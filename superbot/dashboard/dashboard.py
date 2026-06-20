@@ -1337,10 +1337,117 @@ td.name { color: var(--txt); font-weight: 600; }
   font-weight: 700;
   cursor: pointer;
 }
+
+/* Mobile Toggle & Responsive Styles */
+.mobile-menu-toggle {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--txt);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+}
+.mobile-menu-toggle:hover {
+  background: var(--border);
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(7, 9, 19, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 99;
+  transition: opacity 0.3s ease;
+}
+
+@media (max-width: 1024px) {
+  .mobile-menu-toggle {
+    display: flex;
+  }
+  
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
+  }
+  
+  .sidebar-overlay.open {
+    display: block;
+  }
+  
+  .topbar {
+    padding: 0 16px;
+  }
+  
+  .content {
+    padding: 16px;
+  }
+  
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .balance-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  
+  .sparkline-row {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+  
+  .search-container {
+    max-width: 200px;
+  }
+}
+
+@media (max-width: 640px) {
+  .search-container {
+    display: none; /* Hide search bar on very small devices to keep topbar clean */
+  }
+  
+  .sparkline-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .topbar-actions {
+    gap: 8px;
+  }
+  
+  .top-pill {
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+  
+  .clock {
+    display: none; /* Hide clock to save space */
+  }
+}
 </style>
 </head>
 <body>
 <div class="layout">
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
 
   <!-- ─── Sidebar ─────────────────────────── -->
   <aside class="sidebar">
@@ -1396,6 +1503,9 @@ td.name { color: var(--txt); font-weight: 600; }
   <!-- ─── Main Content ─────────────────────────────── -->
   <div class="main">
     <header class="topbar">
+      <button class="mobile-menu-toggle" onclick="toggleSidebar()" aria-label="Toggle Menu">
+        <i class="fa-solid fa-bars"></i>
+      </button>
       <div class="search-container">
         <i class="fa-solid fa-magnifying-glass"></i>
         <input type="text" class="search-input" placeholder="Rechercher des transactions, actifs ou signaux..."/>
@@ -1803,6 +1913,24 @@ function showPanel(id) {
   });
   if (id === 'logs') {
     fetchLogs();
+  }
+  
+  // Fermer la sidebar mobile lors du clic sur un onglet
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (sidebar && sidebar.classList.contains('open')) {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('open');
+  }
+}
+
+// ─── Sidebar Mobile Toggle ──────────────────────────────────────────────────
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (sidebar && overlay) {
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('open');
   }
 }
 
