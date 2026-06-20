@@ -58,9 +58,3 @@ Une fois le bot démarré, ouvrez votre navigateur et accédez à l'URL suivante
 Pour approfondir les détails techniques de l'architecture, de la stratégie mathématique, du cycle de vie du moteur de trading ou pour ajouter vos propres indicateurs et courtiers, consultez :
 * **[Documentation Technique Complète (TECHNICAL_DOCUMENTATION.md)](TECHNICAL_DOCUMENTATION.md)**
 * **[Guide de changement de courtier (CHANGER_DE_BROKER.md)](CHANGER_DE_BROKER.md)**
-
----
-
-## ⚠️ Avertissement & Sécurité
-* **Fichiers Sensibles** : Le fichier `.gitignore` est pré-configuré pour exclure automatiquement vos fichiers `.env`, vos sauvegardes de clés API, vos historiques de logs (`superbot.log`) et vos caches de compilation. Ne désactivez pas ces règles d'exclusion.
-* **Testnet Recommandé** : Utilisez toujours les comptes de démonstration (Binance Testnet ou Alpaca Paper Trading) pour valider vos paramètres de stratégie avant toute mise en production avec des fonds réels.
