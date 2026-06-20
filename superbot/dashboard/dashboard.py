@@ -183,6 +183,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
 <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script>
+  if (typeof ApexCharts === 'undefined') {
+    document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/apexcharts/3.41.0/apexcharts.min.js"><' + '/script>');
+  }
+</script>
+<script>
+  if (typeof ApexCharts === 'undefined') {
+    document.write('<script src="https://unpkg.com/apexcharts"><' + '/script>');
+  }
+</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -1443,6 +1453,15 @@ td.name { color: var(--txt); font-weight: 600; }
     display: none; /* Hide clock to save space */
   }
 }
+.balance-currency-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: var(--txt) !important;
+}
+.currency-option:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--txt) !important;
+}
 </style>
 </head>
 <body>
@@ -1535,13 +1554,19 @@ td.name { color: var(--txt); font-weight: 600; }
         
         <div class="balance-header-row">
           <div class="balance-widget">
-            <div class="balance-title-row">
+            <div class="balance-title-row" style="display: flex; align-items: center; gap: 12px;">
               <div class="balance-subtitle">Solde Total du Portefeuille</div>
-              <div class="balance-tabs" style="margin-left: 20px;">
-                <button class="balance-tab active">Portfolio</button>
-                <button class="balance-tab">Rewards</button>
+              <!-- Currency selector dropdown -->
+              <div class="balance-currency-container" style="position: relative; display: inline-block;">
+                <button class="balance-currency-btn" id="currency-dropdown-btn" onclick="toggleCurrencyDropdown()" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); color: var(--txt-secondary); padding: 4px 10px; border-radius: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; transition: all 0.2s;">
+                  <span id="active-currency-label">USD</span> <i class="fa-solid fa-chevron-down" style="font-size:8px;"></i>
+                </button>
+                <div class="balance-currency-menu" id="currency-menu" style="display: none; position: absolute; top: 100%; left: 0; margin-top: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 50; min-width: 100px; padding: 4px 0;">
+                  <div class="currency-option" onclick="selectCurrency('USD')" style="padding: 8px 12px; font-size: 11px; cursor: pointer; color: var(--txt); transition: background 0.2s; text-align: left;">USD ($)</div>
+                  <div class="currency-option" onclick="selectCurrency('EUR')" style="padding: 8px 12px; font-size: 11px; cursor: pointer; color: var(--txt-secondary); transition: background 0.2s; text-align: left;">EUR (€)</div>
+                  <div class="currency-option" onclick="selectCurrency('BTC')" style="padding: 8px 12px; font-size: 11px; cursor: pointer; color: var(--txt-secondary); transition: background 0.2s; text-align: left;">BTC (₿)</div>
+                </div>
               </div>
-              <span class="balance-currency" style="margin-left: 10px;">USD <i class="fa-solid fa-chevron-down" style="font-size:8px;"></i></span>
             </div>
             <div class="balance-value-row">
               <div class="balance-amount" id="kpi-balance">—</div>
@@ -1590,48 +1615,6 @@ td.name { color: var(--txt); font-weight: 600; }
           
           <!-- Left Main Column -->
           <div class="left-column">
-            
-            <div class="widget-row-2">
-              <!-- Overview supplies -->
-              <div class="card">
-                <div class="metric-header">
-                  <span class="metric-title"><i class="fa-solid fa-chart-bar"></i> Vue d'ensemble approvisionnements</span>
-                  <i class="fa-solid fa-arrow-up-right-from-square text-muted" style="cursor:pointer;"></i>
-                </div>
-                <div class="metric-item">
-                  <span class="metric-item-name">Offre totale max</span>
-                  <span class="metric-item-value">$4,654.4K</span>
-                </div>
-                <div class="metric-item">
-                  <span class="metric-item-name">Offre en circulation</span>
-                  <span class="metric-item-value">$3,120.2K</span>
-                </div>
-                <div class="metric-item">
-                  <span class="metric-item-name">Total émis</span>
-                  <span class="metric-item-value">$4,654.4K</span>
-                </div>
-              </div>
-
-              <!-- Market supplies -->
-              <div class="card">
-                <div class="metric-header">
-                  <span class="metric-title"><i class="fa-solid fa-globe"></i> Activité Marché On-Chain</span>
-                  <i class="fa-solid fa-arrow-up-right-from-square text-muted" style="cursor:pointer;"></i>
-                </div>
-                <div class="metric-item">
-                  <span class="metric-item-name">Transactions / seconde</span>
-                  <span class="metric-item-value">2,450 tx/s</span>
-                </div>
-                <div class="metric-item">
-                  <span class="metric-item-name">Volume d'échange 24h</span>
-                  <span class="metric-item-value">$18.4M</span>
-                </div>
-                <div class="metric-item">
-                  <span class="metric-item-name">Dominance marché</span>
-                  <span class="metric-item-value">54.2%</span>
-                </div>
-              </div>
-            </div>
 
             <!-- Chart Card -->
             <div class="card">
@@ -1900,6 +1883,83 @@ td.name { color: var(--txt); font-weight: 600; }
 </div><!-- /layout -->
 
 <script>
+let selectedCurrency = 'USD';
+const EXCHANGE_RATES = { USD: 1.0, EUR: 0.92 };
+let lastBalanceUsd = null;
+let lastInitUsd = null;
+let lastBtcPrice = 67000.0;
+
+function toggleCurrencyDropdown() {
+  const menu = document.getElementById('currency-menu');
+  if (menu) {
+    menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+  }
+}
+
+window.addEventListener('click', function(e) {
+  const btn = document.getElementById('currency-dropdown-btn');
+  const menu = document.getElementById('currency-menu');
+  if (btn && menu && !btn.contains(e.target) && !menu.contains(e.target)) {
+    menu.style.display = 'none';
+  }
+});
+
+function selectCurrency(curr) {
+  selectedCurrency = curr;
+  document.getElementById('active-currency-label').textContent = curr;
+  document.getElementById('currency-menu').style.display = 'none';
+  
+  const options = document.querySelectorAll('.currency-option');
+  options.forEach(opt => {
+    if (opt.textContent.startsWith(curr)) {
+      opt.style.color = 'var(--txt)';
+      opt.style.fontWeight = '600';
+    } else {
+      opt.style.color = 'var(--txt-secondary)';
+      opt.style.fontWeight = 'normal';
+    }
+  });
+  
+  updateBalanceDisplay();
+}
+
+function updateBalanceDisplay() {
+  if (lastBalanceUsd === null) return;
+  
+  // Essayer d'extraire le prix du BTC depuis cachedData s'il est disponible
+  if (cachedData && cachedData['BTC/USDT'] && cachedData['BTC/USDT'].length) {
+    const lastCandle = cachedData['BTC/USDT'][cachedData['BTC/USDT'].length - 1];
+    if (lastCandle && lastCandle.y && lastCandle.y[3]) {
+      lastBtcPrice = parseFloat(lastCandle.y[3]);
+    }
+  }
+  
+  let formattedBal = '';
+  let formattedInit = '';
+  let formattedSubBal = '';
+  
+  if (selectedCurrency === 'USD') {
+    formattedBal = '$' + fmt(lastBalanceUsd);
+    formattedInit = '$' + fmt(lastInitUsd);
+    formattedSubBal = '$' + fmt(lastBalanceUsd);
+  } else if (selectedCurrency === 'EUR') {
+    const rate = EXCHANGE_RATES.EUR;
+    formattedBal = '€' + fmt(lastBalanceUsd * rate);
+    formattedInit = '€' + fmt(lastInitUsd * rate);
+    formattedSubBal = '€' + fmt(lastBalanceUsd * rate);
+  } else if (selectedCurrency === 'BTC') {
+    const btcBal = lastBalanceUsd / lastBtcPrice;
+    const btcInit = lastInitUsd / lastBtcPrice;
+    formattedBal = '₿' + fmt(btcBal, 5);
+    formattedInit = '₿' + fmt(btcInit, 5);
+    formattedSubBal = '₿' + fmt(btcBal, 5);
+  }
+  
+  setEl('kpi-balance', formattedBal);
+  setEl('kpi-init', formattedInit);
+  setEl('sub-acc-balance', formattedSubBal);
+}
+
 // ─── Nav ──────────────────────────────────────────────────────────────────
 const PANELS = ['overview','positions','risk','news','logs'];
 function showPanel(id) {
@@ -2200,17 +2260,9 @@ async function fetchData() {
     // ── KPI: Solde ──
     const bal  = perf.current_balance;
     const init = perf.initial_balance;
-    setEl('kpi-balance', bal != null ? '$' + fmt(bal) : '—');
-    setEl('kpi-init',    init != null ? '$' + fmt(init) : '—');
-    setEl('sub-acc-balance', bal != null ? '$' + fmt(bal) : '—');
-    
-    // Mettre à jour les avoirs dans "Mes Actifs" (simulation de répartition basique pour l'UI)
-    if (bal != null) {
-      document.getElementById('my-asset-btc').textContent = '$' + fmt(bal * 0.52, 0);
-      document.getElementById('my-asset-eth').textContent = '$' + fmt(bal * 0.26, 0);
-      document.getElementById('my-asset-bnb').textContent = '$' + fmt(bal * 0.12, 0);
-      document.getElementById('my-asset-sol').textContent = '$' + fmt(bal * 0.08, 0);
-    }
+    lastBalanceUsd = bal;
+    lastInitUsd = init;
+    updateBalanceDisplay();
 
     // ── KPI: P&L ──
     const pnl   = parseFloat(perf.total_pnl ?? 0);

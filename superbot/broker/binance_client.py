@@ -163,11 +163,47 @@ class BinanceClient(Broker):
 
     # ─── Compte ───────────────────────────────────────────────
 
+    def _get_usd_balances(self, account_data: Dict) -> Dict[str, float]:
+        """Calcule le solde du portefeuille et le P&L latent convertis en USD/USDT pour le mode Multi-Actifs."""
+        total_wallet_balance = 0.0
+        total_unrealized_pnl = 0.0
+        
+        for asset_info in account_data.get("assets", []):
+            wb = float(asset_info.get("walletBalance", 0.0))
+            upnl = float(asset_info.get("unrealizedProfit", 0.0))
+            if wb == 0.0 and upnl == 0.0:
+                continue
+                
+            asset_name = asset_info.get("asset", "")
+            if asset_name in ["USDT", "USDC", "USD"]:
+                total_wallet_balance += wb
+                total_unrealized_pnl += upnl
+            else:
+                # Récupérer le prix de l'actif
+                try:
+                    price = float(self.get_current_price(f"{asset_name}/USDT"))
+                    if price <= 0:
+                        price = float(self.get_current_price(asset_name))
+                except Exception:
+                    # Fallbacks approximatifs en dernier recours
+                    fallbacks = {"BTC": 67000.0, "ETH": 3500.0, "BNB": 580.0, "SOL": 140.0, "ADA": 0.45}
+                    price = fallbacks.get(asset_name, 1.0)
+                
+                total_wallet_balance += wb * price
+                total_unrealized_pnl += upnl * price
+                
+        return {
+            "wallet_balance": total_wallet_balance,
+            "unrealized_pnl": total_unrealized_pnl,
+            "margin_balance": total_wallet_balance + total_unrealized_pnl
+        }
+
     def get_balance(self) -> float:
-        """Solde total du portefeuille de futures (wallet balance)."""
+        """Solde total du portefeuille de futures (wallet balance) en USD/USDT."""
         def run():
             account = self._client.futures_account()
-            return float(account["totalWalletBalance"])
+            balances = self._get_usd_balances(account)
+            return balances["wallet_balance"]
         return self._call_api(run, 0.0)
 
     def get_account_summary(self) -> Dict[str, Any]:
@@ -176,10 +212,11 @@ class BinanceClient(Broker):
             account = self._client.futures_account()
             positions = self._client.futures_position_information()
             open_pos  = [p for p in positions if float(p["positionAmt"]) != 0]
+            balances = self._get_usd_balances(account)
             return {
-                "balance":        float(account["totalWalletBalance"]),
-                "equity":         float(account["totalMarginBalance"]),
-                "unrealized_pnl": float(account["totalUnrealizedProfit"]),
+                "balance":        balances["wallet_balance"],
+                "equity":         balances["margin_balance"],
+                "unrealized_pnl": balances["unrealized_pnl"],
                 "margin_used":    float(account["totalInitialMargin"]),
                 "open_positions": len(open_pos),
                 "leverage":       LEVERAGE,
