@@ -1,0 +1,1 @@
+# Ce fichier est obsolète et a été déplacé dans superbot/broker/base.py pour éviter les conflits d'importation.

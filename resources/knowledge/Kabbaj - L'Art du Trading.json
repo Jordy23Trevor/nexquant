@@ -1,0 +1,182 @@
+{
+  "book": "Kabbaj - L'Art du Trading.pdf",
+  "processed_at": "2026-06-18T22:30:13.583613",
+  "rules_found": 25,
+  "rules": [
+    {
+      "id": "elder_triple_screen",
+      "category": "strategy",
+      "rule": "Triple Screen: weekly trend + daily oscillator + intraday entry.",
+      "author": "Dr. Alexander Elder",
+      "source": "Vivre du Trading"
+    },
+    {
+      "id": "elder_2pct_rule",
+      "category": "risk",
+      "rule": "Never risk more than 2% of account equity on a single trade.",
+      "author": "Dr. Alexander Elder",
+      "source": "Vivre du Trading"
+    },
+    {
+      "id": "elder_6pct_rule",
+      "category": "risk",
+      "rule": "Stop trading the month if monthly drawdown exceeds 6%.",
+      "author": "Dr. Alexander Elder",
+      "source": "Vivre du Trading"
+    },
+    {
+      "id": "elder_macd_divergence",
+      "category": "signal",
+      "rule": "MACD divergence from price is a high-probability reversal signal.",
+      "author": "Dr. Alexander Elder",
+      "source": "Vivre du Trading"
+    },
+    {
+      "id": "elder_force_index",
+      "category": "signal",
+      "rule": "Force Index (price * volume) confirms trend strength or weakness.",
+      "author": "Dr. Alexander Elder",
+      "source": "Vivre du Trading"
+    },
+    {
+      "id": "elder_ema_envelope",
+      "category": "signal",
+      "rule": "Price outside EMA envelope signals overbought/oversold conditions.",
+      "author": "Dr. Alexander Elder",
+      "source": "Vivre du Trading"
+    },
+    {
+      "id": "elder_iron_triangle",
+      "category": "risk",
+      "rule": "Iron Triangle: money management → entries → psychology (in that order).",
+      "author": "Dr. Alexander Elder",
+      "source": "Vivre du Trading"
+    },
+    {
+      "id": "kabbaj_kelly",
+      "category": "sizing",
+      "rule": "Kelly Fraction: size = edge / odds. Use 25% of Kelly (fractional Kelly) to reduce ruin risk.",
+      "author": "Thami Kabbaj",
+      "source": "L'Art du Trading"
+    },
+    {
+      "id": "kabbaj_rr_minimum",
+      "category": "risk",
+      "rule": "Minimum 2:1 reward-to-risk ratio on every trade entry.",
+      "author": "Thami Kabbaj",
+      "source": "L'Art du Trading"
+    },
+    {
+      "id": "kabbaj_partial_tp",
+      "category": "exit",
+      "rule": "Take 50% profit at TP1, let the rest run with a trailing stop.",
+      "author": "Thami Kabbaj",
+      "source": "L'Art du Trading"
+    },
+    {
+      "id": "kabbaj_price_action",
+      "category": "signal",
+      "rule": "Pure price action patterns (pin bars, engulfing) outperform indicators alone.",
+      "author": "Thami Kabbaj",
+      "source": "L'Art du Trading"
+    },
+    {
+      "id": "kabbaj_sector_rotation",
+      "category": "strategy",
+      "rule": "Follow capital rotation between sectors to anticipate trend changes.",
+      "author": "Thami Kabbaj",
+      "source": "L'Art du Trading"
+    },
+    {
+      "id": "kabbaj_psychology",
+      "category": "psychology",
+      "rule": "Trading is 90% psychology. Discipline and routine create consistent results.",
+      "author": "Thami Kabbaj",
+      "source": "L'Art du Trading"
+    },
+    {
+      "id": "douglas_probability",
+      "category": "psychology",
+      "rule": "Think in probabilities. Each trade is a unique event within a series.",
+      "author": "Mark Douglas",
+      "source": "Trading in the Zone"
+    },
+    {
+      "id": "douglas_edge",
+      "category": "strategy",
+      "rule": "Define your edge clearly. Execute it mechanically without hesitation.",
+      "author": "Mark Douglas",
+      "source": "Trading in the Zone"
+    },
+    {
+      "id": "douglas_accept_risk",
+      "category": "psychology",
+      "rule": "Accept the risk BEFORE placing the trade. Eliminate hope and fear.",
+      "author": "Mark Douglas",
+      "source": "Trading in the Zone"
+    },
+    {
+      "id": "douglas_consistency",
+      "category": "psychology",
+      "rule": "Consistency comes from executing your edge, not from being right.",
+      "author": "Mark Douglas",
+      "source": "Trading in the Zone"
+    },
+    {
+      "id": "tharp_sqn",
+      "category": "performance",
+      "rule": "System Quality Number (SQN) > 2.5 is good, > 5 is excellent.",
+      "author": "Van Tharp",
+      "source": "Trade Your Way to Financial Freedom"
+    },
+    {
+      "id": "tharp_r_multiple",
+      "category": "risk",
+      "rule": "Express every trade as R-multiples. Expectancy > 0 over a large sample is the goal.",
+      "author": "Van Tharp",
+      "source": "Trade Your Way to Financial Freedom"
+    },
+    {
+      "id": "tharp_position_sizing",
+      "category": "sizing",
+      "rule": "Position sizing is the most critical factor in overall performance.",
+      "author": "Van Tharp",
+      "source": "Trade Your Way to Financial Freedom"
+    },
+    {
+      "id": "tharp_objectives",
+      "category": "strategy",
+      "rule": "Define your objectives before designing your system.",
+      "author": "Van Tharp",
+      "source": "Trade Your Way to Financial Freedom"
+    },
+    {
+      "id": "schwager_risk_first",
+      "category": "risk",
+      "rule": "All great traders focus on risk management, not returns.",
+      "author": "Jack Schwager",
+      "source": "Market Wizards"
+    },
+    {
+      "id": "schwager_methodology",
+      "category": "strategy",
+      "rule": "Have a clearly defined methodology. Follow it with discipline.",
+      "author": "Jack Schwager",
+      "source": "Market Wizards"
+    },
+    {
+      "id": "schwager_cut_losses",
+      "category": "exit",
+      "rule": "Cut losses short, let profits run. The asymmetry is essential.",
+      "author": "Jack Schwager",
+      "source": "Market Wizards"
+    },
+    {
+      "id": "schwager_market_type",
+      "category": "strategy",
+      "rule": "Adapt your approach to current market type (trending vs ranging).",
+      "author": "Jack Schwager",
+      "source": "Market Wizards"
+    }
+  ]
+}

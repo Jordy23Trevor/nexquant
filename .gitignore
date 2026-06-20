@@ -1,0 +1,33 @@
+# Fichiers d'environnement (API keys, secrets)
+.env
+.env.backup
+.env.local
+.env.*.local
+
+# Python caches et compilation
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# Journaux et logs système
+superbot/logs/
+*.log
+logs/
+
+# Fichiers d'IDE et éditeurs
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Fichiers médias et temporaires
+*.webp
+*.png
+*.jpg
+*.jpeg
+*.gif

@@ -1,0 +1,481 @@
+"""
+╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╩
+"""
+import math
+import pandas as pd
+import numpy as np
+from typing import Tuple, List, Dict, Any, Optional
+import logging
+
+log = logging.getLogger("strategy.knowledge_base")
+
+
+def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    Calcule l'Average True Range (ATR).
+
+    Args:
+        high: Série des prix hauts
+        low: Série des prix bas
+        close: Série des prix de clôture
+        period: Période pour le calcul de l'ATR (défaut: 14)
+
+    Returns:
+        Série contenant les valeurs de l'ATR
+    """
+    tr1 = high - low
+    tr2 = abs(high - close.shift())
+    tr3 = abs(low - close.shift())
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+    return atr
+
+
+def calculate_ema(data: pd.Series, period: int) -> pd.Series:
+    """
+    Calcule la Moyenne Mobile Exponentielle (EMA).
+
+    Args:
+        data: Série de données (généralement les prix de clôture)
+        period: Période pour le calcul de l'EMA
+
+    Returns:
+        Série contenant les valeurs de l'EMA
+    """
+    return data.ewm(span=period, adjust=False).mean()
+
+
+def calculate_sma(data: pd.Series, period: int) -> pd.Series:
+    """
+    Calcule la Moyenne Mobile Simple (SMA).
+
+    Args:
+        data: Série de données
+        period: Période pour le calcul de la SMA
+
+    Returns:
+        Série contenant les valeurs de la SMA
+    """
+    return data.rolling(window=period).mean()
+
+
+def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    Calcule l'Indice de Force Relative (RSI).
+
+    Args:
+        close: Série des prix de clôture
+        period: Période pour le calcul du RSI (défaut: 14)
+
+    Returns:
+        Série contenant les valeurs du RSI (0-100)
+    """
+    delta = close.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+
+def calculate_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Calcule le Moving Average Convergence Divergence (MACD).
+
+    Args:
+        close: Série des prix de clôture
+        fast: Période de la moyenne rapide (défaut: 12)
+        slow: Période de la moyenne lente (défaut: 26)
+        signal: Période de la ligne de signal (défaut: 9)
+
+    Returns:
+        Tuple de (MACD line, Signal line, Histogram)
+    """
+    ema_fast = calculate_ema(close, fast)
+    ema_slow = calculate_ema(close, slow)
+    macd_line = ema_fast - ema_slow
+    signal_line = calculate_ema(macd_line, signal)
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+def calculate_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    Calcule l'Average Directional Index (ADX).
+
+    Args:
+        high: Série des prix hauts
+        low: Série des prix bas
+        close: Série des prix de clôture
+        period: Période pour le calcul de l'ADX (défaut: 14)
+
+    Returns:
+        Série contenant les valeurs de l'ADX
+    """
+    # Calcul du True Range
+    tr1 = high - low
+    tr2 = abs(high - close.shift())
+    tr3 = abs(low - close.shift())
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+
+    # Calcul du Directional Movement
+    dm_plus = high - high.shift()
+    dm_minus = low.shift() - low
+    dm_plus = dm_plus.where((dm_plus > dm_minus) & (dm_plus > 0), 0)
+    dm_minus = dm_minus.where((dm_minus > dm_plus) & (dm_minus > 0), 0)
+
+    # Calcul du Directional Indicators
+    di_plus = 100 * (dm_plus.rolling(window=period).mean() / atr)
+    di_minus = 100 * (dm_minus.rolling(window=period).mean() / atr)
+
+    # Calcul du DX et de l'ADX
+    dx = 100 * abs(di_plus - di_minus) / (di_plus + di_minus)
+    adx = dx.rolling(window=period).mean()
+    return adx
+
+
+def calculate_supertrend(high: pd.Series, low: pd.Series, close: pd.Series,
+                        atr_period: int = 10, multiplier: float = 3.0) -> Tuple[pd.Series, pd.Series]:
+    """
+    Calcule l'indicateur Supertrend.
+
+    Args:
+        high: Série des prix hauts
+        low: Série des prix bas
+        close: Série des prix de clôture
+        atr_period: Période pour le calcul de l'ATR (défaut: 10)
+        multiplier: Multiplicateur pour l'ATR (défaut: 3.0)
+
+    Returns:
+        Tuple de (Supertrend line, Trend direction) où Trend direction est 1 pour haussier, -1 pour baissier
+    """
+    atr = calculate_atr(high, low, close, atr_period)
+    hl2 = (high + low) / 2
+    upper_band = hl2 + (multiplier * atr)
+    lower_band = hl2 - (multiplier * atr)
+
+    supertrend = pd.Series(index=close.index, dtype=float)
+    trend = pd.Series(index=close.index, dtype=int)
+
+    # Initialisation
+    supertrend.iloc[0] = upper_band.iloc[0]
+    trend.iloc[0] = 1
+
+    for i in range(1, len(close)):
+        if close.iloc[i] <= upper_band.iloc[i-1]:
+            upper_band.iloc[i] = min(upper_band.iloc[i], upper_band.iloc[i-1])
+        else:
+            upper_band.iloc[i] = upper_band.iloc[i]
+
+        if close.iloc[i] >= lower_band.iloc[i-1]:
+            lower_band.iloc[i] = max(lower_band.iloc[i], lower_band.iloc[i-1])
+        else:
+            lower_band.iloc[i] = lower_band.iloc[i]
+
+        if close.iloc[i] <= supertrend.iloc[i-1]:
+            trend.iloc[i] = -1
+            supertrend.iloc[i] = upper_band.iloc[i]
+        else:
+            trend.iloc[i] = 1
+            supertrend.iloc[i] = lower_band.iloc[i]
+
+    return supertrend, trend
+
+
+def calculate_bollinger_bands(close: pd.Series, period: int = 20, std_dev: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Calcule les Bandes de Bollinger.
+
+    Args:
+        close: Série des prix de clôture
+        period: Période pour le calcul de la moyenne mobile (défaut: 20)
+        std_dev: Nombre d'écarts-types pour les bandes (défaut: 2.0)
+
+    Returns:
+        Tuple de (Upper band, Middle band (SMA), Lower band)
+    """
+    sma = calculate_sma(close, period)
+    std = close.rolling(window=period).std()
+    upper_band = sma + (std * std_dev)
+    lower_band = sma - (std * std_dev)
+    return upper_band, sma, lower_band
+
+
+def calculate_ichimoku(high: pd.Series, low: pd.Series, close: pd.Series,
+                      tenkan: int = 9, kijun: int = 26, senkou_span_b: int = 52,
+                      displacement: int = 26) -> Dict[str, pd.Series]:
+    """
+    Calcule l'indicateur Ichimoku Cloud.
+
+    Args:
+        high: Série des prix hauts
+        low: Série des prix bas
+        close: Série des prix de clôture
+        tenkan: Période pour Tenkan-sen (défaut: 9)
+        kijun: Période pour Kijun-sen (défaut: 26)
+        senkou_span_b: Période pour Senkou Span B (défaut: 52)
+        displacement: Décalage pour les nuages (défaut: 26)
+
+    Returns:
+        Dictionnaire contenant tous les composants de l'Ichimoku:
+        - tenkan_sen: Ligne de conversion
+        - kijun_sen: Ligne de base
+        - senkou_span_a: Ligne avancée A
+        - senkou_span_b: Ligne avancée B
+        - chikou_span: Lagging span
+    """
+    # Tenkan-sen (Conversion Line): (highest high + lowest low)/2 pour les 9 dernières périodes
+    tenkan_sen = (high.rolling(window=tenkan).max() + low.rolling(window=tenkan).min()) / 2
+
+    # Kijun-sen (Base Line): (highest high + lowest low)/2 pour les 26 dernières périodes
+    kijun_sen = (high.rolling(window=kijun).max() + low.rolling(window=kijun).min()) / 2
+
+    # Senkou Span A (Leading Span A): (Tenkan-sen + Kijun-sen)/2 décalé de 26 périodes
+    senkou_span_a = ((tenkan_sen + kijun_sen) / 2).shift(displacement)
+
+    # Senkou Span B (Leading Span B): (highest high + lowest low)/2 pour les 52 dernières périodes décalé de 26 périodes
+    senkou_span_b = ((high.rolling(window=senkou_span_b).max() + low.rolling(window=senkou_span_b).min()) / 2).shift(displacement)
+
+    # Chikou Span (Lagging Span): Prix de clôture décalé de -26 périodes
+    chikou_span = close.shift(-displacement)
+
+    return {
+        "tenkan_sen": tenkan_sen,
+        "kijun_sen": kijun_sen,
+        "senkou_span_a": senkou_span_a,
+        "senkou_span_b": senkou_span_b,
+        "chikou_span": chikou_span,
+    }
+
+
+def calculate_vwap(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series,
+                  period: int = 14) -> pd.Series:
+    """
+    Calcule le Volume Weighted Average Price (VWAP).
+
+    Args:
+        high: Série des prix hauts
+        low: Série des prix bas
+        close: Série des prix de clôture
+        volume: Série des volumes
+        period: Période pour le calcul (défaut: 14)
+
+    Returns:
+        Série contenant les valeurs du VWAP
+    """
+    typical_price = (high + low + close) / 3
+    vwap = (typical_price * volume).rolling(window=period).sum() / volume.rolling(window=period).sum()
+    return vwap
+
+
+def detect_divergence(price: pd.Series, indicator: pd.Series, lookback: int = 10) -> Tuple[bool, bool]:
+    """
+    Détecte les divergences régulière entre le prix et un indicateur.
+
+    Args:
+        price: Série des prix de clôture
+        indicator: Série de l'indicateur (RSI, MACD, etc.)
+        lookback: Nombre de périodes à regarder en arrière pour détecter les divergences
+
+    Returns:
+        Tuple de (bullish_divergence, bearish_divergence)
+    """
+    if len(price) < lookback + 1 or len(indicator) < lookback + 1:
+        return False, False
+
+    # Trouver les hauts et bas récents dans le prix et l'indicateur
+    recent_price = price.iloc[-lookback:]
+    recent_indicator = indicator.iloc[-lookback:]
+
+    # Pour la divergence haussière: prix fait un plus bas, indicateur fait un plus haut
+    price_low = recent_price.iloc[-1] == recent_price.min()
+    indicator_high = recent_indicator.iloc[-1] == recent_indicator.max()
+    bullish_div = price_low and indicator_high
+
+    # Pour la divergence baissière: prix fait un plus haut, indicateur fait un plus bas
+    price_high = recent_price.iloc[-1] == recent_price.max()
+    indicator_low = recent_indicator.iloc[-1] == recent_indicator.min()
+    bearish_div = price_high and indicator_low
+
+    return bullish_div, bearish_div
+
+
+def calculate_kelly_fraction(win_rate: float, avg_win: float, avg_loss: float) -> float:
+    """
+    Calcule la fraction de Kelly optimale.
+
+    Args:
+        win_rate: Taux de réussite (0-1)
+        avg_win: Gain moyen en pourcentage ou en monnaie de compte
+        avg_loss: Perte moyenne en pourcentage ou en monnaie de compte (valeur positive)
+
+    Returns:
+        Fraction de Kelly (0-1)
+    """
+    if avg_loss <= 0:
+        return 0.0
+
+    # Formule de Kelly: f = (bp - q) / b
+    # où b = avg_win/avg_loss, p = win_rate, q = 1 - win_rate
+    if win_rate <= 0 or win_rate >= 1:
+        return 0.0
+
+    b = avg_win / avg_loss
+    p = win_rate
+    q = 1 - win_rate
+
+    kelly = (b * p - q) / b
+    return max(0.0, min(kelly, 1.0))  # Limiter entre 0 et 1
+
+
+def calculate_risk_reward_ratio(entry_price: float, stop_loss: float, take_profit: float) -> float:
+    """
+    Calcule le ratio risque/rendement (RRR).
+
+    Args:
+        entry_price: Prix d'entrée
+        stop_loss: Prix du stop loss
+        take_profit: Prix du take profit
+
+    Returns:
+        Ratio risque/rendement (ex: 2.0 pour un R:R de 2:1)
+    """
+    if entry_price == stop_loss:
+        return 0.0
+
+    risk = abs(entry_price - stop_loss)
+    reward = abs(take_profit - entry_price)
+
+    if risk == 0:
+        return 0.0
+
+    return reward / risk
+
+
+def is_market_trending(adx_value: float, threshold: float = 22.0) -> bool:
+    """
+    Détermine si le marché est en tendance ou en phase de range basé sur l'ADX.
+
+    Args:
+        adx_value: Valeur actuelle de l'ADX
+        threshold: Seuil au-dessus duquel on considère le marché comme tendance (défaut: 22.0)
+
+    Returns:
+        True si le marché est en tendance, False si en range
+    """
+    return adx_value > threshold
+
+
+def calculate_position_size_from_risk(account_balance: float, risk_percent: float,
+                                    entry_price: float, stop_loss: float) -> float:
+    """
+    Calcule la taille de position basée sur le risque en pourcentage du compte.
+
+    Args:
+        account_balance: Solde du compte
+        risk_percent: Pourcentage du compte à risquer (ex: 1.0 pour 1%)
+        entry_price: Prix d'entrée prévu
+        stop_loss: Prix du stop loss
+
+    Returns:
+        Taille de position en unités de l'actif
+    """
+    if entry_price == stop_loss:
+        return 0.0
+
+    risk_amount = account_balance * (risk_percent / 100.0)
+    price_risk = abs(entry_price - stop_loss)
+
+    if price_risk == 0:
+        return 0.0
+
+    return risk_amount / price_risk
+
+
+def round_to_precision(value: float, precision: int) -> float:
+    """
+    Arrondit une valeur à une précision spécifique.
+
+    Args:
+        value: Valeur à arrondir
+        precision: Nombre de décimales
+
+    Returns:
+        Valeur arrondie
+    """
+    factor = 10 ** precision
+    return round(value * factor) / factor
+
+
+def calculate_pip_value(symbol: str, lot_size: float = 100000.0) -> float:
+    """
+    Calcule la valeur d'un pip pour une paire de devises donnée.
+
+    Args:
+        symbol: Symbole de la paire (ex: EUR/USD)
+        lot_size: Taille du lot en unités de devise de base (défaut: 100,000 pour un lot standard)
+
+    Returns:
+        Valeur d'un pip en devise de quote
+    """
+    # Normaliser le symbole
+    symbol = symbol.upper().replace("/", "")
+
+    # Pour les paires où JPY est la devise de quote
+    if "JPY" in symbol and symbol.endswith("JPY"):
+        # Pour les paires JPY, un pip est 0.01
+        return 0.01 * lot_size
+    else:
+        # Pour la plupart des autres paires, un pip est 0.0001
+        return 0.0001 * lot_size
+
+
+# Fonctions utilitaires pour l'analyse de données
+def resample_data(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """
+    Rééchantillonne un DataFrame OHLCV vers un timeframe supérieur.
+
+    Args:
+        df: DataFrame avec colonnes ['open', 'high', 'low', 'close', 'volume'] et index datetime
+        timeframe: Nouveau timeframe (ex: '4H', '1D', '1W')
+
+    Returns:
+        DataFrame rééchantillonné
+    """
+    ohlc_dict = {
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum'
+    }
+    return df.resample(timeframe).apply(ohlc_dict).dropna()
+
+
+def get_higher_timeframe_data(df: pd.DataFrame, htf_multiplier: int = 4) -> pd.DataFrame:
+    """
+    Obtient les données d'un timeframe supérieur basé sur le timeframe actuel.
+
+    Args:
+        df: DataFrame avec données OHLCV
+        htf_multiplier: Multiplicateur pour déterminer le timeframe supérieur (défaut: 4)
+
+    Returns:
+        DataFrame avec les données du timeframe supérieur
+    """
+    # Cette fonction serait plus sophistiquée dans une implémentation complète
+    # Pour l'instant, on retourne une copie simple
+    return df.copy()
+
+
+# Export des fonctions publiques
+__all__ = [
+    'calculate_atr', 'calculate_ema', 'calculate_sma', 'calculate_rsi',
+    'calculate_macd', 'calculate_adx', 'calculate_supertrend',
+    'calculate_bollinger_bands', 'calculate_ichimoku', 'calculate_vwap',
+    'detect_divergence', 'calculate_kelly_fraction', 'calculate_risk_reward_ratio',
+    'is_market_trending', 'calculate_position_size_from_risk',
+    'round_to_precision', 'calculate_pip_value', 'resample_data',
+    'get_higher_timeframe_data'
+]

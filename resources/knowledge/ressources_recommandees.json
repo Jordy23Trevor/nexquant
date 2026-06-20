@@ -1,0 +1,91 @@
+{
+  "book": "ressources_recommandees.txt",
+  "processed_at": "2026-06-18T22:30:13.584883",
+  "rules_found": 12,
+  "rules": [
+    {
+      "id": "douglas_probability",
+      "category": "psychology",
+      "rule": "Think in probabilities. Each trade is a unique event within a series.",
+      "author": "Mark Douglas",
+      "source": "Trading in the Zone"
+    },
+    {
+      "id": "douglas_edge",
+      "category": "strategy",
+      "rule": "Define your edge clearly. Execute it mechanically without hesitation.",
+      "author": "Mark Douglas",
+      "source": "Trading in the Zone"
+    },
+    {
+      "id": "douglas_accept_risk",
+      "category": "psychology",
+      "rule": "Accept the risk BEFORE placing the trade. Eliminate hope and fear.",
+      "author": "Mark Douglas",
+      "source": "Trading in the Zone"
+    },
+    {
+      "id": "douglas_consistency",
+      "category": "psychology",
+      "rule": "Consistency comes from executing your edge, not from being right.",
+      "author": "Mark Douglas",
+      "source": "Trading in the Zone"
+    },
+    {
+      "id": "tharp_sqn",
+      "category": "performance",
+      "rule": "System Quality Number (SQN) > 2.5 is good, > 5 is excellent.",
+      "author": "Van Tharp",
+      "source": "Trade Your Way to Financial Freedom"
+    },
+    {
+      "id": "tharp_r_multiple",
+      "category": "risk",
+      "rule": "Express every trade as R-multiples. Expectancy > 0 over a large sample is the goal.",
+      "author": "Van Tharp",
+      "source": "Trade Your Way to Financial Freedom"
+    },
+    {
+      "id": "tharp_position_sizing",
+      "category": "sizing",
+      "rule": "Position sizing is the most critical factor in overall performance.",
+      "author": "Van Tharp",
+      "source": "Trade Your Way to Financial Freedom"
+    },
+    {
+      "id": "tharp_objectives",
+      "category": "strategy",
+      "rule": "Define your objectives before designing your system.",
+      "author": "Van Tharp",
+      "source": "Trade Your Way to Financial Freedom"
+    },
+    {
+      "id": "schwager_risk_first",
+      "category": "risk",
+      "rule": "All great traders focus on risk management, not returns.",
+      "author": "Jack Schwager",
+      "source": "Market Wizards"
+    },
+    {
+      "id": "schwager_methodology",
+      "category": "strategy",
+      "rule": "Have a clearly defined methodology. Follow it with discipline.",
+      "author": "Jack Schwager",
+      "source": "Market Wizards"
+    },
+    {
+      "id": "schwager_cut_losses",
+      "category": "exit",
+      "rule": "Cut losses short, let profits run. The asymmetry is essential.",
+      "author": "Jack Schwager",
+      "source": "Market Wizards"
+    },
+    {
+      "id": "schwager_market_type",
+      "category": "strategy",
+      "rule": "Adapt your approach to current market type (trending vs ranging).",
+      "author": "Jack Schwager",
+      "source": "Market Wizards"
+    }
+  ]
+}
