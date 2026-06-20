@@ -435,6 +435,7 @@ a{color:inherit;text-decoration:none}
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 32px;
   gap: 24px;
 }
@@ -475,6 +476,7 @@ a{color:inherit;text-decoration:none}
   display: flex;
   align-items: center;
   gap: 16px;
+  margin-left: auto;
 }
 
 .theme-toggle, .settings-btn {
@@ -1525,10 +1527,6 @@ td.name { color: var(--txt); font-weight: 600; }
       <button class="mobile-menu-toggle" onclick="toggleSidebar()" aria-label="Toggle Menu">
         <i class="fa-solid fa-bars"></i>
       </button>
-      <div class="search-container">
-        <i class="fa-solid fa-magnifying-glass"></i>
-        <input type="text" class="search-input" placeholder="Rechercher des transactions, actifs ou signaux..."/>
-      </div>
       <div class="topbar-actions">
         <div class="top-pill">
           <div class="dot green" id="api-dot"></div>
@@ -1537,9 +1535,6 @@ td.name { color: var(--txt); font-weight: 600; }
         <div class="clock" id="tb-clock">—</div>
         <button class="theme-toggle" onclick="toggleTheme()" title="Changer le thème">
           <i class="fa-solid fa-moon" id="theme-icon"></i>
-        </button>
-        <button class="settings-btn" title="Paramètres">
-          <i class="fa-solid fa-gear"></i>
         </button>
         <div class="user-profile">
           <div class="user-avatar">NQ</div>
