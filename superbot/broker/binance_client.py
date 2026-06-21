@@ -74,23 +74,34 @@ class BinanceClient(Broker):
             log.warning(f"️  Impossible de synchroniser le temps : {e}")
 
     def _call_api(self, api_func, default_val, *args, **kwargs):
-        try:
-            return api_func(*args, **kwargs)
-        except BinanceAPIException as e:
-            if e.code in (-1021, -1022) or "ahead" in str(e.message).lower() or "recvwindow" in str(e.message).lower():
-                log.warning(f"⏰ Erreur de synchronisation temporelle détectée ({e.message}). Réalignement avec le serveur...")
-                self._sync_time()
-                try:
-                    return api_func(*args, **kwargs)
-                except BinanceAPIException as e2:
-                    log.error(f"Échec persistant après re-synchronisation : {e2.message} (code {e2.code})")
+        max_retries = 3
+        backoff = 1.0
+        for attempt in range(1, max_retries + 1):
+            try:
+                return api_func(*args, **kwargs)
+            except BinanceAPIException as e:
+                if e.code in (-1021, -1022) or "ahead" in str(e.message).lower() or "recvwindow" in str(e.message).lower():
+                    log.warning(f"⏰ Erreur de synchronisation temporelle détectée ({e.message}). Réalignement...")
+                    self._sync_time()
+                    try:
+                        return api_func(*args, **kwargs)
+                    except Exception as ex:
+                        log.error(f"Échec persistant après re-synchronisation : {ex}")
+                        return default_val
+                elif e.code == -1003:
+                    log.warning(f"⚠️ Limite de taux Binance API atteinte (IP bloquée). Tentative {attempt}/{max_retries} après {backoff}s...")
+                    time.sleep(backoff)
+                    backoff *= 2.0
+                else:
+                    log.error(f"Erreur Binance API : {e.message} (code {e.code})")
                     return default_val
-            else:
-                log.error(f"Erreur Binance API : {e.message} (code {e.code})")
-                return default_val
-        except Exception as e:
-            log.error(f"Erreur inattendue lors de l'appel API : {e}")
-            return default_val
+            except Exception as e:
+                log.warning(f"⚠️ Erreur réseau/inattendue lors de l'appel API ({e}). Tentative {attempt}/{max_retries} après {backoff}s...")
+                if attempt == max_retries:
+                    log.error(f"Échec critique après {max_retries} tentatives : {e}")
+                    return default_val
+                time.sleep(backoff)
+                backoff *= 2.0
 
     def _init_client(self):
         """Initialise le client Binance avec gestion du testnet."""
