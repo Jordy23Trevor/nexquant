@@ -1,0 +1,85 @@
+{
+  "source": "NBER Working Papers",
+  "type": "blog",
+  "scraped_at": "2026-06-21T16:04:04.643850",
+  "articles_count": 15,
+  "rules": [
+    {
+      "id": "blog_NBER Working Papers_d0101fb40bb4",
+      "category": "strategy",
+      "rule": "The committee makes a separate determination of the calendar quarter of a peak or trough, based on measures of aggregate economic activity over the relevant quarters. Two measures that are important i",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_3b0f25c189bd",
+      "category": "strategy",
+      "rule": "[Dynamic Risk Adjustment in Markets with Persistent Risk and Manipulable Signals: Market Design for Health Insurance](/papers/w35325)",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_841842b70ef1",
+      "category": "strategy",
+      "rule": "Risk adjustment is a payment mechanism, not only a prediction problem. I extend optimal risk adjustment to dynamic...",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_c3afba80c575",
+      "category": "strategy",
+      "rule": "[Risk and Risk Management in the Agricultural Economy](/books-and-chapters/risk-and-risk-management-agricultural-economy)",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_0c5dc5c03dd1",
+      "category": "strategy",
+      "rule": "[Paul H.S. Kim](https://www.nber.org/people/paul_kim) and [Anran Li](https://www.nber.org/people/anran_li) find that for every dollar the government spends on public health reinsurance, consumer premi",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_6cc0834afc91",
+      "category": "strategy",
+      "rule": "[Financial Frictions and Systemic Risk](/programs-projects/projects-and-centers/financial-frictions-and-systemic-risk)",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_c3afba80c575",
+      "category": "strategy",
+      "rule": "[Risk and Risk Management in the Agricultural Economy](/books-and-chapters/risk-and-risk-management-agricultural-economy)",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_c2a0732b4328",
+      "category": "strategy",
+      "rule": "[Economic Indicators and Releases](/releases)",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_6d6c00ebf374",
+      "category": "strategy",
+      "rule": "The US capital gains tax is realization based, which means that taxes are due when appreciated assets are sold. Critics of this approach argue that it allows asset holders, such as corporate founders,",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_2154fbc5c28c",
+      "category": "strategy",
+      "rule": "As the RRC evolved through subsequent phases, an organizing theme was analysis of Social Security policy in the context of a changing landscape of retirement in the United States. Some aspects of the ",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_NBER Working Papers_ba55f27ac1e0",
+      "category": "strategy",
+      "rule": "Neither reduced earnings nor higher healthcare spending can explain the magnitude of the wealth gap. The differential earnings decline at dementia onset is less than $1,000. Out-of-pocket healthcare s",
+      "source": "NBER Working Papers",
+      "origin": "scraped_blog"
+    }
+  ]
+}

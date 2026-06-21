@@ -1,7 +1,7 @@
 {
   "book": "ressources_recommandees.txt",
-  "processed_at": "2026-06-18T22:30:13.584883",
-  "rules_found": 12,
+  "processed_at": "2026-06-21T22:21:21.839978",
+  "rules_found": 18,
   "rules": [
     {
       "id": "douglas_probability",
@@ -86,6 +86,48 @@
       "rule": "Adapt your approach to current market type (trending vs ranging).",
       "author": "Jack Schwager",
       "source": "Market Wizards"
+    },
+    {
+      "id": "chan_half_kelly",
+      "category": "sizing",
+      "rule": "Use half-Kelly position sizing to prevent overbetting and parameters estimation errors.",
+      "author": "Ernest Chan",
+      "source": "Algorithmic Trading"
+    },
+    {
+      "id": "chan_stationarity",
+      "category": "strategy",
+      "rule": "Verify stationarity of the spread (e.g. using the ADF test) before running mean-reversion strategies.",
+      "author": "Ernest Chan",
+      "source": "Algorithmic Trading"
+    },
+    {
+      "id": "chan_momentum",
+      "category": "strategy",
+      "rule": "Time-series momentum models perform best with lookback periods between 3 to 12 months.",
+      "author": "Ernest Chan",
+      "source": "Algorithmic Trading"
+    },
+    {
+      "id": "volman_double_bends",
+      "category": "signal",
+      "rule": "Double bends and triple taps on a 25 EMA suggest high probability breakout setups.",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping"
+    },
+    {
+      "id": "volman_scalp_risk",
+      "category": "risk",
+      "rule": "Scalping setups require fixed stop-loss targets based on recent micro-supports (often 10 pips or less).",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping"
+    },
+    {
+      "id": "volman_bb_breakout",
+      "category": "signal",
+      "rule": "Look for price squeeze/build-up right against a major horizontal level before a breakout.",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping"
     }
   ]
 }

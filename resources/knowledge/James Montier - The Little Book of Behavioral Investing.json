@@ -1,7 +1,7 @@
 {
-  "book": "Kabbaj - L'Art du Trading.pdf",
-  "processed_at": "2026-06-21T22:21:21.810684",
-  "rules_found": 28,
+  "book": "James Montier - The Little Book of Behavioral Investing.txt",
+  "processed_at": "2026-06-21T22:21:21.832503",
+  "rules_found": 25,
   "rules": [
     {
       "id": "elder_triple_screen",
@@ -51,48 +51,6 @@
       "rule": "Iron Triangle: money management → entries → psychology (in that order).",
       "author": "Dr. Alexander Elder",
       "source": "Vivre du Trading"
-    },
-    {
-      "id": "kabbaj_kelly",
-      "category": "sizing",
-      "rule": "Kelly Fraction: size = edge / odds. Use 25% of Kelly (fractional Kelly) to reduce ruin risk.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_rr_minimum",
-      "category": "risk",
-      "rule": "Minimum 2:1 reward-to-risk ratio on every trade entry.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_partial_tp",
-      "category": "exit",
-      "rule": "Take 50% profit at TP1, let the rest run with a trailing stop.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_price_action",
-      "category": "signal",
-      "rule": "Pure price action patterns (pin bars, engulfing) outperform indicators alone.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_sector_rotation",
-      "category": "strategy",
-      "rule": "Follow capital rotation between sectors to anticipate trend changes.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_psychology",
-      "category": "psychology",
-      "rule": "Trading is 90% psychology. Discipline and routine create consistent results.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
     },
     {
       "id": "douglas_probability",
@@ -198,6 +156,27 @@
       "rule": "Time-series momentum models perform best with lookback periods between 3 to 12 months.",
       "author": "Ernest Chan",
       "source": "Algorithmic Trading"
+    },
+    {
+      "id": "volman_double_bends",
+      "category": "signal",
+      "rule": "Double bends and triple taps on a 25 EMA suggest high probability breakout setups.",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping"
+    },
+    {
+      "id": "volman_scalp_risk",
+      "category": "risk",
+      "rule": "Scalping setups require fixed stop-loss targets based on recent micro-supports (often 10 pips or less).",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping"
+    },
+    {
+      "id": "volman_bb_breakout",
+      "category": "signal",
+      "rule": "Look for price squeeze/build-up right against a major horizontal level before a breakout.",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping"
     }
   ]
 }

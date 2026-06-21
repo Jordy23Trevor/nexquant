@@ -1,7 +1,7 @@
 {
-  "book": "Kabbaj - L'Art du Trading.pdf",
-  "processed_at": "2026-06-21T22:21:21.810684",
-  "rules_found": 28,
+  "book": "John J. Murphy - Technical Analysis of the Financial Markets.pdf",
+  "processed_at": "2026-06-21T22:21:04.622674",
+  "rules_found": 22,
   "rules": [
     {
       "id": "elder_triple_screen",
@@ -51,48 +51,6 @@
       "rule": "Iron Triangle: money management → entries → psychology (in that order).",
       "author": "Dr. Alexander Elder",
       "source": "Vivre du Trading"
-    },
-    {
-      "id": "kabbaj_kelly",
-      "category": "sizing",
-      "rule": "Kelly Fraction: size = edge / odds. Use 25% of Kelly (fractional Kelly) to reduce ruin risk.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_rr_minimum",
-      "category": "risk",
-      "rule": "Minimum 2:1 reward-to-risk ratio on every trade entry.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_partial_tp",
-      "category": "exit",
-      "rule": "Take 50% profit at TP1, let the rest run with a trailing stop.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_price_action",
-      "category": "signal",
-      "rule": "Pure price action patterns (pin bars, engulfing) outperform indicators alone.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_sector_rotation",
-      "category": "strategy",
-      "rule": "Follow capital rotation between sectors to anticipate trend changes.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_psychology",
-      "category": "psychology",
-      "rule": "Trading is 90% psychology. Discipline and routine create consistent results.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
     },
     {
       "id": "douglas_probability",

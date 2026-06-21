@@ -1,24 +1,66 @@
 {
   "version": 1,
-  "updated_at": "2026-06-18T22:30:13.585217",
+  "updated_at": "2026-06-21T22:21:21.886102",
   "books": {
+    "Bob Volman - Forex Price Action Scalping.pdf": {
+      "hash": "6b12db01c9333a62806e05e0ae387e8c",
+      "processed_at": "2026-06-21T22:19:02.627869",
+      "rules_extracted": 18,
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Bob Volman - Forex Price Action Scalping.pdf"
+    },
+    "Brett N. Steenbarger - Trading Psychology 2.0.pdf": {
+      "hash": "4aa196afc41d371697330ec0ebcee120",
+      "processed_at": "2026-06-21T22:19:24.573542",
+      "rules_extracted": 29,
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Brett N. Steenbarger - Trading Psychology 2.0.pdf"
+    },
+    "Chris Burniske - Cryptoassets.pdf": {
+      "hash": "5068257866adc4fd3be993192ee3618d",
+      "processed_at": "2026-06-21T22:20:04.577738",
+      "rules_extracted": 29,
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Chris Burniske - Cryptoassets.pdf"
+    },
     "Elder - Vivre du Trading.pdf": {
       "hash": "b77232725684c72ff8cbb6664aa34197",
-      "processed_at": "2026-06-18T22:30:08.911168",
+      "processed_at": "2026-06-21T22:20:22.719818",
+      "rules_extracted": 28,
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Elder - Vivre du Trading.pdf"
+    },
+    "Ernest Chan - Algorithmic Trading.pdf": {
+      "hash": "e4d660df1c1a75e8676a28ff4f852fa7",
+      "processed_at": "2026-06-21T22:20:29.999071",
       "rules_extracted": 25,
-      "path": "/home/claude/nexquant/resources/books/Elder - Vivre du Trading.pdf"
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Ernest Chan - Algorithmic Trading.pdf"
+    },
+    "John J. Murphy - Technical Analysis of the Financial Markets.pdf": {
+      "hash": "6d7d13fe95368476a2b00230b03ff796",
+      "processed_at": "2026-06-21T22:21:04.624615",
+      "rules_extracted": 22,
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\John J. Murphy - Technical Analysis of the Financial Markets.pdf"
     },
     "Kabbaj - L'Art du Trading.pdf": {
       "hash": "b77232725684c72ff8cbb6664aa34197",
-      "processed_at": "2026-06-18T22:30:13.583919",
+      "processed_at": "2026-06-21T22:21:21.812659",
+      "rules_extracted": 28,
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Kabbaj - L'Art du Trading.pdf"
+    },
+    "James Montier - The Little Book of Behavioral Investing.txt": {
+      "hash": "92b2536a64826f0538bfaab24c80a724",
+      "processed_at": "2026-06-21T22:21:21.834295",
       "rules_extracted": 25,
-      "path": "/home/claude/nexquant/resources/books/Kabbaj - L'Art du Trading.pdf"
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\James Montier - The Little Book of Behavioral Investing.txt"
     },
     "ressources_recommandees.txt": {
       "hash": "80f9967dcfa240d6dcb508f7d0d04ef2",
-      "processed_at": "2026-06-18T22:30:13.585056",
-      "rules_extracted": 12,
-      "path": "/home/claude/nexquant/resources/books/ressources_recommandees.txt"
+      "processed_at": "2026-06-21T22:21:21.841417",
+      "rules_extracted": 18,
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\ressources_recommandees.txt"
+    },
+    "Robert Lustig - The Hacking of the American Mind.txt": {
+      "hash": "1c2343d5dee59946f7b9b2bd795247e3",
+      "processed_at": "2026-06-21T22:21:21.885710",
+      "rules_extracted": 25,
+      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Robert Lustig - The Hacking of the American Mind.txt"
     }
   },
   "rules": [
@@ -252,6 +294,54 @@
       "rule": "Adapt your approach to current market type (trending vs ranging).",
       "author": "Jack Schwager",
       "source": "Market Wizards",
+      "origin": "builtin"
+    },
+    {
+      "id": "chan_half_kelly",
+      "category": "sizing",
+      "rule": "Use half-Kelly position sizing to prevent overbetting and parameters estimation errors.",
+      "author": "Ernest Chan",
+      "source": "Algorithmic Trading",
+      "origin": "builtin"
+    },
+    {
+      "id": "chan_stationarity",
+      "category": "strategy",
+      "rule": "Verify stationarity of the spread (e.g. using the ADF test) before running mean-reversion strategies.",
+      "author": "Ernest Chan",
+      "source": "Algorithmic Trading",
+      "origin": "builtin"
+    },
+    {
+      "id": "chan_momentum",
+      "category": "strategy",
+      "rule": "Time-series momentum models perform best with lookback periods between 3 to 12 months.",
+      "author": "Ernest Chan",
+      "source": "Algorithmic Trading",
+      "origin": "builtin"
+    },
+    {
+      "id": "volman_double_bends",
+      "category": "signal",
+      "rule": "Double bends and triple taps on a 25 EMA suggest high probability breakout setups.",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping",
+      "origin": "builtin"
+    },
+    {
+      "id": "volman_scalp_risk",
+      "category": "risk",
+      "rule": "Scalping setups require fixed stop-loss targets based on recent micro-supports (often 10 pips or less).",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping",
+      "origin": "builtin"
+    },
+    {
+      "id": "volman_bb_breakout",
+      "category": "signal",
+      "rule": "Look for price squeeze/build-up right against a major horizontal level before a breakout.",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping",
       "origin": "builtin"
     }
   ]
