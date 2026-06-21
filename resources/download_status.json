@@ -1,0 +1,126 @@
+{
+  "books": {
+    "Trading Psychology 2.0": {
+      "status": "DOWNLOADED",
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Brett N. Steenbarger - Trading Psychology 2.0.pdf"
+    },
+    "The Little Book of Behavioral Investing": {
+      "status": "DOWNLOADED",
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\James Montier - The Little Book of Behavioral Investing.pdf"
+    },
+    "Technical Analysis of the Financial Markets": {
+      "status": "DOWNLOADED",
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\John J. Murphy - Technical Analysis of the Financial Markets.pdf"
+    },
+    "Algorithmic Trading": {
+      "status": "DOWNLOADED",
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Ernest Chan - Algorithmic Trading.pdf"
+    },
+    "Cryptoassets": {
+      "status": "DOWNLOADED",
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Chris Burniske - Cryptoassets.pdf"
+    },
+    "Forex Price Action Scalping": {
+      "status": "DOWNLOADED",
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Bob Volman - Forex Price Action Scalping.pdf"
+    },
+    "The Hacking of the American Mind": {
+      "status": "DOWNLOADED",
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Robert Lustig - The Hacking of the American Mind.pdf"
+    }
+  },
+  "blogs": {
+    "QuantStart": {
+      "status": "OK",
+      "articles_found": 15,
+      "articles_saved": 15,
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\blogs\\QuantStart"
+    },
+    "QuantInsti": {
+      "status": "OK",
+      "articles_found": 15,
+      "articles_saved": 5,
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\blogs\\QuantInsti"
+    },
+    "CoinShares Research": {
+      "status": "OK",
+      "articles_found": 10,
+      "articles_saved": 1,
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\blogs\\CoinShares Research"
+    },
+    "NBER Working Papers": {
+      "status": "OK",
+      "articles_found": 15,
+      "articles_saved": 15,
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\blogs\\NBER Working Papers"
+    },
+    "Newfound Research": {
+      "status": "FAILED",
+      "error": "Impossible d'accéder au site"
+    },
+    "Trading Composure": {
+      "status": "TIMEOUT",
+      "original_url": "https://tradingcomposure.com/",
+      "alternative": "Contenu similaire disponible sur: https://www.investopedia.com/trading-psychology-4689669",
+      "description": "Discipline, routines pré/post-marché, journaling"
+    },
+    "Trading Composure_alt": {
+      "status": "FAILED",
+      "error": "Impossible d'accéder au site"
+    },
+    "Santiment Blog": {
+      "status": "404",
+      "original_url": "https://santiment.net/blog/",
+      "alternative": "Utiliser Glassnode Academy: https://academy.glassnode.com/",
+      "description": "Métriques on-chain avancées"
+    },
+    "Santiment Blog_alt": {
+      "status": "OK",
+      "articles_found": 10,
+      "articles_saved": 9,
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\blogs\\Santiment Blog (alternative)"
+    },
+    "Glassnode Insights": {
+      "status": "404",
+      "original_url": "https://glassnode.com/insights",
+      "alternative": "Utiliser Glassnode Academy: https://academy.glassnode.com/",
+      "description": "Comportement whales, activité développeur, NVT"
+    },
+    "Glassnode Insights_alt": {
+      "status": "OK",
+      "articles_found": 10,
+      "articles_saved": 9,
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\blogs\\Glassnode Insights (alternative)"
+    },
+    "Forex Factory": {
+      "status": "403_BLOCKED",
+      "original_url": "https://www.forexfactory.com/",
+      "alternative": "Utiliser BabyPips: https://www.babypips.com/forexpedia ou TradingView: https://www.tradingview.com/",
+      "description": "Stratégies réelles partagées par traders pro"
+    },
+    "Forex Factory_alt": {
+      "status": "OK",
+      "articles_found": 10,
+      "articles_saved": 10,
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\blogs\\Forex Factory (alternative)"
+    },
+    "Journal of Portfolio Management": {
+      "status": "DNS_FAIL",
+      "original_url": "https://journals.pm-research.com/",
+      "alternative": "Accès via SSRN: https://www.ssrn.com/ ou Google Scholar",
+      "description": "Facteurs (value, momentum), allocation dynamique"
+    },
+    "Journal of Portfolio Management_alt": {
+      "status": "FAILED",
+      "error": "Impossible d'accéder au site"
+    }
+  },
+  "papers": {
+    "Profitability of Technical Analysis": {
+      "status": "DOWNLOADED",
+      "path": "c:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\papers\\Park & Irwin (2007) - Profitability of Technical Analysis.md",
+      "source": "https://ageconsearch.umn.edu/record/37818"
+    }
+  },
+  "updated_at": "2026-06-21T22:09:26"
+}

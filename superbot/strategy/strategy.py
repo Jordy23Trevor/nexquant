@@ -8,6 +8,13 @@ from typing import Dict, Any, Tuple, Optional, List
 import logging
 from datetime import datetime
 
+# Classificateur sémantique NLP pour les règles dynamiques
+try:
+    from superbot.strategy.semantic_classifier import SemanticRuleClassifier
+    _SEMANTIC_AVAILABLE = True
+except ImportError:
+    _SEMANTIC_AVAILABLE = False
+
 # Importer les modules necesarios
 from superbot.indicators.technical_indicators import TechnicalIndicators
 from superbot.strategy.knowledge_base import (
@@ -42,6 +49,33 @@ class TradingStrategy:
         self.score_min = config.get('SCORE_MIN', 6)  # Score minimum pour entrer
         self.risk_per_trade = config.get('RISK_PCT', 1.0)  # % du compte à risquer par trade
         self.kelly_fraction = config.get('KELLY_FRACTION', 0.25)  # Fraction de Kelly à utiliser
+
+        # Charger la base de connaissances dynamique (connaissances extraites des livres)
+        try:
+            from resources.learning_engine import load_knowledge_index
+            raw_rules = load_knowledge_index()
+            log.info(f"Chargé {len(raw_rules)} règles brutes de la base de connaissances.")
+        except Exception as e:
+            raw_rules = []
+            log.warning(f"Impossible de charger la base de connaissances dynamiques : {e}")
+
+        # Classifier sémantiquement les règles (NLP ou fallback mots-clés)
+        if _SEMANTIC_AVAILABLE and raw_rules:
+            try:
+                self._classifier = SemanticRuleClassifier()
+                # Charger le cache si disponible, sinon classifier et sauvegarder
+                cached = self._classifier.load_cache()
+                if cached and len(cached) == len(raw_rules):
+                    self.knowledge_rules = cached
+                    log.info(f"Règles chargées depuis le cache sémantique ({len(cached)} règles).")
+                else:
+                    self.knowledge_rules = self._classifier.classify_rules(raw_rules)
+                    self._classifier.save_cache(self.knowledge_rules)
+            except Exception as e:
+                log.warning(f"Classificateur sémantique en erreur ({e}), utilisation des règles brutes.")
+                self.knowledge_rules = raw_rules
+        else:
+            self.knowledge_rules = raw_rules
 
         log.info(f"TradingStrategy initialisée avec score_min={self.score_min}, risk_per_trade={self.risk_per_trade}%")
 
@@ -92,12 +126,31 @@ class TradingStrategy:
         sentiment_factor = 1.0  # À implémenter avec le news manager
         news_filter_passed = True  # À implémenter avec le news manager
 
-        # Calculer la taille de position basée sur le risque et Kelly
-        account_balance = 10000.0  # Valeur par défaut, à remplacer par le vrai solde
-        risk_amount = account_balance * (self.risk_per_trade / 100.0)
-
         # Ajuster le score avec le facteur de sentiment
         adjusted_score = total_score * sentiment_factor
+
+        # Valeurs par défaut ajustables dynamiquement par les règles
+        risk_pct = self.risk_per_trade
+        kelly_frac = self.kelly_fraction
+
+        # Appliquer les règles dynamiques de connaissances (par exemple, Ernest Chan, Bob Volman)
+        adjusted_score, risk_pct, kelly_frac = self._apply_knowledge_rules(
+            adjusted_score,
+            risk_pct,
+            kelly_frac,
+            {
+                'market_regime': market_regime,
+                'is_trending': is_trending,
+                'total_score': total_score,
+                'trigger_long': trigger_long,
+                'trigger_short': trigger_short,
+                'latest_bar': latest
+            }
+        )
+
+        # Calculer la taille de position basée sur le risque et Kelly
+        account_balance = 10000.0  # Valeur par défaut, à remplacer par le vrai solde
+        risk_amount = account_balance * (risk_pct / 100.0)
 
         # Déterminer si on prend le trade
         should_long = (
@@ -124,7 +177,7 @@ class TradingStrategy:
 
             # Calculer la taille de base basée sur le risque
             base_size = calculate_position_size_from_risk(
-                account_balance, self.risk_per_trade, entry_price, sl_for_size
+                account_balance, risk_pct, entry_price, sl_for_size
             )
 
             # Appliquer la fraction de Kelly (méthode Kabbaj conservatrice)
@@ -136,10 +189,10 @@ class TradingStrategy:
 
             if avg_loss > 0 and rr_ratio > 0:
                 kelly_fraction_raw = calculate_kelly_fraction(estimated_win_rate, avg_win, avg_loss)
-                kelly_fraction_applied = min(kelly_fraction_raw * self.kelly_fraction, 0.02)  # Plafonné à 2% comme dans le plan
+                kelly_fraction_applied = min(kelly_fraction_raw * kelly_frac, 0.02)  # Plafonné à 2% comme dans le plan
                 position_size = base_size * kelly_fraction_applied
             else:
-                position_size = base_size * self.kelly_fraction  # Fallback
+                position_size = base_size * kelly_frac  # Fallback
 
         # Mettre à jour l'historique des scores
         self.score_history.append({
@@ -188,6 +241,68 @@ class TradingStrategy:
                   f"Long: {signal['should_long']} | Short: {signal['should_short']} | RR: {signal['rr_ratio']:.2f}")
 
         return signal
+
+    def _apply_knowledge_rules(self, current_score: float, risk_pct: float, kelly_frac: float, context: Dict[str, Any]) -> Tuple[float, float, float]:
+        """
+        Applique les règles de la base de connaissances en utilisant les actions
+        pré-classifiées par le SemanticRuleClassifier (NLP ou fallback mots-clés).
+        Chaque règle porte un champ 'actions' contenant les catégories matchées.
+        """
+        adjusted_score = current_score
+        adjusted_risk_pct = risk_pct
+        adjusted_kelly_frac = kelly_frac
+
+        for rule_info in self.knowledge_rules:
+            rule_id = rule_info.get("id", "?")
+            actions = rule_info.get("actions", [])
+
+            for action_info in actions:
+                action = action_info.get("action", "")
+                modifier = action_info.get("modifier", 0)
+
+                # --- GESTION DE RISQUE ---
+                if action == "CAP_KELLY":
+                    original = adjusted_kelly_frac
+                    adjusted_kelly_frac = min(adjusted_kelly_frac, modifier)
+                    if original != adjusted_kelly_frac:
+                        log.info(f"🧠 NLP [{rule_id}] → CAP_KELLY à {adjusted_kelly_frac} (était {original})")
+
+                elif action == "CAP_RISK_PCT":
+                    original = adjusted_risk_pct
+                    adjusted_risk_pct = min(adjusted_risk_pct, modifier)
+                    if original != adjusted_risk_pct:
+                        log.info(f"🧠 NLP [{rule_id}] → CAP_RISK à {adjusted_risk_pct}% (était {original}%)")
+
+                # --- AJUSTEMENT DE SCORE PAR REGIME ---
+                elif action == "BONUS_SCORE_RANGING":
+                    if context.get('market_regime') == 'RANGING':
+                        adjusted_score += modifier
+                        log.info(f"🧠 NLP [{rule_id}] → BONUS Ranging +{modifier} (score={adjusted_score:.1f})")
+                    elif context.get('market_regime') == 'TRENDING':
+                        adjusted_score -= modifier
+                        log.info(f"🧠 NLP [{rule_id}] → Pénalité anti-ranging en tendance -{modifier}")
+
+                elif action == "BONUS_SCORE_TRENDING":
+                    if context.get('market_regime') == 'TRENDING':
+                        adjusted_score += modifier
+                        log.info(f"🧠 NLP [{rule_id}] → BONUS Trending +{modifier} (score={adjusted_score:.1f})")
+
+                # --- EMA SQUEEZE ---
+                elif action == "BONUS_EMA_SQUEEZE":
+                    latest_bar = context.get('latest_bar', {})
+                    close = latest_bar.get('close', 0)
+                    ema_fast = latest_bar.get('ema_fast', 0)
+                    if close > 0 and ema_fast > 0:
+                        diff_pct = abs(close - ema_fast) / close
+                        if diff_pct < 0.0015:
+                            adjusted_score += modifier
+                            log.info(f"🧠 NLP [{rule_id}] → EMA Squeeze détecté +{modifier}")
+
+                # --- FLAGS (logged but no parameter change) ---
+                elif action in ("ENFORCE_STRICT_SL", "PSYCHOLOGY_FLAG"):
+                    pass  # Acknowledged — no score/risk change
+
+        return adjusted_score, adjusted_risk_pct, adjusted_kelly_frac
 
     def _create_neutral_signal(self, reason: str) -> Dict[str, Any]:
         """Génère un signal neutre en cas d'erreur ou d'absence de données."""

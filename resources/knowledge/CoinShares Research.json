@@ -1,0 +1,29 @@
+{
+  "source": "CoinShares Research",
+  "type": "blog",
+  "scraped_at": "2026-06-21T16:04:04.572612",
+  "articles_count": 1,
+  "rules": [
+    {
+      "id": "blog_CoinShares Research_01405caeca44",
+      "category": "strategy",
+      "rule": "[## Crypto is battle-tested, and in fewer hands",
+      "source": "CoinShares Research",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_CoinShares Research_3ee377e46370",
+      "category": "strategy",
+      "rule": "Bitcoin’s worst month in over a year reveals a maturing market: fast money is leaving, patient capital is staying, and only a handful of crypto names are passing the institutional test.",
+      "source": "CoinShares Research",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_CoinShares Research_f4c521f3beca",
+      "category": "strategy",
+      "rule": "### \"Pension funds adding crypto will drive the next crypto summer\"](/insights/the-node/interview-stephan-lutz-bitmex/)",
+      "source": "CoinShares Research",
+      "origin": "scraped_blog"
+    }
+  ]
+}

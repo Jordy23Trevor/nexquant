@@ -1,99 +1,8 @@
 {
-  "book": "Kabbaj - L'Art du Trading.pdf",
-  "processed_at": "2026-06-21T22:21:21.810684",
-  "rules_found": 28,
+  "book": "Bob Volman - Forex Price Action Scalping.pdf",
+  "processed_at": "2026-06-21T22:19:02.626191",
+  "rules_found": 18,
   "rules": [
-    {
-      "id": "elder_triple_screen",
-      "category": "strategy",
-      "rule": "Triple Screen: weekly trend + daily oscillator + intraday entry.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading"
-    },
-    {
-      "id": "elder_2pct_rule",
-      "category": "risk",
-      "rule": "Never risk more than 2% of account equity on a single trade.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading"
-    },
-    {
-      "id": "elder_6pct_rule",
-      "category": "risk",
-      "rule": "Stop trading the month if monthly drawdown exceeds 6%.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading"
-    },
-    {
-      "id": "elder_macd_divergence",
-      "category": "signal",
-      "rule": "MACD divergence from price is a high-probability reversal signal.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading"
-    },
-    {
-      "id": "elder_force_index",
-      "category": "signal",
-      "rule": "Force Index (price * volume) confirms trend strength or weakness.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading"
-    },
-    {
-      "id": "elder_ema_envelope",
-      "category": "signal",
-      "rule": "Price outside EMA envelope signals overbought/oversold conditions.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading"
-    },
-    {
-      "id": "elder_iron_triangle",
-      "category": "risk",
-      "rule": "Iron Triangle: money management → entries → psychology (in that order).",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading"
-    },
-    {
-      "id": "kabbaj_kelly",
-      "category": "sizing",
-      "rule": "Kelly Fraction: size = edge / odds. Use 25% of Kelly (fractional Kelly) to reduce ruin risk.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_rr_minimum",
-      "category": "risk",
-      "rule": "Minimum 2:1 reward-to-risk ratio on every trade entry.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_partial_tp",
-      "category": "exit",
-      "rule": "Take 50% profit at TP1, let the rest run with a trailing stop.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_price_action",
-      "category": "signal",
-      "rule": "Pure price action patterns (pin bars, engulfing) outperform indicators alone.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_sector_rotation",
-      "category": "strategy",
-      "rule": "Follow capital rotation between sectors to anticipate trend changes.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
-    {
-      "id": "kabbaj_psychology",
-      "category": "psychology",
-      "rule": "Trading is 90% psychology. Discipline and routine create consistent results.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading"
-    },
     {
       "id": "douglas_probability",
       "category": "psychology",
@@ -198,6 +107,27 @@
       "rule": "Time-series momentum models perform best with lookback periods between 3 to 12 months.",
       "author": "Ernest Chan",
       "source": "Algorithmic Trading"
+    },
+    {
+      "id": "volman_double_bends",
+      "category": "signal",
+      "rule": "Double bends and triple taps on a 25 EMA suggest high probability breakout setups.",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping"
+    },
+    {
+      "id": "volman_scalp_risk",
+      "category": "risk",
+      "rule": "Scalping setups require fixed stop-loss targets based on recent micro-supports (often 10 pips or less).",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping"
+    },
+    {
+      "id": "volman_bb_breakout",
+      "category": "signal",
+      "rule": "Look for price squeeze/build-up right against a major horizontal level before a breakout.",
+      "author": "Bob Volman",
+      "source": "Forex Price Action Scalping"
     }
   ]
 }

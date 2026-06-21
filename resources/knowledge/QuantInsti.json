@@ -1,0 +1,78 @@
+{
+  "source": "QuantInsti",
+  "type": "blog",
+  "scraped_at": "2026-06-21T16:04:04.674070",
+  "articles_count": 5,
+  "rules": [
+    {
+      "id": "blog_QuantInsti_8a0386b2e65c",
+      "category": "strategy",
+      "rule": "### Forex Trading for Beginners | Build Systematic G10 FX Index",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_QuantInsti_c57e22394f5c",
+      "category": "strategy",
+      "rule": "Equity, FX, Options, Futures, ETFs",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_QuantInsti_c8c6fdd3f08e",
+      "category": "strategy",
+      "rule": "* **Options primer:** Learning terminology used, types of options, volatility and its types, and simple options trading strategies.",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_QuantInsti_c1873cd42608",
+      "category": "strategy",
+      "rule": "All Professions Data Analyst / Data Scientist / Data Engineer Director / CXO / VP Financial Analyst / Risk Analyst / Credit Analyst Full-Time Student Portfolio Manager / Risk Manager Programmer Trader",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_QuantInsti_31434f1031dd",
+      "category": "strategy",
+      "rule": "I don’t have a background in programming, so it was vital for me to find a programme that provides in-depth instruction. It’s kind of surreal to look back at my journey of progress with EPAT. I went f",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_QuantInsti_bed1bd6f2a29",
+      "category": "strategy",
+      "rule": "Scheduled progress calls align your study plan with upcoming exams, projects, and career milestones, so no surprises derail your momentum.",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_QuantInsti_88f18b639c83",
+      "category": "strategy",
+      "rule": "Choose mini-projects to practise new tools, then collaborate on a mentored capstone you can deploy in the live market (data pipelines, execution, risk controls, and more).",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_QuantInsti_c68d884dd467",
+      "category": "strategy",
+      "rule": "EPAT empowers traders with hands-on experience in backtesting using Python, live trading with APIs and brokers like Alpaca. Explore funding opportunities and receive guidance to set up your trading de",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_QuantInsti_0d182d991746",
+      "category": "strategy",
+      "rule": "EPAT offers an immersive learning experience, allowing you to **work with market data**, backtest your trading ideas, **analyze backtesting results, paper trade your strategies**, risk-free environmen",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    },
+    {
+      "id": "blog_QuantInsti_cc58d56c6383",
+      "category": "strategy",
+      "rule": "Analyze historical data and backtesting strategies using spreadsheets",
+      "source": "QuantInsti",
+      "origin": "scraped_blog"
+    }
+  ]
+}

@@ -99,6 +99,24 @@ AUTHOR_RULE_SEEDS: Dict[str, Dict] = {
             {"id": "schwager_cut_losses",    "category": "exit",         "rule": "Cut losses short, let profits run. The asymmetry is essential."},
             {"id": "schwager_market_type",   "category": "strategy",     "rule": "Adapt your approach to current market type (trending vs ranging)."},
         ]
+    },
+    "chan": {
+        "author":  "Ernest Chan",
+        "source":  "Algorithmic Trading",
+        "rules": [
+            {"id": "chan_half_kelly",        "category": "sizing",       "rule": "Use half-Kelly position sizing to prevent overbetting and parameters estimation errors."},
+            {"id": "chan_stationarity",      "category": "strategy",     "rule": "Verify stationarity of the spread (e.g. using the ADF test) before running mean-reversion strategies."},
+            {"id": "chan_momentum",          "category": "strategy",     "rule": "Time-series momentum models perform best with lookback periods between 3 to 12 months."}
+        ]
+    },
+    "volman": {
+        "author":  "Bob Volman",
+        "source":  "Forex Price Action Scalping",
+        "rules": [
+            {"id": "volman_double_bends",    "category": "signal",       "rule": "Double bends and triple taps on a 25 EMA suggest high probability breakout setups."},
+            {"id": "volman_scalp_risk",      "category": "risk",         "rule": "Scalping setups require fixed stop-loss targets based on recent micro-supports (often 10 pips or less)."},
+            {"id": "volman_bb_breakout",     "category": "signal",       "rule": "Look for price squeeze/build-up right against a major horizontal level before a breakout."}
+        ]
     }
 }
 
