@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexQuant — Global Multilingual Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --sidebar-bg: #161b22;
+            --border-color: #30363d;
+            --text-color: #c9d1d9;
+            --text-bright: #f0f6fc;
+            --accent-color: #58a6ff;
+            --accent-glow: rgba(88, 166, 255, 0.15);
+            --code-bg: #0b0e14;
+            --shadow: rgba(0, 0, 0, 0.5);
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: 'Outfit', sans-serif;
+            color: var(--text-bright);
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        h2 {
+            font-size: 1.6rem;
+            margin-top: 2rem;
+            border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+            padding-bottom: 0.3rem;
+        }
+
+        h3 {
+            font-size: 1.25rem;
+            margin-top: 1.5rem;
+        }
+
+        p, ul, ol {
+            margin-bottom: 1.2rem;
+            font-size: 1rem;
+        }
+
+        ul, ol {
+            padding-left: 1.5rem;
+        }
+
+        li {
+            margin-bottom: 0.4rem;
+        }
+
+        a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Sidebar styling */
+        .sidebar {
+            width: 320px;
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .logo {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-bright);
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo span {
+            color: var(--accent-color);
+        }
+
+        .search-box {
+            margin-top: 16px;
+            position: relative;
+        }
+
+        .search-box input {
+            width: 100%;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-color);
+            font-family: inherit;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .search-box input:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .nav-links {
+            list-style: none;
+            padding: 20px 12px;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        .nav-links li {
+            margin-bottom: 4px;
+        }
+
+        .nav-links a {
+            display: block;
+            padding: 10px 16px;
+            color: var(--text-color);
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: 0.95rem;
+            transition: background-color 0.2s, color 0.2s;
+        }
+
+        .nav-links a:hover, .nav-links a.active {
+            background-color: rgba(88, 166, 255, 0.1);
+            color: var(--text-bright);
+            text-decoration: none;
+        }
+
+        .nav-links a.active {
+            border-left: 3px solid var(--accent-color);
+            border-radius: 0 6px 6px 0;
+            padding-left: 13px;
+        }
+
+        /* Content area styling */
+        .content-container {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            height: 100%;
+            background-color: var(--bg-color);
+        }
+
+        .top-bar {
+            height: 70px;
+            border-bottom: 1px solid var(--border-color);
+            padding: 0 40px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 20px;
+        }
+
+        .lang-select-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .lang-select-container label {
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        select {
+            background-color: var(--sidebar-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-bright);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            outline: none;
+            cursor: pointer;
+        }
+
+        select:focus {
+            border-color: var(--accent-color);
+        }
+
+        .main-content {
+            padding: 40px;
+            overflow-y: auto;
+            flex-grow: 1;
+            scroll-behavior: smooth;
+        }
+
+        .doc-section {
+            display: none;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .doc-section.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Code Blocks */
+        pre {
+            background-color: var(--code-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 16px;
+            overflow-x: auto;
+            margin-bottom: 1.5rem;
+            position: relative;
+        }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            color: #ff7b72;
+        }
+
+        pre code {
+            color: var(--text-color);
+            font-size: 0.85rem;
+        }
+
+        /* Tables styling */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1.5rem;
+            font-size: 0.95rem;
+        }
+
+        th, td {
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            text-align: left;
+        }
+
+        th {
+            background-color: var(--sidebar-bg);
+            color: var(--text-bright);
+            font-weight: 600;
+        }
+
+        tr:nth-child(even) td {
+            background-color: rgba(22, 27, 34, 0.3);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar Navigation -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">Nex<span>Quant</span> Docs</div>
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="Rechercher...">
+            </div>
+        </div>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="#manual" class="active" onclick="switchSection('manual')">Manuel d'Utilisation</a></li>
+            <li><a href="#expert" onclick="switchSection('expert')">Guide Expert Trader</a></li>
+            <li><a href="#tech" onclick="switchSection('tech')">Documentation Technique</a></li>
+            <li><a href="#broker" onclick="switchSection('broker')">Changement de Broker & Webhooks</a></li>
+        </ul>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="content-container">
+        <div class="top-bar">
+            <div class="lang-select-container">
+                <label id="lang-label" for="lang-select">Langue :</label>
+                <select id="lang-select" onchange="switchLanguage(this.value)">
+                    <option value="fr">🇫🇷 Français</option>
+                    <option value="en">🇬🇧 English</option>
+                    <option value="es">🇪🇸 Español</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="main-content" id="main-content">
+            <div id="manual" class="doc-section active"></div>
+            <div id="expert" class="doc-section"></div>
+            <div id="tech" class="doc-section"></div>
+            <div id="broker" class="doc-section"></div>
+        </div>
+    </div>
+
+    <!-- Inject data and JS -->
+    <script>
+        const docsData = {
+  "fr": {
+    "title": "NexQuant — Documentation Globale",
+    "lang_name": "Français",
+    "nav": {
+      "manual": "Manuel d'Utilisation",
+      "expert": "Guide Expert Trader",
+      "tech": "Documentation Technique",
+      "broker": "Changement de Broker & Webhooks"
+    },
+    "search_placeholder": "Rechercher dans la documentation...",
+    "language_label": "Langue :",
+    "back_to_top": "Retour en haut",
+    "download_md": "Télécharger en MD",
+    "manual_content": "\n# 📖 Manuel d'Utilisation Complet - SuperBot Trading Unifié\n\n## 1. Présentation du SuperBot\nLe **SuperBot Trading Unifié** est un système de trading algorithmique de niveau institutionnel conçu pour fonctionner de manière autonome sur plusieurs classes d'actifs (Crypto, Actions, Forex).\nIl combine l'analyse technique multi-indicateurs, un filtre sémantique NLP pour l'ingestion de règles textuelles de trading, et un gestionnaire de risques basé sur les règles de Kelly et d'Elder.\n\n## 2. Prérequis Système\n- **Python** : Version 3.8 ou supérieure (recommandé 3.10).\n- **Dépendances** : `pandas`, `numpy`, `requests`, `python-dotenv`.\n- **Dépendances optionnelles** : `sentence-transformers` (NLP local), `optuna` (Optimisation).\n\n## 3. Installation et Lancement\n1. Clonez ou téléchargez le projet.\n2. Installez les packages :\n   ```bash\n   pip install -r requirements.txt\n   ```\n3. Configurez votre fichier `.env` à la racine du projet.\n4. Lancez le bot :\n   ```bash\n   python superbot/main.py\n   ```\n\n## 4. Configuration (.env)\nLes paramètres clés du fichier `.env` :\n- `BROKER_TYPE` : Le courtier actif (`binance`, `alpaca`, `paper_forex`).\n- `RISK_PCT` : Le pourcentage de capital risqué par position (par défaut `1.0`%).\n- `SCORE_MIN` : Le score minimum (sur 10) requis pour déclencher un signal.\n- `ENABLE_DASHBOARD` : Active le tableau de bord web (`http://localhost:5000`).\n        ",
+    "expert_content": "\n# 📈 Guide Expert Trader - Compréhension Avancée\n\n## 1. Philosophie Centrale : Instinct-Raison-Connaissance\nLe bot fonctionne en mariant trois types d'analyses :\n1. **L'Instinct** : Traitement du sentiment de marché (Fear & Greed, nouvelles).\n2. **La Raison** : Scoring technique strict basé sur 20+ indicateurs.\n3. **La Connaissance** : Ingestion sémantique NLP de règles théoriques issues de la littérature financière (Ernest Chan, Alexander Elder, Bob Volman).\n\n## 2. Optimisations de Performance et Réactivité\nPour maximiser la réactivité dans des marchés volatils, plusieurs paramètres ont été optimisés :\n- **Seuil de score réduit** à `4` (au lieu de 6) pour attraper les retournements précoces.\n- **Seuil ADX** ajusté à `20` pour détecter le début des mouvements de tendance plus tôt.\n- **Pyramiding** (`USE_PYRAMIDING=true`) activé pour accumuler des positions sur les tendances fortes.\n- **Filtre de volatilité** (`USE_VOLATILITY_FILTER=true`) exigeant au moins 0.5% d'amplitude pour éviter de se faire piéger dans les marchés plats (chop).\n        ",
+    "tech_content": "\n# 💻 Documentation Technique Complète\n\n## 1. Architecture Modulaire\nLe système est divisé en modules indépendants coordonnés par le moteur central `superbot/main.py` :\n- **Broker Adapter Layer** (`superbot/broker/`) : Standardise les connexions API vers Binance, Alpaca et le simulateur Forex.\n- **Risk Manager** (`superbot/risk/`) : Contrôle de l'exposition globale et du drawdown maximal.\n- **Technical Indicators Engine** (`superbot/indicators/`) : Calculs vectorisés haute performance en O(N) pour les indicateurs (EMA, RSI, MACD, Bollinger Bands, ATR, Supertrend).\n- **Semantic Classifier** (`superbot/strategy/semantic_classifier.py`) : Classifieur NLP utilisant des embeddings sémantiques.\n\n## 2. Classifieur Sémantique NLP\nLe classifieur charge les règles extraites des livres, génère leurs embeddings à l'aide de `sentence-transformers` et calcule leur similarité cosinus avec des profils d'action prédéfinis :\n- `CAP_KELLY` : Plafonne la fraction de Kelly à 0.125.\n- `CAP_RISK_PCT` : Limite le risque maximal par trade à 2%.\n- `BONUS_SCORE_RANGING` / `BONUS_SCORE_TRENDING` : Ajuste dynamiquement le score selon le régime de marché détecté.\n\n## 3. Optimisation Bayésienne (Optuna)\nLe script `optimize_rules.py` permet d'ajuster automatiquement les poids des règles et les hyperparamètres (comme le score min) en effectuant des simulations de backtest rapides et en évaluant le Sharpe Ratio.\n        ",
+    "broker_content": "\n# 🔗 Changement de Broker et Webhooks Externes\n\n## 1. Changer de Broker\nPour passer de Binance à un autre courtier, modifiez simplement `BROKER_TYPE` dans votre fichier `.env` :\n```env\nBROKER_TYPE=alpaca  # Actions US\n# ou\nBROKER_TYPE=paper_forex  # Forex simulé\n```\nLe bot charge automatiquement les instruments spécifiques configurés (`INSTRUMENTS_BINANCE`, `INSTRUMENTS_ALPACA`, etc.).\n\n## 2. Serveur Webhook Intégré (TradingView, MT5, cTrader)\nNexQuant intègre un serveur de webhook HTTP (`superbot/webhook/server.py`) écoutant sur le port `8080` pour exécuter des signaux en provenance d'autres plateformes.\n\n### Exemple de configuration TradingView\nCochez **URL de Webhook** dans votre alerte TradingView (ex: via ngrok `https://abcd.ngrok-free.app/`) et envoyez le JSON suivant :\n```json\n{\n  \"symbol\": \"{{ticker}}\",\n  \"action\": \"{{strategy.order.action}}\",\n  \"price\": {{close}},\n  \"source\": \"TradingView\"\n}\n```\n\n### Exemple de script MetaTrader 5 (MQL5)\n```mql5\nvoid SendSignalToNexQuant(string symbol, string action, double price) {\n    string url = \"https://votre-url-ngrok.ngrok-free.app/\";\n    string json = StringFormat(\"{\\\"symbol\\\": \\\"%s\\\", \\\"action\\\": \\\"%s\\\", \\\"price\\\": %.5f, \\\"source\\\": \\\"MT5\\\"}\", symbol, action, price);\n    char post[];\n    char result[];\n    string headers = \"Content-Type: application/json\\r\\n\";\n    StringToCharArray(json, post);\n    WebRequest(\"POST\", url, headers, 5000, post, result, headers);\n}\n```\n        "
+  },
+  "en": {
+    "title": "NexQuant — Global Documentation",
+    "lang_name": "English",
+    "nav": {
+      "manual": "User Manual",
+      "expert": "Expert Trader Guide",
+      "tech": "Technical Documentation",
+      "broker": "Broker & Webhook Integration"
+    },
+    "search_placeholder": "Search the documentation...",
+    "language_label": "Language:",
+    "back_to_top": "Back to top",
+    "download_md": "Download MD",
+    "manual_content": "\n# 📖 Complete User Manual - SuperBot Unified Trading\n\n## 1. Introduction\nThe **SuperBot Unified Trading** is an institutional-grade algorithmic trading system designed to run autonomously across multiple asset classes (Crypto, Stocks, Forex).\nIt combines multi-indicator technical analysis, a semantic NLP filter for raw trading rule ingestion, and a risk manager based on Kelly and Elder rules.\n\n## 2. Prerequisites\n- **Python**: Version 3.8 or higher (3.10 recommended).\n- **Dependencies**: `pandas`, `numpy`, `requests`, `python-dotenv`.\n- **Optional Dependencies**: `sentence-transformers` (for local NLP), `optuna` (for optimization).\n\n## 3. Installation & Run\n1. Clone or download the repository.\n2. Install dependencies:\n   ```bash\n   pip install -r requirements.txt\n   ```\n3. Configure your `.env` file in the project root.\n4. Launch the bot:\n   ```bash\n   python superbot/main.py\n   ```\n\n## 4. Configuration (.env)\nKey settings in the `.env` file:\n- `BROKER_TYPE`: The active broker (`binance`, `alpaca`, `paper_forex`).\n- `RISK_PCT`: Percentage of equity to risk per trade (default `1.0`%).\n- `SCORE_MIN`: Minimum decision score (out of 10) to trigger a trade.\n- `ENABLE_DASHBOARD`: Enable the web dashboard (`http://localhost:5000`).\n        ",
+    "expert_content": "\n# 📈 Expert Trader Guide - Advanced Logic\n\n## 1. Core Philosophy: Instinct-Reason-Knowledge\nThe bot operates by merging three layers of analysis:\n1. **Instinct**: Market sentiment processing (Fear & Greed, fundamental news).\n2. **Reason**: Strict technical scoring based on 20+ indicators.\n3. **Knowledge**: Semantic NLP ingestion of trading rules from financial literature (Ernest Chan, Alexander Elder, Bob Volman).\n\n## 2. Performance Optimizations\nTo maximize responsiveness in volatile markets, key parameters have been fine-tuned:\n- **Score threshold reduced** to `4` (from 6) to catch early market reversals.\n- **ADX threshold** adjusted to `20` to detect trending market regimes faster.\n- **Pyramiding** (`USE_PYRAMIDING=true`) enabled to scale into winning positions.\n- **Volatility Filter** (`USE_VOLATILITY_FILTER=true`) requiring a minimum 0.5% volatility amplitude to prevent getting chopped in flat markets.\n        ",
+    "tech_content": "\n# 💻 Complete Technical Documentation\n\n## 1. Modular Architecture\nThe system consists of independent modules coordinated by the central engine `superbot/main.py`:\n- **Broker Adapter Layer** (`superbot/broker/`): Standardizes API connections for Binance, Alpaca, and the simulated Forex feed.\n- **Risk Manager** (`superbot/risk/`): Manages overall exposure, leverage, and maximum drawdown limits.\n- **Technical Indicators Engine** (`superbot/indicators/`): Performance-optimized O(N) calculations for indicators (EMA, RSI, MACD, Bollinger Bands, ATR, Supertrend).\n- **Semantic Classifier** (`superbot/strategy/semantic_classifier.py`): NLP-driven rule parser using sentence embeddings.\n\n## 2. Semantic NLP Classifier\nThe classifier loads extracted rules, generates embeddings using `sentence-transformers`, and evaluates cosine similarity against pre-defined action descriptions:\n- `CAP_KELLY`: Caps the Kelly fraction to 0.125.\n- `CAP_RISK_PCT`: Limits maximum risk per trade to 2%.\n- `BONUS_SCORE_RANGING` / `BONUS_SCORE_TRENDING`: Dynamically boosts the score based on the detected market regime.\n\n## 3. Bayesian Optimization (Optuna)\nThe `optimize_rules.py` script automatically adjusts weights and hyperparameters (like the min score threshold) by running rapid backtests and optimizing the Sharpe Ratio.\n        ",
+    "broker_content": "\n# 🔗 Broker & External Webhook Integration\n\n## 1. Changing Brokers\nTo switch from Binance to another broker, modify `BROKER_TYPE` in your `.env` file:\n```env\nBROKER_TYPE=alpaca  # US Stocks\n# or\nBROKER_TYPE=paper_forex  # Simulated Forex\n```\nThe bot dynamically loads the matching instruments (`INSTRUMENTS_BINANCE`, `INSTRUMENTS_ALPACA`, etc.).\n\n## 2. Built-in Webhook Server (TradingView, MT5, cTrader)\nNexQuant runs an HTTP webhook server (`superbot/webhook/server.py`) on port `8080` to listen for external signals.\n\n### TradingView Setup\nCheck **Webhook URL** in your TradingView alert (e.g., pointing to your ngrok URL `https://abcd.ngrok-free.app/`) and send the following JSON:\n```json\n{\n  \"symbol\": \"{{ticker}}\",\n  \"action\": \"{{strategy.order.action}}\",\n  \"price\": {{close}},\n  \"source\": \"TradingView\"\n}\n```\n\n### MetaTrader 5 (MQL5) Integration script\n```mql5\nvoid SendSignalToNexQuant(string symbol, string action, double price) {\n    string url = \"https://votre-url-ngrok.ngrok-free.app/\";\n    string json = StringFormat(\"{\\\"symbol\\\": \\\"%s\\\", \\\"action\\\": \\\"%s\\\", \\\"price\\\": %.5f, \\\"source\\\": \\\"MT5\\\"}\", symbol, action, price);\n    char post[];\n    char result[];\n    string headers = \"Content-Type: application/json\\r\\n\";\n    StringToCharArray(json, post);\n    WebRequest(\"POST\", url, headers, 5000, post, result, headers);\n}\n```\n        "
+  },
+  "es": {
+    "title": "NexQuant — Documentación Global",
+    "lang_name": "Español",
+    "nav": {
+      "manual": "Manual de Usuario",
+      "expert": "Guía del Trader Experto",
+      "tech": "Documentación Técnica",
+      "broker": "Cambio de Bróker y Webhooks"
+    },
+    "search_placeholder": "Buscar en la documentación...",
+    "language_label": "Idioma:",
+    "back_to_top": "Volver arriba",
+    "download_md": "Descargar MD",
+    "manual_content": "\n# 📖 Manual de Usuario Completo - SuperBot Trading Unificado\n\n## 1. Presentación\nEl **SuperBot Trading Unificado** es un sistema avanzado de trading algorítmico institucional diseñado para operar de forma autónoma en múltiples mercados (Criptomonedas, Acciones, Forex).\nCombina análisis técnico multi-indicador, un filtro semántico NLP para asimilar reglas teóricas y un gestor de riesgos basado en las fórmulas de Kelly y Elder.\n\n## 2. Requisitos del Sistema\n- **Python**: Versión 3.8 o superior (se recomienda 3.10).\n- **Dependencias**: `pandas`, `numpy`, `requests`, `python-dotenv`.\n- **Dependencias opcionales**: `sentence-transformers` (NLP local), `optuna` (Optimización).\n\n## 3. Instalación e Inicio\n1. Descargue o clone el proyecto.\n2. Instale los paquetes requeridos:\n   ```bash\n   pip install -r requirements.txt\n   ```\n3. Configure su archivo `.env` en la raíz del proyecto.\n4. Inicie el bot:\n   ```bash\n   python superbot/main.py\n   ```\n\n## 4. Configuration (.env)\nParámetros clave del archivo `.env`:\n- `BROKER_TYPE`: El bróker activo (`binance`, `alpaca`, `paper_forex`).\n- `RISK_PCT`: Porcentaje de capital en riesgo por operación (por defecto `1.0`%).\n- `SCORE_MIN`: Puntuación mínima (sobre 10) requerida para abrir una posición.\n- `ENABLE_DASHBOARD`: Activa el panel web interactivo (`http://localhost:5000`).\n        ",
+    "expert_content": "\n# 📈 Guía del Trader Experto - Lógica Avanzada\n\n## 1. Filosofía Central: Instinto-Razón-Conocimiento\nEl bot funciona integrando tres capas de análisis:\n1. **El Instinto**: Procesamiento del sentimiento de mercado (Fear & Greed, noticias).\n2. **La Razón**: Puntuación técnica estricta basada en más de 20 indicadores.\n3. **El Conocimiento**: Ingesta semántica mediante NLP de reglas de trading extraídas de libros financieros (Ernest Chan, Alexander Elder, Bob Volman).\n\n## 2. Optimizaciones de Rendimiento y Reactividad\nPara maximizar la reactividad en mercados altamente volátiles, se han optimizado varios parámetros:\n- **Umbral de puntuación reducido** a `4` (en lugar de 6) para capturar giros tempranos.\n- **Umbral del ADX** ajustado a `20` para detectar el inicio de tendencias con mayor rapidez.\n- **Pyramiding** (`USE_PYRAMIDING=true`) activado para acumular posiciones a favor de tendencias fuertes.\n- **Filtre de volatilidad** (`USE_VOLATILITY_FILTER=true`) que exige un rango mínimo del 0.5% para evitar operaciones en mercados laterales planos.\n        ",
+    "tech_content": "\n# 💻 Documentación Técnica Completa\n\n## 1. Arquitectura Modular\nEl sistema está dividido en módulos independientes coordinados por el motor central `superbot/main.py`:\n- **Broker Adapter Layer** (`superbot/broker/`): Estandariza las conexiones API a Binance, Alpaca y el simulador de Forex.\n- **Risk Manager** (`superbot/risk/`): Controla la exposición total del portafolio y los límites de drawdown.\n- **Technical Indicators Engine** (`superbot/indicators/`): Cálculos optimizados en O(N) para indicadores (EMA, RSI, MACD, Bandas de Bollinger, ATR, Supertrend).\n- **Semantic Classifier** (`superbot/strategy/semantic_classifier.py`): Clasificador NLP mediante embeddings semánticos.\n\n## 2. Clasificador Semántico NLP\nEl clasificador carga las reglas teóricas, genera sus embeddings utilizando `sentence-transformers` y evalúa la similitud de coseno contra descripciones de acción predefinidas:\n- `CAP_KELLY`: Limita la fracción de Kelly a 0.125.\n- `CAP_RISK_PCT`: Limita el riesgo máximo por operación al 2%.\n- `BONUS_SCORE_RANGING` / `BONUS_SCORE_TRENDING`: Modifica dinámicamente la puntuación según el régimen de mercado.\n\n## 3. Optimización Bayesiana (Optuna)\nEl script `optimize_rules.py` ajusta automáticamente los parámetros y pesos de las reglas mediante simulaciones de backtesting rápido para maximizar el Sharpe Ratio.\n        ",
+    "broker_content": "\n# 🔗 Cambio de Bróker y Webhooks Externos\n\n## 1. Cambiar de Bróker\nPara cambiar el bróker configurado, simplemente edite la variable `BROKER_TYPE` en su archivo `.env`:\n```env\nBROKER_TYPE=alpaca  # Acciones de EE.UU.\n# o\nBROKER_TYPE=paper_forex  # Forex Simulado\n```\nEl bot cargará automáticamente los instrumentos específicos (`INSTRUMENTS_BINANCE`, `INSTRUMENTS_ALPACA`, etc.).\n\n## 2. Servidor de Webhook Integrado (TradingView, MT5, cTrader)\nNexQuant ejecuta un servidor HTTP de webhooks (`superbot/webhook/server.py`) en el puerto `8080` para recibir señales de trading externas.\n\n### Configuración en TradingView\nActive la opción **Webhook URL** en su alerta de TradingView (ej: usando ngrok `https://abcd.ngrok-free.app/`) y configure el siguiente mensaje JSON:\n```json\n{\n  \"symbol\": \"{{ticker}}\",\n  \"action\": \"{{strategy.order.action}}\",\n  \"price\": {{close}},\n  \"source\": \"TradingView\"\n}\n```\n\n### Integración con MetaTrader 5 (MQL5)\n```mql5\nvoid SendSignalToNexQuant(string symbol, string action, double price) {\n    string url = \"https://votre-url-ngrok.ngrok-free.app/\";\n    string json = StringFormat(\"{\\\"symbol\\\": \\\"%s\\\", \\\"action\\\": \\\"%s\\\", \\\"price\\\": %.5f, \\\"source\\\": \\\"MT5\\\"}\", symbol, action, price);\n    char post[];\n    char result[];\n    string headers = \"Content-Type: application/json\\r\\n\";\n    StringToCharArray(json, post);\n    WebRequest(\"POST\", url, headers, 5000, post, result, headers);\n}\n```\n        "
+  }
+};
+
+        function getMarkdownHtml(markdownText) {
+            // Very simple parser for rendering standard markdown elements inside HTML
+            let html = markdownText
+                .replace(/\n/g, '<br>')
+                .replace(/# (.*?)\n/g, '<h1>$1</h1>\n')
+                .replace(/## (.*?)\n/g, '<h2>$1</h2>\n')
+                .replace(/### (.*?)\n/g, '<h3>$1</h3>\n')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+                .replace(/- (.*?)\n/g, '<li>$1</li>\n')
+                .replace(/\n(\d+)\. (.*?)\n/g, '<br>$1. $2\n');
+            
+            // Clean up list blocks
+            html = html.replace(/(<li>.*?<\/li>\n?)+/g, '<ul>$&</ul>');
+            return html;
+        }
+
+        let currentLang = 'fr';
+        let currentSection = 'manual';
+
+        function renderDocs() {
+            const data = docsData[currentLang];
+            
+            // Update labels
+            document.getElementById('lang-label').innerText = data.language_label;
+            document.getElementById('search-input').placeholder = data.search_placeholder;
+
+            // Render sections
+            document.getElementById('manual').innerHTML = getMarkdownHtml(data.manual_content);
+            document.getElementById('expert').innerHTML = getMarkdownHtml(data.expert_content);
+            document.getElementById('tech').innerHTML = getMarkdownHtml(data.tech_content);
+            document.getElementById('broker').innerHTML = getMarkdownHtml(data.broker_content);
+
+            // Update Navigation Menu Links Text
+            const links = document.getElementById('nav-links').getElementsByTagName('a');
+            links[0].innerText = data.nav.manual;
+            links[1].innerText = data.nav.expert;
+            links[2].innerText = data.nav.tech;
+            links[3].innerText = data.nav.broker;
+        }
+
+        function switchSection(sectionId) {
+            currentSection = sectionId;
+            document.querySelectorAll('.doc-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-links a').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById(sectionId).classList.add('active');
+            document.querySelector(`a[href="#${sectionId}"]`).classList.add('active');
+            
+            document.getElementById('main-content').scrollTop = 0;
+        }
+
+        function switchLanguage(langCode) {
+            currentLang = langCode;
+            renderDocs();
+        }
+
+        // Live Local search
+        document.getElementById('search-input').addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase();
+            const sections = ['manual', 'expert', 'tech', 'broker'];
+            
+            if (!query) {
+                switchSection(currentSection);
+                return;
+            }
+
+            sections.forEach(sec => {
+                const content = document.getElementById(sec).innerText.toLowerCase();
+                const link = document.querySelector(`a[href="#${sec}"]`);
+                if (content.includes(query)) {
+                    link.style.display = 'block';
+                } else {
+                    link.style.display = 'none';
+                }
+            });
+        });
+
+        // Initial execution
+        renderDocs();
+    </script>
+</body>
+</html>
