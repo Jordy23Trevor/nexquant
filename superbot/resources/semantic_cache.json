@@ -1,0 +1,600 @@
+[
+  {
+    "id": "elder_triple_screen",
+    "category": "strategy",
+    "rule": "Triple Screen: weekly trend + daily oscillator + intraday entry.",
+    "author": "Dr. Alexander Elder",
+    "source": "Vivre du Trading",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "elder_2pct_rule",
+    "category": "risk",
+    "rule": "Never risk more than 2% of account equity on a single trade.",
+    "author": "Dr. Alexander Elder",
+    "source": "Vivre du Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cap_risk_2pct",
+        "action": "CAP_RISK_PCT",
+        "modifier": 2.0,
+        "similarity": 0.7555,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "elder_6pct_rule",
+    "category": "risk",
+    "rule": "Stop trading the month if monthly drawdown exceeds 6%.",
+    "author": "Dr. Alexander Elder",
+    "source": "Vivre du Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cut_losses",
+        "action": "ENFORCE_STRICT_SL",
+        "modifier": 1.0,
+        "similarity": 0.4035,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "elder_macd_divergence",
+    "category": "signal",
+    "rule": "MACD divergence from price is a high-probability reversal signal.",
+    "author": "Dr. Alexander Elder",
+    "source": "Vivre du Trading",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "elder_force_index",
+    "category": "signal",
+    "rule": "Force Index (price * volume) confirms trend strength or weakness.",
+    "author": "Dr. Alexander Elder",
+    "source": "Vivre du Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "bonus_ranging",
+        "action": "BONUS_SCORE_RANGING",
+        "modifier": 0.5,
+        "similarity": 0.4091,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "ema_squeeze",
+        "action": "BONUS_EMA_SQUEEZE",
+        "modifier": 0.5,
+        "similarity": 0.4197,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "elder_ema_envelope",
+    "category": "signal",
+    "rule": "Price outside EMA envelope signals overbought/oversold conditions.",
+    "author": "Dr. Alexander Elder",
+    "source": "Vivre du Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "bonus_ranging",
+        "action": "BONUS_SCORE_RANGING",
+        "modifier": 0.5,
+        "similarity": 0.4419,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "ema_squeeze",
+        "action": "BONUS_EMA_SQUEEZE",
+        "modifier": 0.5,
+        "similarity": 0.5896,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "elder_iron_triangle",
+    "category": "risk",
+    "rule": "Iron Triangle: money management → entries → psychology (in that order).",
+    "author": "Dr. Alexander Elder",
+    "source": "Vivre du Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "psychology_discipline",
+        "action": "PSYCHOLOGY_FLAG",
+        "modifier": 0.0,
+        "similarity": 0.4397,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "kabbaj_kelly",
+    "category": "sizing",
+    "rule": "Kelly Fraction: size = edge / odds. Use 25% of Kelly (fractional Kelly) to reduce ruin risk.",
+    "author": "Thami Kabbaj",
+    "source": "L'Art du Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cap_kelly",
+        "action": "CAP_KELLY",
+        "modifier": 0.125,
+        "similarity": 0.5282,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "kabbaj_rr_minimum",
+    "category": "risk",
+    "rule": "Minimum 2:1 reward-to-risk ratio on every trade entry.",
+    "author": "Thami Kabbaj",
+    "source": "L'Art du Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cap_risk_2pct",
+        "action": "CAP_RISK_PCT",
+        "modifier": 2.0,
+        "similarity": 0.6222,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "cut_losses",
+        "action": "ENFORCE_STRICT_SL",
+        "modifier": 1.0,
+        "similarity": 0.4377,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "psychology_discipline",
+        "action": "PSYCHOLOGY_FLAG",
+        "modifier": 0.0,
+        "similarity": 0.5526,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "kabbaj_partial_tp",
+    "category": "exit",
+    "rule": "Take 50% profit at TP1, let the rest run with a trailing stop.",
+    "author": "Thami Kabbaj",
+    "source": "L'Art du Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cut_losses",
+        "action": "ENFORCE_STRICT_SL",
+        "modifier": 1.0,
+        "similarity": 0.4188,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "kabbaj_price_action",
+    "category": "signal",
+    "rule": "Pure price action patterns (pin bars, engulfing) outperform indicators alone.",
+    "author": "Thami Kabbaj",
+    "source": "L'Art du Trading",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "kabbaj_sector_rotation",
+    "category": "strategy",
+    "rule": "Follow capital rotation between sectors to anticipate trend changes.",
+    "author": "Thami Kabbaj",
+    "source": "L'Art du Trading",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "kabbaj_psychology",
+    "category": "psychology",
+    "rule": "Trading is 90% psychology. Discipline and routine create consistent results.",
+    "author": "Thami Kabbaj",
+    "source": "L'Art du Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "bonus_trending",
+        "action": "BONUS_SCORE_TRENDING",
+        "modifier": 0.5,
+        "similarity": 0.4589,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "cut_losses",
+        "action": "ENFORCE_STRICT_SL",
+        "modifier": 1.0,
+        "similarity": 0.4903,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "psychology_discipline",
+        "action": "PSYCHOLOGY_FLAG",
+        "modifier": 0.0,
+        "similarity": 0.7736,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "douglas_probability",
+    "category": "psychology",
+    "rule": "Think in probabilities. Each trade is a unique event within a series.",
+    "author": "Mark Douglas",
+    "source": "Trading in the Zone",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "psychology_discipline",
+        "action": "PSYCHOLOGY_FLAG",
+        "modifier": 0.0,
+        "similarity": 0.5883,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "douglas_edge",
+    "category": "strategy",
+    "rule": "Define your edge clearly. Execute it mechanically without hesitation.",
+    "author": "Mark Douglas",
+    "source": "Trading in the Zone",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "douglas_accept_risk",
+    "category": "psychology",
+    "rule": "Accept the risk BEFORE placing the trade. Eliminate hope and fear.",
+    "author": "Mark Douglas",
+    "source": "Trading in the Zone",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cap_risk_2pct",
+        "action": "CAP_RISK_PCT",
+        "modifier": 2.0,
+        "similarity": 0.4789,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "cut_losses",
+        "action": "ENFORCE_STRICT_SL",
+        "modifier": 1.0,
+        "similarity": 0.414,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "psychology_discipline",
+        "action": "PSYCHOLOGY_FLAG",
+        "modifier": 0.0,
+        "similarity": 0.5281,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "douglas_consistency",
+    "category": "psychology",
+    "rule": "Consistency comes from executing your edge, not from being right.",
+    "author": "Mark Douglas",
+    "source": "Trading in the Zone",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "tharp_sqn",
+    "category": "performance",
+    "rule": "System Quality Number (SQN) > 2.5 is good, > 5 is excellent.",
+    "author": "Van Tharp",
+    "source": "Trade Your Way to Financial Freedom",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "tharp_r_multiple",
+    "category": "risk",
+    "rule": "Express every trade as R-multiples. Expectancy > 0 over a large sample is the goal.",
+    "author": "Van Tharp",
+    "source": "Trade Your Way to Financial Freedom",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "psychology_discipline",
+        "action": "PSYCHOLOGY_FLAG",
+        "modifier": 0.0,
+        "similarity": 0.4418,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "tharp_position_sizing",
+    "category": "sizing",
+    "rule": "Position sizing is the most critical factor in overall performance.",
+    "author": "Van Tharp",
+    "source": "Trade Your Way to Financial Freedom",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cap_kelly",
+        "action": "CAP_KELLY",
+        "modifier": 0.125,
+        "similarity": 0.5188,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "tharp_objectives",
+    "category": "strategy",
+    "rule": "Define your objectives before designing your system.",
+    "author": "Van Tharp",
+    "source": "Trade Your Way to Financial Freedom",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "livermore_trend",
+    "category": "strategy",
+    "rule": "The trend is your friend. Never trade against the primary trend.",
+    "author": "Jesse Livermore",
+    "source": "Reminiscences of a Stock Operator",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "bonus_trending",
+        "action": "BONUS_SCORE_TRENDING",
+        "modifier": 0.5,
+        "similarity": 0.5929,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "cut_losses",
+        "action": "ENFORCE_STRICT_SL",
+        "modifier": 1.0,
+        "similarity": 0.4097,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "psychology_discipline",
+        "action": "PSYCHOLOGY_FLAG",
+        "modifier": 0.0,
+        "similarity": 0.4246,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "livermore_pyramiding",
+    "category": "sizing",
+    "rule": "Add to winning positions (pyramid) only when each unit is profitable.",
+    "author": "Jesse Livermore",
+    "source": "Reminiscences of a Stock Operator",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "bonus_trending",
+        "action": "BONUS_SCORE_TRENDING",
+        "modifier": 0.5,
+        "similarity": 0.4018,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "livermore_patience",
+    "category": "psychology",
+    "rule": "Sitting tight in a winning trade is harder than entering — do it anyway.",
+    "author": "Jesse Livermore",
+    "source": "Reminiscences of a Stock Operator",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "psychology_discipline",
+        "action": "PSYCHOLOGY_FLAG",
+        "modifier": 0.0,
+        "similarity": 0.421,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "livermore_pivot_points",
+    "category": "signal",
+    "rule": "Buy at pivotal points where resistance turns support (breakout).",
+    "author": "Jesse Livermore",
+    "source": "Reminiscences of a Stock Operator",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "bonus_trending",
+        "action": "BONUS_SCORE_TRENDING",
+        "modifier": 0.5,
+        "similarity": 0.5064,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "schwager_risk_first",
+    "category": "risk",
+    "rule": "All great traders focus on risk management, not returns.",
+    "author": "Jack Schwager",
+    "source": "Market Wizards",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cap_risk_2pct",
+        "action": "CAP_RISK_PCT",
+        "modifier": 2.0,
+        "similarity": 0.4755,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "psychology_discipline",
+        "action": "PSYCHOLOGY_FLAG",
+        "modifier": 0.0,
+        "similarity": 0.5613,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "schwager_methodology",
+    "category": "strategy",
+    "rule": "Have a clearly defined methodology. Follow it with discipline.",
+    "author": "Jack Schwager",
+    "source": "Market Wizards",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "schwager_cut_losses",
+    "category": "exit",
+    "rule": "Cut losses short, let profits run. The asymmetry is essential.",
+    "author": "Jack Schwager",
+    "source": "Market Wizards",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cut_losses",
+        "action": "ENFORCE_STRICT_SL",
+        "modifier": 1.0,
+        "similarity": 0.543,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "schwager_market_type",
+    "category": "strategy",
+    "rule": "Adapt your approach to current market type (trending vs ranging).",
+    "author": "Jack Schwager",
+    "source": "Market Wizards",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "bonus_ranging",
+        "action": "BONUS_SCORE_RANGING",
+        "modifier": 0.5,
+        "similarity": 0.4244,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "bonus_trending",
+        "action": "BONUS_SCORE_TRENDING",
+        "modifier": 0.5,
+        "similarity": 0.5196,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "chan_half_kelly",
+    "category": "sizing",
+    "rule": "Use half-Kelly position sizing to prevent overbetting and parameters estimation errors.",
+    "author": "Ernest Chan",
+    "source": "Algorithmic Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "cap_kelly",
+        "action": "CAP_KELLY",
+        "modifier": 0.125,
+        "similarity": 0.7923,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "chan_stationarity",
+    "category": "strategy",
+    "rule": "Verify stationarity of the spread (e.g. using the ADF test) before running mean-reversion strategies.",
+    "author": "Ernest Chan",
+    "source": "Algorithmic Trading",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "bonus_ranging",
+        "action": "BONUS_SCORE_RANGING",
+        "modifier": 0.5,
+        "similarity": 0.583,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "chan_momentum",
+    "category": "strategy",
+    "rule": "Time-series momentum models perform best with lookback periods between 3 to 12 months.",
+    "author": "Ernest Chan",
+    "source": "Algorithmic Trading",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "volman_double_bends",
+    "category": "signal",
+    "rule": "Double bends and triple taps on a 25 EMA suggest high probability breakout setups.",
+    "author": "Bob Volman",
+    "source": "Forex Price Action Scalping",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "ema_squeeze",
+        "action": "BONUS_EMA_SQUEEZE",
+        "modifier": 0.5,
+        "similarity": 0.567,
+        "method": "nlp_embedding"
+      }
+    ]
+  },
+  {
+    "id": "volman_scalp_risk",
+    "category": "risk",
+    "rule": "Scalping setups require fixed stop-loss targets based on recent micro-supports (often 10 pips or less).",
+    "author": "Bob Volman",
+    "source": "Forex Price Action Scalping",
+    "origin": "builtin",
+    "actions": []
+  },
+  {
+    "id": "volman_bb_breakout",
+    "category": "signal",
+    "rule": "Look for price squeeze/build-up right against a major horizontal level before a breakout.",
+    "author": "Bob Volman",
+    "source": "Forex Price Action Scalping",
+    "origin": "builtin",
+    "actions": [
+      {
+        "category": "bonus_trending",
+        "action": "BONUS_SCORE_TRENDING",
+        "modifier": 0.5,
+        "similarity": 0.5653,
+        "method": "nlp_embedding"
+      },
+      {
+        "category": "ema_squeeze",
+        "action": "BONUS_EMA_SQUEEZE",
+        "modifier": 0.5,
+        "similarity": 0.5529,
+        "method": "nlp_embedding"
+      }
+    ]
+  }
+]
