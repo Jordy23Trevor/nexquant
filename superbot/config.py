@@ -12,7 +12,7 @@ load_dotenv(dotenv_path=env_path)
 # =============================================================================
 # BROKER CONFIGURATION
 # =============================================================================
-BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, paper_forex
+BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, paper_forex, oanda, mt5
 
 # =============================================================================
 # BINANCE FUTURES CONFIGURATION
@@ -31,12 +31,17 @@ ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets
 ALPACA_API_VERSION = os.getenv("ALPACA_API_VERSION", "v2")
 
 # =============================================================================
-# PAPER FOREX ENGINE CONFIGURATION
+# FOREX BROKER & SIMULATION CONFIGURATION
 # =============================================================================
-# Using Twelve Data or Alpha Vantage for free forex data
-TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "").strip()
-ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY", "").strip()
-FOREX_DATA_PROVIDER = os.getenv("FOREX_DATA_PROVIDER", "twelvedata").strip()  # twelvedata or alphavantage
+# OANDA CONFIGURATION
+OANDA_API_KEY = os.getenv("OANDA_API_KEY", "").strip()
+OANDA_ACCOUNT_ID = os.getenv("OANDA_ACCOUNT_ID", "").strip()
+OANDA_ENVIRONMENT = os.getenv("OANDA_ENVIRONMENT", "practice").strip().lower()
+
+# METATRADER 5 CONFIGURATION
+MT5_LOGIN = int(os.getenv("MT5_LOGIN", "0"))
+MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
+MT5_SERVER = os.getenv("MT5_SERVER", "")
 
 # Paper trading parameters for forex simulation
 FOREX_DEFAULT_LEVERAGE = int(os.getenv("FOREX_DEFAULT_LEVERAGE", "30"))  # Typical forex leverage
@@ -218,8 +223,9 @@ __all__ = [
     # Alpaca
     "ALPACA_API_KEY", "ALPACA_API_SECRET", "ALPACA_BASE_URL", "ALPACA_API_VERSION",
 
-    # Paper Forex
-    "TWELVEDATA_API_KEY", "ALPHAVANTAGE_API_KEY", "FOREX_DATA_PROVIDER",
+    # Forex Brokers & Simulation
+    "OANDA_API_KEY", "OANDA_ACCOUNT_ID", "OANDA_ENVIRONMENT",
+    "MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER",
     "FOREX_DEFAULT_LEVERAGE", "FOREX_MARGIN_CALL_LEVEL", "FOREX_STOP_OUT_LEVEL",
 
     # Trading

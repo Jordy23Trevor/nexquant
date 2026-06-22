@@ -18,7 +18,6 @@ except ImportError:
 
 from superbot.broker.base import Broker
 from superbot.config import (
-    TWELVEDATA_API_KEY, ALPHAVANTAGE_API_KEY, FOREX_DATA_PROVIDER,
     FOREX_DEFAULT_LEVERAGE, FOREX_MARGIN_CALL_LEVEL, FOREX_STOP_OUT_LEVEL,
     MIN_POSITION_SIZE, MAX_POSITION_SIZE, RISK_PCT
 )
@@ -54,23 +53,9 @@ class PaperForexClient(Broker):
         return "forex"
 
     def _init_data_provider(self):
-        """Initialise le fournisseur de données (Twelve Data ou Alpha Vantage)."""
-        self.data_provider = FOREX_DATA_PROVIDER.lower()
-        self.twelve_data_key = TWELVEDATA_API_KEY
-        self.alpha_vantage_key = ALPHAVANTAGE_API_KEY
-
-        if self.data_provider == "twelvedata" and not self.twelve_data_key:
-            log.warning("️  TWELVEDATA_API_KEY non configuré, passage à Alpha Vantage si disponible")
-            self.data_provider = "alphavantage" if self.alpha_vantage_key else "simulation"
-        elif self.data_provider == "alphavantage" and not self.alpha_vantage_key:
-            log.warning("️  ALPHAVANTAGE_API_KEY non configuré, passage à Twelve Data si disponible")
-            self.data_provider = "twelvedata" if self.twelve_data_key else "simulation"
-
-        if not self.twelve_data_key and not self.alpha_vantage_key:
-            log.warning("️  Aucune clé API forex configurée, utilisation du mode simulation pur")
-            self.data_provider = "simulation"
-
-        log.info(f"Fournisseur de données forex : {self.data_provider}")
+        """Initialise le fournisseur de données (Yahoo Finance)."""
+        self.data_provider = "yahoo"
+        log.info("Fournisseur de données forex : Yahoo Finance (gratuit, sans clé)")
 
     def _initialize_symbols(self):
         """Initialise la liste des symboles forex soutenus avec leurs caractéristiques."""
@@ -115,72 +100,36 @@ class PaperForexClient(Broker):
         else:
             return clean
 
-    def _fetch_price_twelvedata(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Récupère le prix en temps réel depuis Twelve Data."""
-        if not self.twelve_data_key:
-            return None
-
+    def _fetch_price_yahoo(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Récupère le prix en temps réel depuis Yahoo Finance (sans clé API)."""
         normalized = self._normalize_symbol(symbol)
-        symbol_td = normalized.replace("/", "")
+        # EUR/USD -> EURUSD=X
+        symbol_yh = normalized.replace("/", "") + "=X"
 
-        url = "https://api.twelvedata.com/price"
-        params = {
-            "symbol": symbol_td,
-            "apikey": self.twelve_data_key
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol_yh}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
         }
-
         try:
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                if "price" in data:
-                    price = float(data["price"])
-                    return {
-                        "price": price,
-                        "timestamp": datetime.now(timezone.utc),
-                        "bid": price - 0.00005,
-                        "ask": price + 0.00005,
-                    }
+                result = data.get("chart", {}).get("result", [])
+                if result:
+                    meta = result[0].get("meta", {})
+                    price = meta.get("regularMarketPrice")
+                    if price is not None:
+                        price = float(price)
+                        return {
+                            "price": price,
+                            "timestamp": datetime.now(timezone.utc),
+                            "bid": price - 0.00005,
+                            "ask": price + 0.00005,
+                        }
             else:
-                log.warning(f"️  Twelve Data API error for {symbol}: {response.status_code}")
+                log.warning(f"⚠️ Yahoo Finance API error for {symbol}: {response.status_code}")
         except Exception as e:
-            log.warning(f"️  Failed to fetch price from Twelve Data for {symbol}: {e}")
-
-        return None
-
-    def _fetch_price_alpha_vantage(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Récupère le prix en temps réel depuis Alpha Vantage."""
-        if not self.alpha_vantage_key:
-            return None
-
-        normalized = self._normalize_symbol(symbol)
-        symbol_av = normalized.replace("/", "")
-
-        url = "https://www.alphavantage.co/query"
-        params = {
-            "function": "CURRENCY_EXCHANGE_RATE",
-            "from_currency": symbol_av[:3],
-            "to_currency": symbol_av[3:],
-            "apikey": self.alpha_vantage_key
-        }
-
-        try:
-            response = requests.get(url, params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if "Realtime Currency Exchange Rate" in data:
-                    rate_info = data["Realtime Currency Exchange Rate"]
-                    price = float(rate_info["5. Exchange Rate"])
-                    return {
-                        "price": price,
-                        "timestamp": datetime.now(timezone.utc),
-                        "bid": price - 0.00005,
-                        "ask": price + 0.00005,
-                    }
-            else:
-                log.warning(f"️  Alpha Vantage API error for {symbol}: {response.status_code}")
-        except Exception as e:
-            log.warning(f"️  Failed to fetch price from Alpha Vantage for {symbol}: {e}")
+            log.warning(f"⚠️ Failed to fetch price from Yahoo Finance for {symbol}: {e}")
 
         return None
 
@@ -232,10 +181,8 @@ class PaperForexClient(Broker):
                 return self._price_cache[normalized]["price"]
 
         price_data = None
-        if self.data_provider == "twelvedata":
-            price_data = self._fetch_price_twelvedata(symbol)
-        elif self.data_provider == "alphavantage":
-            price_data = self._fetch_price_alpha_vantage(symbol)
+        if self.data_provider == "yahoo":
+            price_data = self._fetch_price_yahoo(symbol)
 
         if price_data is None:
             price_data = self._fetch_price_simulation(symbol)
@@ -629,12 +576,10 @@ class PaperForexClient(Broker):
         """
         normalized = self._normalize_symbol(symbol)
         
-        # Essayer de récupérer de vraies données si clés configurées
+        # Essayer de récupérer de vraies données de Yahoo Finance
         df = None
-        if self.data_provider == "twelvedata" and self.twelve_data_key:
-            df = self._fetch_candles_twelvedata(normalized, timeframe, limit)
-        elif self.data_provider == "alphavantage" and self.alpha_vantage_key:
-            df = self._fetch_candles_alphavantage(normalized, timeframe, limit)
+        if self.data_provider == "yahoo":
+            df = self._fetch_candles_yahoo(normalized, timeframe, limit)
             
         if df is not None and not df.empty:
             return df
@@ -642,106 +587,100 @@ class PaperForexClient(Broker):
         # Sinon, générer des données simulées réalistes
         return self._generate_simulated_candles(normalized, timeframe, limit)
 
-    def _fetch_candles_twelvedata(self, symbol: str, timeframe: str, limit: int) -> Optional[pd.DataFrame]:
-        if not self.twelve_data_key:
-            return None
-        
-        # Adapter le timeframe pour Twelve Data
+    def _fetch_candles_yahoo(self, symbol: str, timeframe: str, limit: int) -> Optional[pd.DataFrame]:
+        """Télécharge les bougies de Yahoo Finance."""
+        normalized = self._normalize_symbol(symbol)
+        symbol_yh = normalized.replace("/", "") + "=X"
+
+        # Traduire le timeframe pour Yahoo Finance
         tf_map = {
-            "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min",
-            "1h": "1h", "2h": "2h", "4h": "4h", "1d": "1day", "1w": "1week"
+            "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+            "1h": "1h", "2h": "1h", "4h": "1h", "1d": "1d", "1w": "1wk"
         }
         interval = tf_map.get(timeframe, "1h")
         
-        url = "https://api.twelvedata.com/time_series"
-        params = {
-            "symbol": symbol,
-            "interval": interval,
-            "outputsize": limit,
-            "apikey": self.twelve_data_key
-        }
-        
-        try:
-            response = requests.get(url, params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if "values" in data:
-                    # Convertir en DataFrame
-                    df_data = data["values"]
-                    df = pd.DataFrame(df_data)
-                    df["datetime"] = pd.to_datetime(df["datetime"])
-                    df = df.set_index("datetime")
-                    df = df.astype(float)
-                    df = df.rename(columns={
-                        "open": "open", "high": "high", "low": "low", "close": "close", "volume": "volume"
-                    })
-                    # S'assurer que le volume existe
-                    if "volume" not in df.columns:
-                        df["volume"] = 1.0
-                    df = df.sort_index()
-                    return df[['open', 'high', 'low', 'close', 'volume']]
-            else:
-                log.warning(f"Twelve Data error fetching candles: {response.status_code}")
-        except Exception as e:
-            log.warning(f"Failed to fetch candles from Twelve Data: {e}")
-        return None
-
-    def _fetch_candles_alphavantage(self, symbol: str, timeframe: str, limit: int) -> Optional[pd.DataFrame]:
-        if not self.alpha_vantage_key:
-            return None
-            
-        parts = symbol.split("/")
-        if len(parts) != 2:
-            return None
-        from_symbol, to_symbol = parts[0], parts[1]
-        
-        url = "https://www.alphavantage.co/query"
-        
-        if timeframe in ["1d", "1w"]:
-            params = {
-                "function": "FX_DAILY",
-                "from_symbol": from_symbol,
-                "to_symbol": to_symbol,
-                "outputsize": "full" if limit > 100 else "compact",
-                "apikey": self.alpha_vantage_key
-            }
-            key_data = "Time Series FX (Daily)"
+        # Déterminer la période (range) nécessaire en fonction de limit et interval
+        if interval == "1m":
+            period = "1d"
+        elif interval == "5m":
+            period = "5d"
+        elif interval in ["15m", "30m"]:
+            period = "1mo"
+        elif interval == "1h":
+            period = "3mo" if limit > 500 else "1mo"
+        elif interval == "1d":
+            period = "1y" if limit > 250 else "6mo"
+        elif interval == "1wk":
+            period = "5y" if limit > 250 else "2y"
         else:
-            tf_map = {
-                "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min",
-                "1h": "60min", "2h": "60min", "4h": "60min"
-            }
-            interval = tf_map.get(timeframe, "60min")
-            params = {
-                "function": "FX_INTRADAY",
-                "from_symbol": from_symbol,
-                "to_symbol": to_symbol,
-                "interval": interval,
-                "outputsize": "full" if limit > 100 else "compact",
-                "apikey": self.alpha_vantage_key
-            }
-            key_data = f"Time Series FX ({interval})"
-            
+            period = "1mo"
+
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol_yh}"
+        params = {
+            "interval": interval,
+            "range": period
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        }
         try:
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, params=params, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                if key_data in data:
-                    ts_data = data[key_data]
-                    df = pd.DataFrame.from_dict(ts_data, orient="index")
-                    df.index = pd.to_datetime(df.index)
-                    df = df.rename(columns={
-                        col: col.split(". ")[1] for col in df.columns if ". " in col
-                    })
-                    df = df.astype(float)
-                    if "volume" not in df.columns:
-                        df["volume"] = 1.0
-                    df = df.sort_index()
-                    return df.tail(limit)[['open', 'high', 'low', 'close', 'volume']]
+                result = data.get("chart", {}).get("result", [])
+                if result:
+                    candles_data = result[0]
+                    timestamps = candles_data.get("timestamp", [])
+                    indicators = candles_data.get("indicators", {}).get("quote", [{}])[0]
+                    
+                    opens = indicators.get("open", [])
+                    highs = indicators.get("high", [])
+                    lows = indicators.get("low", [])
+                    closes = indicators.get("close", [])
+                    volumes = indicators.get("volume", [1.0] * len(timestamps))
+                    
+                    if not timestamps or not closes:
+                        return None
+                        
+                    # Filtrer les valeurs None/NaN
+                    df_list = []
+                    for i in range(len(timestamps)):
+                        t = datetime.fromtimestamp(timestamps[i], timezone.utc)
+                        o = opens[i]
+                        h = highs[i]
+                        l = lows[i]
+                        c = closes[i]
+                        v = volumes[i] if volumes[i] is not None else 1.0
+                        if None not in [o, h, l, c]:
+                            df_list.append({
+                                "timestamp": t,
+                                "open": float(o),
+                                "high": float(h),
+                                "low": float(l),
+                                "close": float(c),
+                                "volume": float(v)
+                            })
+                            
+                    df = pd.DataFrame(df_list)
+                    if not df.empty:
+                        df = df.set_index("timestamp")
+                        df = df.sort_index()
+                        
+                        # Si l'utilisateur demande du 2h ou 4h, on peut resampler
+                        if timeframe == "2h":
+                            df = df.resample("2h").agg({
+                                "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"
+                            }).dropna()
+                        elif timeframe == "4h":
+                            df = df.resample("4h").agg({
+                                "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"
+                            }).dropna()
+                            
+                        return df.tail(limit)
             else:
-                log.warning(f"Alpha Vantage error fetching candles: {response.status_code}")
+                log.warning(f"⚠️ Yahoo Finance candle error for {symbol}: {response.status_code}")
         except Exception as e:
-            log.warning(f"Failed to fetch candles from Alpha Vantage: {e}")
+            log.warning(f"⚠️ Failed to fetch candles from Yahoo Finance for {symbol}: {e}")
         return None
 
     def _generate_simulated_candles(self, symbol: str, timeframe: str, limit: int = 500) -> pd.DataFrame:
