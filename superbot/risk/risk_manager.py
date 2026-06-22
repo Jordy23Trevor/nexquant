@@ -382,7 +382,7 @@ class RiskManager:
             current_price: Prix actuel du marché
         """
         # Vérifier si le trailing stop est activé pour cette position
-        if not position.get('trailing_stop_enabled', False):
+        if not position.get('trailing_stop_enabled', True):
             return
 
         try:

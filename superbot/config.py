@@ -68,7 +68,7 @@ EMA_FAST = int(os.getenv("EMA_FAST", "9"))
 EMA_SLOW = int(os.getenv("EMA_SLOW", "21"))
 EMA_TREND = int(os.getenv("EMA_TREND", "200"))  # Long-term trend
 HTF_EMA = int(os.getenv("HTF_EMA", "50"))  # Higher timeframe EMA
-D1_EMA = int(os.getenv("D1_EMA", "50"))  # Daily EMA
+D1_EMA = int(os.getenv("D1_EMA", "200"))  # Daily EMA (changed from 50 to avoid duplicate with HTF_EMA)
 W1_EMA = int(os.getenv("W1_EMA", "20"))  # Weekly EMA (Elder)
 
 # RSI
@@ -166,7 +166,7 @@ FEAR_GREED_EXTREME_GREED = int(os.getenv("FEAR_GREED_EXTREME_GREED", "80"))  # >
 # =============================================================================
 # WEBHOOK CONFIGURATION (for TradingView alerts)
 # =============================================================================
-WEBHOOK_ENABLED = os.getenv("WEBHOOK_ENABLED", "false").lower() == "true"
+WEBHOOK_ENABLED = (os.getenv("WEBHOOK_ENABLED") or os.getenv("ENABLE_WEBHOOK") or "false").lower() == "true"
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "change_this_to_a_strong_secret")
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
 WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "5000"))

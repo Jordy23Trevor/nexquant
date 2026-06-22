@@ -38,7 +38,7 @@ sys.stdout = SafeStreamWrapper(sys.stdout)
 sys.stderr = SafeStreamWrapper(sys.stderr)
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import threading
 import traceback
 
@@ -46,6 +46,7 @@ import traceback
 from superbot.config import (
     BROKER_TYPE, INSTRUMENTS, GRANULARITY, ENABLE_PAPER_TRADING,
     LOG_LEVEL, ENABLE_DASHBOARD, WEBHOOK_ENABLED,
+    WEBHOOK_SECRET, WEBHOOK_HOST, WEBHOOK_PORT,
     
     # Risk Management
     RISK_PCT, MAX_DAILY_LOSS_PCT, MAX_MONTHLY_LOSS_PCT, MAX_OPEN_POSITIONS,
@@ -205,6 +206,29 @@ class SuperBot:
                 log.info(f"Actifs de nouvelles — défauts broker ({BROKER_TYPE}) : {self.news_assets}")
 
             # 2. Créer le gestionnaire de risques
+            asset_type = self.broker.get_asset_type()
+            default_min_pos = MIN_POSITION_SIZE
+            default_max_pos = MAX_POSITION_SIZE
+            
+            if asset_type == "forex":
+                # Pour le forex, les tailles sont en unités de devise (ex: 1000 EUR)
+                default_min_pos = 1.0
+                default_max_pos = 10000000.0
+            elif asset_type == "stock":
+                # Pour les actions, les tailles sont en actions (ex: 1 action SPY = ~500 USD)
+                default_min_pos = 0.001
+                default_max_pos = 100000.0
+            elif asset_type == "crypto":
+                # Pour la crypto, les tailles sont en jetons (ex: 0.001 BTC, 0.1 SOL)
+                default_min_pos = 0.001
+                default_max_pos = 1000000.0
+
+            # Permettre à l'utilisateur de surcharger via .env s'ils ont explicitement configuré ces variables
+            env_min_pos = os.getenv("MIN_POSITION_SIZE")
+            env_max_pos = os.getenv("MAX_POSITION_SIZE")
+            actual_min_pos = float(env_min_pos) if env_min_pos else default_min_pos
+            actual_max_pos = float(env_max_pos) if env_max_pos else default_max_pos
+
             self.risk_manager = RiskManager({
                 'RISK_PCT': RISK_PCT,
                 'MAX_DAILY_LOSS_PCT': MAX_DAILY_LOSS_PCT,
@@ -216,8 +240,8 @@ class SuperBot:
                 'TP_ATR_MULT': TP_ATR_MULT,
                 'TRAIL_ATR_MULT': TRAIL_ATR_MULT,
                 'BE_ATR_MULT': BE_ATR_MULT,
-                'MIN_POSITION_SIZE': MIN_POSITION_SIZE,
-                'MAX_POSITION_SIZE': MAX_POSITION_SIZE
+                'MIN_POSITION_SIZE': actual_min_pos,
+                'MAX_POSITION_SIZE': actual_max_pos
             })
             log.info("Gestionnaire de risques initialisé")
 
@@ -388,6 +412,21 @@ class SuperBot:
             except Exception as e:
                 log.error(f"Erreur lors du démarrage du dashboard : {e}")
 
+        # Démarrer le webhook server si activé
+        if WEBHOOK_ENABLED:
+            try:
+                from superbot.webhook.server import WebhookServer
+                self.webhook_server = WebhookServer(
+                    host=WEBHOOK_HOST,
+                    port=WEBHOOK_PORT,
+                    webhook_secret=WEBHOOK_SECRET,
+                    callback_func=self._process_webhook_signal
+                )
+                self.webhook_server.start()
+                log.info(f"Serveur Webhook démarré sur {WEBHOOK_HOST}:{WEBHOOK_PORT}")
+            except Exception as e:
+                log.error(f"Erreur lors du démarrage du serveur Webhook : {e}")
+
         # Démarrer la boucle principale dans un thread séparé
         self.main_thread = threading.Thread(target=self._main_loop, daemon=True)
         self.main_thread.start()
@@ -423,6 +462,14 @@ class SuperBot:
                 log.info("Dashboard arrêté")
             except Exception as e:
                 log.error(f"Erreur lors de l'arrêt du dashboard : {e}")
+
+        # Arrêter le serveur webhook
+        if hasattr(self, 'webhook_server') and self.webhook_server:
+            try:
+                self.webhook_server.stop()
+                log.info("Serveur Webhook arrêté")
+            except Exception as e:
+                log.error(f"Erreur lors de l'arrêt du serveur Webhook : {e}")
 
         # Attendre la fin du thread principal
         if hasattr(self, 'main_thread') and self.main_thread.is_alive():
@@ -719,6 +766,153 @@ class SuperBot:
 
         log.debug(f"Position suivie mise à jour pour {symbol} : {position_side} {size}")
 
+    def _process_webhook_signal(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Traite un signal de trading reçu via Webhook (ex: TradingView).
+        """
+        try:
+            log.info(f"Traitement du signal Webhook : {data}")
+
+            # Vérifier le secret si configuré
+            secret = data.get('secret')
+            if WEBHOOK_SECRET and secret != WEBHOOK_SECRET:
+                log.warning("Secret de webhook invalide dans le payload")
+                return {"status": "error", "reason": "invalid_secret"}
+
+            # Adapter le payload pour TradingView (ticker -> symbol, position/strategy_position -> action, close -> price)
+            symbol = data.get('symbol') or data.get('ticker')
+            action = data.get('action') or data.get('strategy_position') or data.get('position')
+            if action:
+                action = str(action).lower()
+            else:
+                action = ''
+                
+            price = data.get('price') or data.get('close')
+            if price is not None:
+                try:
+                    price = float(price)
+                except (ValueError, TypeError):
+                    price = None
+            
+            if not symbol or not action:
+                log.warning(f"Champs manquants ou invalides dans le webhook : symbol={symbol}, action={action}")
+                return {"status": "error", "reason": "missing_fields"}
+
+            # Normaliser le symbole pour le broker
+            symbol = self.broker.normalize_symbol(symbol)
+
+            # 1. Action de fermeture / sortie
+            if action in ['exit', 'close', 'sell_all', 'buy_all']:
+                log.info(f"Demande de fermeture de position reçue via webhook pour {symbol}")
+                success = self.broker.close_position(symbol, reason="Webhook exit request")
+                if success:
+                    # Mettre à jour l'état local
+                    if symbol in self.positions:
+                        del self.positions[symbol]
+                    if self.risk_manager and symbol in self.risk_manager.open_positions:
+                        del self.risk_manager.open_positions[symbol]
+                    return {"status": "success", "action": "closed", "symbol": symbol}
+                else:
+                    return {"status": "error", "reason": "failed_to_close", "symbol": symbol}
+
+            # 2. Action d'entrée (buy/sell)
+            if action not in ['buy', 'sell']:
+                return {"status": "error", "reason": f"unknown_action: {action}"}
+
+            # Vérifier les nouvelles si activé
+            should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
+            if should_avoid:
+                log.info(f"Signal webhook évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
+                return {"status": "skipped", "reason": "news_avoidance", "news_event": str(news_event) if news_event else None}
+
+            # Récupérer les prix SL/TP optionnels ou les calculer
+            sl_price = float(data.get('sl', 0))
+            tp_price = float(data.get('tp', 0))
+
+            # Si non fournis dans le webhook, essayer de les calculer avec l'ATR si on a des données de marché
+            if sl_price == 0 or tp_price == 0:
+                df = self._fetch_market_data(symbol)
+                if df is not None and not df.empty:
+                    df_with_indicators = self.technical_indicators.calculate_all_indicators(df.copy())
+                    atr_value = df_with_indicators.iloc[-1].get('atr', 0)
+                    if atr_value > 0:
+                        position_side = "LONG" if action == 'buy' else "SHORT"
+                        sl_price, tp_price = self.risk_manager.calculate_sl_tp_levels(
+                            price or self.broker.get_current_price(symbol), atr_value, position_side
+                        )
+                
+                # Fallback fixe si toujours pas calculable
+                if sl_price == 0 or tp_price == 0:
+                    entry = price or self.broker.get_current_price(symbol)
+                    risk_pct = RISK_PCT / 100.0
+                    if action == 'buy':
+                        sl_price = entry * (1 - risk_pct)
+                        tp_price = entry * (1 + risk_pct * 2)
+                    else:
+                        sl_price = entry * (1 + risk_pct)
+                        tp_price = entry * (1 - risk_pct * 2)
+
+            # Calculer la taille de position
+            account_balance = self.broker.get_balance()
+            entry_price = price or self.broker.get_current_price(symbol)
+            
+            position_size, size_details = self.risk_manager.calculate_position_size(
+                account_balance=account_balance,
+                entry_price=entry_price,
+                stop_loss=sl_price,
+                symbol=symbol,
+                sentiment_factor=self.news_manager.get_risk_factor() if self.news_manager else 1.0
+            )
+
+            if position_size <= 0:
+                log.warning(f"Taille de position calculée nulle pour {symbol}")
+                return {"status": "error", "reason": "zero_position_size"}
+
+            # Vérifier les limites de risque globales
+            if not self.risk_manager._can_take_new_trade(account_balance):
+                log.info(f"Limites de risque atteintes, pas d'exécution de webhook pour {symbol}")
+                return {"status": "skipped", "reason": "risk_limit_reached"}
+
+            # Exécuter l'ordre
+            log.info(f"Exécution du trade webhook : {action.upper()} {position_size:.6f} {symbol} @ {entry_price:.4f} | SL: {sl_price:.4f} | TP: {tp_price:.4f}")
+            order_result = self.broker.place_order(
+                symbol=symbol,
+                side=action,
+                amount=position_size,
+                sl=sl_price,
+                tp=tp_price,
+                comment=f"TradingView webhook signal - {action.upper()}"
+            )
+
+            if order_result:
+                self.stats['trades_executed'] += 1
+                
+                # Enregistrer le trade pour le suivi du risque
+                trade_record = {
+                    'symbol': symbol,
+                    'side': action,
+                    'entry_price': entry_price,
+                    'position_size': position_size,
+                    'stop_loss': sl_price,
+                    'take_profit': tp_price,
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'signal_score': data.get('strength', 1.0) * 10,
+                    'market_regime': 'Webhook Alert'
+                }
+                self.risk_manager.record_trade(trade_record)
+
+                # Mettre à jour la position suivie
+                self._update_position_tracking(symbol, action, position_size, entry_price)
+                return {"status": "success", "action": action, "symbol": symbol, "size": position_size, "entry": entry_price}
+            else:
+                log.error(f"Échec de l'exécution du trade webhook pour {symbol}")
+                return {"status": "error", "reason": "order_placement_failed"}
+
+        except Exception as e:
+            log.error(f"Erreur inattendue dans _process_webhook_signal : {e}")
+            log.debug(traceback.format_exc())
+            return {"status": "error", "reason": str(e)}
+
     def _update_dashboard(self):
         """
         Met à jour le dashboard avec les données actuelles.
@@ -731,6 +925,7 @@ class SuperBot:
             dashboard_data = {
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'broker_type': BROKER_TYPE,
+                'asset_type': self.broker.get_asset_type(),
                 'stats': {
                     **self.stats.copy(),
                     'running': self.running,

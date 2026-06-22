@@ -41,6 +41,7 @@ class PaperForexClient(Broker):
         self._symbol_info: Dict[str, Dict] = {}
         self._price_cache: Dict[str, Dict] = {}
         self._last_update: Dict[str, datetime] = {}
+        self._balance = 10000.0
         self._initialize_symbols()
 
     def get_default_instruments(self) -> List[str]:
@@ -246,7 +247,7 @@ class PaperForexClient(Broker):
 
     def get_balance(self) -> float:
         """Solde disponible en devise de base du compte de simulation."""
-        return 10000.0
+        return self._balance
 
     def get_account_summary(self) -> Dict[str, Any]:
         """Résumé complet du compte de simulation."""
@@ -289,46 +290,89 @@ class PaperForexClient(Broker):
         }
 
     def get_position(self, symbol: str) -> Dict[str, Any]:
-        """Retourne la position ouverte sur un symbole."""
+        """Retourne la position ouverte sur un symbole, avec vérification des SL/TP."""
         normalized = self._normalize_symbol(symbol)
-        position = self._positions.get(normalized, {
-            "side": None,
-            "size": 0.0,
-            "entry_price": 0.0,
-            "mark_price": 0.0,
-            "unrealized_pnl": 0.0,
-            "liquidation_price": None,
-            "margin_used": 0.0,
-        })
+        position = self._positions.get(normalized, {})
 
-        if position["size"] != 0:
-            current_price = self.get_current_price(symbol)
-            position["mark_price"] = current_price
+        if not position or position.get("size", 0.0) == 0.0:
+            return {}
 
-            if position["side"] == "LONG":
-                position["unrealized_pnl"] = (current_price - position["entry_price"]) * abs(position["size"])
-            elif position["side"] == "SHORT":
-                position["unrealized_pnl"] = (position["entry_price"] - current_price) * abs(position["size"])
+        current_price = self.get_current_price(symbol)
+        position["mark_price"] = current_price
 
-            symbol_info = self._get_symbol_info(symbol)
-            leverage = symbol_info["leverage"]
-            notional = abs(position["size"] * position["entry_price"])
-            position["margin_used"] = notional / leverage
+        # Calculer le P&L non réalisé
+        side = position["side"]
+        size = position["size"]
+        entry_price = position["entry_price"]
 
-            if position["side"] == "LONG":
-                price_drop = position["margin_used"] * leverage / abs(position["size"])
-                position["liquidation_price"] = position["entry_price"] - price_drop
-            elif position["side"] == "SHORT":
-                price_rise = position["margin_used"] * leverage / abs(position["size"])
-                position["liquidation_price"] = position["entry_price"] + price_rise
+        if side == "LONG":
+            position["unrealized_pnl"] = (current_price - entry_price) * size
+        else:
+            position["unrealized_pnl"] = (entry_price - current_price) * size
+
+        # Calculer la marge utilisée et le prix de liquidation
+        symbol_info = self._get_symbol_info(symbol)
+        leverage = symbol_info["leverage"]
+        notional = abs(size * entry_price)
+        position["margin_used"] = notional / leverage
+
+        if side == "LONG":
+            price_drop = position["margin_used"] * leverage / size
+            position["liquidation_price"] = entry_price - price_drop
+        else:
+            price_rise = position["margin_used"] * leverage / size
+            position["liquidation_price"] = entry_price + price_rise
+
+        # Vérifier si SL, TP ou Liquidation a été touché!
+        sl = position.get("stop_loss", 0.0)
+        tp = position.get("take_profit", 0.0)
+        liq = position.get("liquidation_price")
+
+        hit = False
+        reason = ""
+
+        if side == "LONG":
+            if sl > 0.0 and current_price <= sl:
+                hit = True
+                reason = f"Stop Loss touché à {current_price:.5f} (SL: {sl:.5f})"
+            elif tp > 0.0 and current_price >= tp:
+                hit = True
+                reason = f"Take Profit touché à {current_price:.5f} (TP: {tp:.5f})"
+            elif liq and current_price <= liq:
+                hit = True
+                reason = f"Liquidation touchée à {current_price:.5f} (Liq: {liq:.5f})"
+        else: # SHORT
+            if sl > 0.0 and current_price >= sl:
+                hit = True
+                reason = f"Stop Loss touché à {current_price:.5f} (SL: {sl:.5f})"
+            elif tp > 0.0 and current_price <= tp:
+                hit = True
+                reason = f"Take Profit touché à {current_price:.5f} (TP: {tp:.5f})"
+            elif liq and current_price >= liq:
+                hit = True
+                reason = f"Liquidation touchée à {current_price:.5f} (Liq: {liq:.5f})"
+
+        if hit:
+            log.info(f"⚡ Exécution automatique d'ordre de sortie sur {symbol}: {reason}")
+            self.close_position(symbol, reason=reason)
+            return {}
 
         return position
+
+    def get_open_positions(self) -> Dict[str, Dict[str, Any]]:
+        """Retourne toutes les positions ouvertes actives."""
+        active = {}
+        for symbol in list(self._positions.keys()):
+            pos = self.get_position(symbol)
+            if pos and pos.get("size", 0.0) > 0.0:
+                active[symbol] = pos
+        return active
 
     def close_position(self, symbol: str, reason: str = "") -> bool:
         """Ferme la position ouverte au prix du marché."""
         normalized = self._normalize_symbol(symbol)
-        pos = self.get_position(symbol)
-        if not pos or pos["size"] == 0:
+        pos = self._positions.get(normalized, {})
+        if not pos or pos.get("size", 0.0) == 0.0:
             log.info(f"ℹ️  Aucune position à fermer sur {symbol}")
             return False
 
@@ -347,6 +391,9 @@ class PaperForexClient(Broker):
         else:
             pnl = (pos["entry_price"] - close_price) * size
 
+        # Mettre à jour le solde
+        self._balance += pnl
+
         log.info(
             f"Position {side} fermée sur {symbol} | "
             f"Taille: {size:.4f} | Entry: {pos['entry_price']:.4f} | "
@@ -361,6 +408,8 @@ class PaperForexClient(Broker):
             "unrealized_pnl": 0.0,
             "liquidation_price": None,
             "margin_used": 0.0,
+            "stop_loss": 0.0,
+            "take_profit": 0.0
         }
 
         self._cancel_related_orders(normalized)
@@ -384,7 +433,7 @@ class PaperForexClient(Broker):
 
         target_symbol = symbol if symbol else "EUR/USD"
         min_size = self.get_min_order_size(symbol=target_symbol)
-        max_size = self.get_step_size(symbol=target_symbol) * 100000
+        max_size = self.get_max_order_size(symbol=target_symbol)
 
         final_size = max(min(leveraged_size, max_size), min_size)
         return final_size
@@ -429,14 +478,16 @@ class PaperForexClient(Broker):
                         "unrealized_pnl": 0.0,
                         "liquidation_price": None,
                         "margin_used": 0.0,
+                        "stop_loss": sl if sl is not None else 0.0,
+                        "take_profit": tp if tp is not None else 0.0,
                     }
                     log.info(
                         f"{'▲' if side == 'buy' else '▼'} {side} {amount} {symbol} @ {entry_price:.4f} | "
                         f"SL: {sl if sl is not None else 'None'} | TP: {tp if tp is not None else 'None'} | {comment}"
                     )
                 else:
-                    pos = self.get_position(symbol)
-                    if not pos or pos["size"] == 0:
+                    pos = self._positions.get(normalized, {})
+                    if not pos or pos.get("size", 0.0) == 0:
                         log.warning(f"️  Aucune position à réduire sur {symbol}")
                         return False
 
@@ -462,6 +513,8 @@ class PaperForexClient(Broker):
                         else:
                             pnl = (pos["entry_price"] - close_price) * amount
 
+                        self._balance += pnl
+
                         log.info(
                             f"Position {current_side} réduite à zéro sur {symbol} | "
                             f"Taille fermée: {amount:.4f} | Entry: {pos['entry_price']:.4f} | "
@@ -476,6 +529,8 @@ class PaperForexClient(Broker):
                             "unrealized_pnl": 0.0,
                             "liquidation_price": None,
                             "margin_used": 0.0,
+                            "stop_loss": 0.0,
+                            "take_profit": 0.0,
                         }
                     else:
                         if current_side == "LONG":
@@ -483,6 +538,7 @@ class PaperForexClient(Broker):
                         else:
                             pnl = (pos["entry_price"] - entry_price) * amount
 
+                        self._balance += pnl
                         self._positions[normalized]["size"] = remaining_size
                         log.info(
                             f"Position {current_side} réduite sur {symbol} | "
@@ -515,20 +571,23 @@ class PaperForexClient(Broker):
         Modifie le stop loss et take profit d'une position existante.
         """
         normalized = self._normalize_symbol(symbol)
-        pos = self.get_position(symbol)
-        if not pos or pos["size"] == 0:
+        pos = self._positions.get(normalized, {})
+        if not pos or pos.get("size", 0.0) == 0.0:
             log.warning(f"️ modify_sl_tp : Aucune position ouverte sur {symbol}")
             return False
 
-        sl = round(sl, 5) if sl > 0 else None
-        tp = round(tp, 5) if tp > 0 else None
+        sl = round(sl, 5) if sl > 0 else 0.0
+        tp = round(tp, 5) if tp > 0 else 0.0
 
         def run():
             try:
-                if sl is not None:
-                    log.info(f"️  SL mis à jour pour {symbol} à {sl:.4f}")
-                if tp is not None:
-                    log.info(f"️  TP mis à jour pour {symbol} à {tp:.4f}")
+                if normalized in self._positions:
+                    if sl > 0:
+                        self._positions[normalized]["stop_loss"] = sl
+                        log.info(f"️  SL mis à jour pour {symbol} à {sl:.4f}")
+                    if tp > 0:
+                        self._positions[normalized]["take_profit"] = tp
+                        log.info(f"️  TP mis à jour pour {symbol} à {tp:.4f}")
                 return True
             except Exception as e:
                 log.error(f"Échec de modification SL/TP sur {symbol} : {e}")
@@ -562,7 +621,7 @@ class PaperForexClient(Broker):
 
     def get_max_order_size(self, symbol: str) -> float:
         """Retourne la taille maximale d'ordre autorisée pour un instrument."""
-        return 100.0
+        return 10000000.0
 
     def fetch_candles(self, symbol: str, timeframe: str, limit: int = 500) -> pd.DataFrame:
         """

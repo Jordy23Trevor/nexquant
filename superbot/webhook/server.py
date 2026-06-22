@@ -49,11 +49,15 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
             log.info(f"Webhook reçu: {json.dumps(data, indent=2)[:500]}...")
 
-            # Vérifier la signature si un secret est configuré
-            if self.webhook_secret and not self._verify_signature(post_data, self.headers.get('X-Signature', '')):
-                log.warning("Signature de webhook invalide")
-                self.send_error(401, "Invalid signature")
-                return
+            # Vérifier la signature ou le secret dans le body si un secret est configuré
+            if self.webhook_secret:
+                has_valid_sig = self._verify_signature(post_data, self.headers.get('X-Signature', ''))
+                has_valid_body_sec = isinstance(data, dict) and data.get('secret') == self.webhook_secret
+                
+                if not (has_valid_sig or has_valid_body_sec):
+                    log.warning("Signature ou secret de webhook invalide")
+                    self.send_error(401, "Invalid signature or secret")
+                    return
 
             # Traiter les données du webhook
             if self.callback_func:

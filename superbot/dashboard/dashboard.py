@@ -102,6 +102,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         'stats': stats,
                         'market_data': raw_data.get('market_data', {}),
                         'broker_type': raw_data.get('broker_type', ''),
+                        'asset_type': raw_data.get('asset_type', 'crypto'),
                         'news': {
                             'overall_score': news_sentiment.get('overall', {}).get('score', 0.0) or 0.0,
                             'confidence': news_sentiment.get('overall', {}).get('confidence', 0.0) or 0.0,
@@ -1571,37 +1572,8 @@ td.name { color: var(--txt); font-weight: 600; }
           </div>
 
           <!-- Top Sparklines -->
-          <div class="sparkline-row">
-            <div class="card sparkline-card">
-              <div class="spark-header">
-                <span class="spark-symbol"><i class="fa-brands fa-bitcoin"></i> Bitcoin (BTC)</span>
-                <span class="spark-change up">+12.5%</span>
-              </div>
-              <div class="spark-body">
-                <span class="spark-price" id="spark-btc-price">$67,420.50</span>
-                <div class="spark-chart-mini" id="spark-btc-chart"></div>
-              </div>
-            </div>
-            <div class="card sparkline-card">
-              <div class="spark-header">
-                <span class="spark-symbol eth"><i class="fa-brands fa-ethereum"></i> Ethereum (ETH)</span>
-                <span class="spark-change down">-1.2%</span>
-              </div>
-              <div class="spark-body">
-                <span class="spark-price" id="spark-eth-price">$3,480.20</span>
-                <div class="spark-chart-mini" id="spark-eth-chart"></div>
-              </div>
-            </div>
-            <div class="card sparkline-card">
-              <div class="spark-header">
-                <span class="spark-symbol bnb"><i class="fa-solid fa-coins"></i> Binance Coin (BNB)</span>
-                <span class="spark-change up">+0.8%</span>
-              </div>
-              <div class="spark-body">
-                <span class="spark-price" id="spark-bnb-price">$578.40</span>
-                <div class="spark-chart-mini" id="spark-bnb-chart"></div>
-              </div>
-            </div>
+          <div class="sparkline-row" id="top-sparklines-container">
+            <div class="empty">Chargement des sparklines...</div>
           </div>
         </div>
 
@@ -1693,65 +1665,13 @@ td.name { color: var(--txt); font-weight: 600; }
             </div>
 
             <!-- My Assets List -->
-            <div class="card">
-              <div class="metric-header">
-                <span class="metric-title"><i class="fa-solid fa-coins"></i> Mes Actifs</span>
-              </div>
-              <div class="assets-grid">
-                <div class="asset-box">
-                  <div class="asset-box-hd up">BTC <span style="font-size:9px;">+4.4%</span></div>
-                  <div class="asset-box-val" id="my-asset-btc">$2,450</div>
-                </div>
-                <div class="asset-box">
-                  <div class="asset-box-hd down">ETH <span style="font-size:9px;">-2.8%</span></div>
-                  <div class="asset-box-val" id="my-asset-eth">$1,230</div>
-                </div>
-                <div class="asset-box">
-                  <div class="asset-box-hd up">BNB <span style="font-size:9px;">+0.8%</span></div>
-                  <div class="asset-box-val" id="my-asset-bnb">$578</div>
-                </div>
-                <div class="asset-box">
-                  <div class="asset-box-hd up">SOL <span style="font-size:9px;">+5.6%</span></div>
-                  <div class="asset-box-val" id="my-asset-sol">$390</div>
-                </div>
-              </div>
+            <div class="card" id="my-assets-card">
+              <div class="empty">Chargement des actifs...</div>
             </div>
 
             <!-- Leaderboard -->
-            <div class="card">
-              <div class="metric-header">
-                <span class="metric-title"><i class="fa-solid fa-ranking-star"></i> Classement des signaux</span>
-              </div>
-              <div class="lead-item">
-                <div class="lead-left">
-                  <i class="fa-solid fa-trophy lead-rank-icon"></i>
-                  <span class="lead-name">BNB/USDT Trend</span>
-                </div>
-                <div class="lead-val">
-                  <span class="lead-volume">$14.5K</span>
-                  <span class="lead-pct up">+23.7%</span>
-                </div>
-              </div>
-              <div class="lead-item">
-                <div class="lead-left">
-                  <i class="fa-solid fa-award lead-rank-icon" style="color:var(--txt-secondary);"></i>
-                  <span class="lead-name">ETH/USDT Swing</span>
-                </div>
-                <div class="lead-val">
-                  <span class="lead-volume">$8.2K</span>
-                  <span class="lead-pct down">-1.2%</span>
-                </div>
-              </div>
-              <div class="lead-item">
-                <div class="lead-left">
-                  <i class="fa-solid fa-award lead-rank-icon" style="color:var(--txt-muted);"></i>
-                  <span class="lead-name">BTC/USDT Breakout</span>
-                </div>
-                <div class="lead-val">
-                  <span class="lead-volume">$24.8K</span>
-                  <span class="lead-pct up">+12.5%</span>
-                </div>
-              </div>
+            <div class="card" id="leaderboard-card">
+              <div class="empty">Chargement du classement...</div>
             </div>
 
           </div>
@@ -1883,6 +1803,257 @@ const EXCHANGE_RATES = { USD: 1.0, EUR: 0.92 };
 let lastBalanceUsd = null;
 let lastInitUsd = null;
 let lastBtcPrice = 67000.0;
+let latestAssetType = 'crypto';
+
+function getCurrencyPrefix() {
+  if (selectedCurrency === 'USD') return '$';
+  if (selectedCurrency === 'EUR') return '€';
+  if (selectedCurrency === 'BTC') return '₿';
+  return '';
+}
+function getDecimals() {
+  if (latestAssetType === 'forex') return 5;
+  return 2;
+}
+function getRate() {
+  if (selectedCurrency === 'USD') return 1.0;
+  if (selectedCurrency === 'EUR') return EXCHANGE_RATES.EUR;
+  if (selectedCurrency === 'BTC') return 1.0 / lastBtcPrice;
+  return 1.0;
+}
+
+function updateDynamicWidgets(assetType, marketData) {
+  const sparkContainer = document.getElementById('top-sparklines-container');
+  const assetsCard = document.getElementById('my-assets-card');
+  const leadCard = document.getElementById('leaderboard-card');
+
+  if (!sparkContainer || !assetsCard || !leadCard) return;
+
+  const symbols = Object.keys(marketData);
+  let sparkHTML = '';
+  let assetsHTML = `<div class="metric-header"><span class="metric-title"><i class="fa-solid fa-coins"></i> Mes Actifs</span></div><div class="assets-grid">`;
+  let leadHTML = `<div class="metric-header"><span class="metric-title"><i class="fa-solid fa-ranking-star"></i> Classement des signaux</span></div>`;
+
+  if (assetType === 'forex') {
+    const forexItems = [
+      { sym: 'EUR/USD', name: 'Euro / US Dollar', icon: 'fa-euro-sign', colorClass: '' },
+      { sym: 'GBP/USD', name: 'Pound / US Dollar', icon: 'fa-sterling-sign', colorClass: 'eth' },
+      { sym: 'USD/JPY', name: 'US Dollar / Yen', icon: 'fa-yen-sign', colorClass: 'bnb' }
+    ];
+
+    forexItems.forEach((item, index) => {
+      const data = marketData[item.sym] || [];
+      let priceStr = '—';
+      let changeStr = '0.00%';
+      let changeClass = 'up';
+      let lastPrice = 0;
+      let prevPrice = 0;
+
+      if (data.length > 0) {
+        lastPrice = parseFloat(data[data.length - 1].c);
+        priceStr = fmt(lastPrice, 5);
+        if (data.length > 1) {
+          prevPrice = parseFloat(data[data.length - 2].c);
+          const pct = ((lastPrice - prevPrice) / prevPrice) * 100;
+          changeStr = (pct >= 0 ? '+' : '') + fmt(pct, 2) + '%';
+          changeClass = pct >= 0 ? 'up' : 'down';
+        }
+      }
+
+      sparkHTML += `
+        <div class="card sparkline-card">
+          <div class="spark-header">
+            <span class="spark-symbol ${item.colorClass}"><i class="fa-solid ${item.icon}"></i> ${item.sym}</span>
+            <span class="spark-change ${changeClass}">${changeStr}</span>
+          </div>
+          <div class="spark-body">
+            <span class="spark-price">${getCurrencyPrefix()}${priceStr}</span>
+            <div class="spark-chart-mini" id="spark-mini-${index}"></div>
+          </div>
+        </div>`;
+
+      const allocatedBalance = (lastBalanceUsd || 10000.0) / 4;
+      assetsHTML += `
+        <div class="asset-box">
+          <div class="asset-box-hd ${changeClass}">${item.sym.split('/')[0]} <span style="font-size:9px;">${changeStr}</span></div>
+          <div class="asset-box-val">${getCurrencyPrefix()}${fmt(allocatedBalance * getRate(), 0)}</div>
+        </div>`;
+
+      const leadIcons = ['fa-trophy', 'fa-award', 'fa-award'];
+      const leadColorStyle = index === 0 ? '' : index === 1 ? 'color:var(--txt-secondary);' : 'color:var(--txt-muted);';
+      leadHTML += `
+        <div class="lead-item">
+          <div class="lead-left">
+            <i class="fa-solid ${leadIcons[index]} lead-rank-icon" style="${leadColorStyle}"></i>
+            <span class="lead-name">${item.sym} Grid</span>
+          </div>
+          <div class="lead-val">
+            <span class="lead-volume">Vol. N/A</span>
+            <span class="lead-pct ${changeClass}">${changeStr}</span>
+          </div>
+        </div>`;
+    });
+
+  } else if (assetType === 'stock' || assetType === 'stocks' || assetType === 'equity') {
+    const stockItems = [
+      { sym: 'SPY', name: 'S&P 500 ETF', icon: 'fa-chart-line', colorClass: '' },
+      { sym: 'AAPL', name: 'Apple Inc.', icon: 'fa-apple', iconBrand: true, colorClass: 'eth' },
+      { sym: 'TSLA', name: 'Tesla Inc.', icon: 'fa-car-side', colorClass: 'bnb' }
+    ];
+
+    stockItems.forEach((item, index) => {
+      const data = marketData[item.sym] || [];
+      let priceStr = '—';
+      let changeStr = '0.00%';
+      let changeClass = 'up';
+      let lastPrice = 0;
+      let prevPrice = 0;
+
+      if (data.length > 0) {
+        lastPrice = parseFloat(data[data.length - 1].c);
+        priceStr = fmt(lastPrice, 2);
+        if (data.length > 1) {
+          prevPrice = parseFloat(data[data.length - 2].c);
+          const pct = ((lastPrice - prevPrice) / prevPrice) * 100;
+          changeStr = (pct >= 0 ? '+' : '') + fmt(pct, 2) + '%';
+          changeClass = pct >= 0 ? 'up' : 'down';
+        }
+      }
+
+      const iconHTML = item.iconBrand ? `<i class="fa-brands ${item.icon}"></i>` : `<i class="fa-solid ${item.icon}"></i>`;
+      sparkHTML += `
+        <div class="card sparkline-card">
+          <div class="spark-header">
+            <span class="spark-symbol ${item.colorClass}">${iconHTML} ${item.sym}</span>
+            <span class="spark-change ${changeClass}">${changeStr}</span>
+          </div>
+          <div class="spark-body">
+            <span class="spark-price">${getCurrencyPrefix()}${priceStr}</span>
+            <div class="spark-chart-mini" id="spark-mini-${index}"></div>
+          </div>
+        </div>`;
+
+      const allocatedBalance = (lastBalanceUsd || 10000.0) / 4;
+      assetsHTML += `
+        <div class="asset-box">
+          <div class="asset-box-hd ${changeClass}">${item.sym} <span style="font-size:9px;">${changeStr}</span></div>
+          <div class="asset-box-val">${getCurrencyPrefix()}${fmt(allocatedBalance * getRate(), 0)}</div>
+        </div>`;
+
+      const leadIcons = ['fa-trophy', 'fa-award', 'fa-award'];
+      const leadColorStyle = index === 0 ? '' : index === 1 ? 'color:var(--txt-secondary);' : 'color:var(--txt-muted);';
+      leadHTML += `
+        <div class="lead-item">
+          <div class="lead-left">
+            <i class="fa-solid ${leadIcons[index]} lead-rank-icon" style="${leadColorStyle}"></i>
+            <span class="lead-name">${item.sym} Momentum</span>
+          </div>
+          <div class="lead-val">
+            <span class="lead-volume">Vol. N/A</span>
+            <span class="lead-pct ${changeClass}">${changeStr}</span>
+          </div>
+        </div>`;
+    });
+
+  } else {
+    const cryptoItems = [
+      { sym: 'BTC/USDT', name: 'Bitcoin', icon: 'fa-bitcoin', iconBrand: true, colorClass: '' },
+      { sym: 'ETH/USDT', name: 'Ethereum', icon: 'fa-ethereum', iconBrand: true, colorClass: 'eth' },
+      { sym: 'BNB/USDT', name: 'Binance Coin', icon: 'fa-coins', colorClass: 'bnb' }
+    ];
+
+    cryptoItems.forEach((item, index) => {
+      const data = marketData[item.sym] || [];
+      let priceStr = '—';
+      let changeStr = '0.00%';
+      let changeClass = 'up';
+      let lastPrice = 0;
+      let prevPrice = 0;
+
+      if (data.length > 0) {
+        lastPrice = parseFloat(data[data.length - 1].c);
+        priceStr = fmt(lastPrice, 2);
+        if (data.length > 1) {
+          prevPrice = parseFloat(data[data.length - 2].c);
+          const pct = ((lastPrice - prevPrice) / prevPrice) * 100;
+          changeStr = (pct >= 0 ? '+' : '') + fmt(pct, 2) + '%';
+          changeClass = pct >= 0 ? 'up' : 'down';
+        }
+      }
+
+      const iconHTML = item.iconBrand ? `<i class="fa-brands ${item.icon}"></i>` : `<i class="fa-solid ${item.icon}"></i>`;
+      sparkHTML += `
+        <div class="card sparkline-card">
+          <div class="spark-header">
+            <span class="spark-symbol ${item.colorClass}">${iconHTML} ${item.sym.replace('/USDT', '')}</span>
+            <span class="spark-change ${changeClass}">${changeStr}</span>
+          </div>
+          <div class="spark-body">
+            <span class="spark-price">${getCurrencyPrefix()}${priceStr}</span>
+            <div class="spark-chart-mini" id="spark-mini-${index}"></div>
+          </div>
+        </div>`;
+
+      const allocatedBalance = (lastBalanceUsd || 10000.0) / 4;
+      assetsHTML += `
+        <div class="asset-box">
+          <div class="asset-box-hd ${changeClass}">${item.sym.split('/')[0]} <span style="font-size:9px;">${changeStr}</span></div>
+          <div class="asset-box-val">${getCurrencyPrefix()}${fmt(allocatedBalance * getRate(), 0)}</div>
+        </div>`;
+
+      const leadIcons = ['fa-trophy', 'fa-award', 'fa-award'];
+      const leadColorStyle = index === 0 ? '' : index === 1 ? 'color:var(--txt-secondary);' : 'color:var(--txt-muted);';
+      leadHTML += `
+        <div class="lead-item">
+          <div class="lead-left">
+            <i class="fa-solid ${leadIcons[index]} lead-rank-icon" style="${leadColorStyle}"></i>
+            <span class="lead-name">${item.sym.replace('/USDT', '')} Trend</span>
+          </div>
+          <div class="lead-val">
+            <span class="lead-volume">Vol. N/A</span>
+            <span class="lead-pct ${changeClass}">${changeStr}</span>
+          </div>
+        </div>`;
+    });
+  }
+
+  assetsHTML += `</div>`;
+  sparkContainer.innerHTML = sparkHTML;
+  assetsCard.innerHTML = assetsHTML;
+  leadCard.innerHTML = leadHTML;
+
+  if (assetType === 'forex') {
+    const items = ['EUR/USD', 'GBP/USD', 'USD/JPY'];
+    items.forEach((sym, index) => {
+      const data = marketData[sym] || [];
+      if (data.length > 0) {
+        const prices = data.slice(-10).map(c => parseFloat(c.c));
+        const color = prices[prices.length - 1] >= prices[0] ? '#10b981' : '#ef4444';
+        renderSparkline(`spark-mini-${index}`, color, prices);
+      }
+    });
+  } else if (assetType === 'stock' || assetType === 'stocks' || assetType === 'equity') {
+    const items = ['SPY', 'AAPL', 'TSLA'];
+    items.forEach((sym, index) => {
+      const data = marketData[sym] || [];
+      if (data.length > 0) {
+        const prices = data.slice(-10).map(c => parseFloat(c.c));
+        const color = prices[prices.length - 1] >= prices[0] ? '#10b981' : '#ef4444';
+        renderSparkline(`spark-mini-${index}`, color, prices);
+      }
+    });
+  } else {
+    const items = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT'];
+    items.forEach((sym, index) => {
+      const data = marketData[sym] || [];
+      if (data.length > 0) {
+        const prices = data.slice(-10).map(c => parseFloat(c.c));
+        const color = prices[prices.length - 1] >= prices[0] ? '#10b981' : '#ef4444';
+        renderSparkline(`spark-mini-${index}`, color, prices);
+      }
+    });
+  }
+}
 
 function toggleCurrencyDropdown() {
   const menu = document.getElementById('currency-menu');
@@ -2325,6 +2496,9 @@ async function fetchData() {
     setEl('r-kelly',  kf != null && !isNaN(parseFloat(kf)) ? parseFloat(kf * 100).toFixed(2) + ' %' : 'N/A');
     setEl('r-maxpos', safe(risk.max_daily_trades));
 
+    latestAssetType = d.asset_type || 'crypto';
+    updateDynamicWidgets(latestAssetType, d.market_data || {});
+
     // ── Positions table ──
     const tbody = document.getElementById('pos-tbody');
     if (tbody) {
@@ -2337,15 +2511,18 @@ async function fetchData() {
           const p    = pos[sym] || {};
           const side = (p.side || '').toUpperCase();
           const upnl = parseFloat(p.unrealized_pnl ?? 0);
+          const dec = getDecimals();
+          const pref = getCurrencyPrefix();
+          const rate = getRate();
           return `<tr>
             <td class="name mono">${sym}</td>
             <td><span class="badge badge-${side === 'LONG' ? 'long' : 'short'}">${side || '—'}</span></td>
             <td class="mono">${fmt(p.size, 4)}</td>
-            <td class="mono">$${fmt(p.entry_price, 2)}</td>
-            <td class="mono">$${fmt(p.current_price, 2)}</td>
-            <td class="mono ${upnl >= 0 ? 'pos' : 'neg'}">${(upnl >= 0 ? '+' : '') + fmt(upnl)} USD</td>
-            <td class="mono ${p.stop_loss ? 'neg' : ''}">$${fmt(p.stop_loss, 2)}</td>
-            <td class="mono ${p.take_profit ? 'pos' : ''}">$${fmt(p.take_profit, 2)}</td>
+            <td class="mono">${pref}${fmt(p.entry_price, dec)}</td>
+            <td class="mono">${pref}${fmt(p.current_price || p.mark_price, dec)}</td>
+            <td class="mono ${upnl >= 0 ? 'pos' : 'neg'}">${(upnl >= 0 ? '+' : '') + fmt(upnl * rate)} ${selectedCurrency}</td>
+            <td class="mono ${p.stop_loss ? 'neg' : ''}">${p.stop_loss > 0 ? pref + fmt(p.stop_loss, dec) : '—'}</td>
+            <td class="mono ${p.take_profit ? 'pos' : ''}">${p.take_profit > 0 ? pref + fmt(p.take_profit, dec) : '—'}</td>
           </tr>`;
         }).join('');
       }
@@ -2363,13 +2540,15 @@ async function fetchData() {
           const p = pos[sym] || {};
           const side = (p.side || '').toUpperCase();
           const timeStr = p.timestamp ? new Date(p.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}) : 'Actif';
+          const dec = getDecimals();
+          const pref = getCurrencyPrefix();
           return `<tr>
             <td class="mono">${timeStr}</td>
             <td class="name mono">${sym}</td>
             <td><span class="badge badge-${side === 'LONG' ? 'long' : 'short'}">${side || '—'}</span></td>
-            <td class="mono">$${fmt(p.entry_price, 2)}</td>
-            <td class="mono">$${fmt(p.stop_loss, 2)}</td>
-            <td class="mono">$${fmt(p.take_profit, 2)}</td>
+            <td class="mono">${pref}${fmt(p.entry_price, dec)}</td>
+            <td class="mono">${p.stop_loss > 0 ? pref + fmt(p.stop_loss, dec) : '—'}</td>
+            <td class="mono">${p.take_profit > 0 ? pref + fmt(p.take_profit, dec) : '—'}</td>
             <td><span class="tx-status success">En Cours</span></td>
           </tr>`;
         }).join('');

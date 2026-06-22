@@ -145,10 +145,23 @@ class AlpacaClient(Broker):
         alpaca_timeframe = timeframe_map.get(timeframe, timeframe)
         alpaca_symbol = self._normalize_symbol(symbol)
 
+        from datetime import datetime, timedelta
+        # Calculer un start date de sécurité basé sur la granularité et la limite
+        days_needed = limit
+        if "Min" in alpaca_timeframe:
+            days_needed = max(1, int(limit / 100))
+        elif "H" in alpaca_timeframe:
+            days_needed = max(1, int(limit / 5))
+        else:
+            days_needed = limit * 2
+            
+        start_date = (datetime.now() - timedelta(days=days_needed)).strftime('%Y-%m-%d')
+
         try:
             bars = self._api.get_bars(
                 alpaca_symbol,
                 alpaca_timeframe,
+                start=start_date,
                 limit=limit,
                 adjustment='raw'
             ).df
