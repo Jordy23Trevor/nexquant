@@ -86,6 +86,7 @@ class XTBClient(Broker):
             log.info(f"Connecté avec succès à XTB (Session: {self.ssid})")
         else:
             reason = response.get("errorDescr", "Raison inconnue")
+            log.error(f"Réponse brute d'erreur XTB : {response}")
             raise RuntimeError(f"Échec de la connexion XTB : {reason}")
 
     def _send_command(self, command: str, arguments: Dict[str, Any] = None) -> Dict[str, Any]:
