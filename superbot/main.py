@@ -197,9 +197,14 @@ class SuperBot:
                 self.instruments = self.broker.get_default_instruments()
                 log.info(f"Aucun instrument configuré — défauts broker ({BROKER_TYPE}) : {self.instruments}")
 
-            env_news_assets = os.getenv("NEWS_ASSETS")
-            if env_news_assets:
-                self.news_assets = [s.strip().upper() for s in env_news_assets.split(",")]
+            news_broker_key = f"NEWS_ASSETS_{BROKER_TYPE.upper()}"
+            env_news_assets_broker = os.getenv(news_broker_key)
+            env_news_assets_generic = os.getenv("NEWS_ASSETS")
+            if env_news_assets_broker:
+                self.news_assets = [s.strip().upper() for s in env_news_assets_broker.split(",")]
+                log.info(f"Actifs de nouvelles spécifiques au broker ({news_broker_key}) : {self.news_assets}")
+            elif env_news_assets_generic:
+                self.news_assets = [s.strip().upper() for s in env_news_assets_generic.split(",")]
                 log.info(f"Actifs de nouvelles configurés via .env : {self.news_assets}")
             else:
                 self.news_assets = self.broker.get_default_news_assets()
@@ -229,11 +234,24 @@ class SuperBot:
             actual_min_pos = float(env_min_pos) if env_min_pos else default_min_pos
             actual_max_pos = float(env_max_pos) if env_max_pos else default_max_pos
 
+            # Déterminer le nombre maximum de positions selon le broker
+            broker_type = BROKER_TYPE
+            max_pos_key = f"MAX_OPEN_POSITIONS_{broker_type.upper()}"
+            env_max_pos_broker = os.getenv(max_pos_key)
+            if env_max_pos_broker:
+                try:
+                    actual_max_open_positions = int(env_max_pos_broker)
+                    log.info(f"Nombre maximum de positions spécifique au broker ({max_pos_key}) : {actual_max_open_positions}")
+                except ValueError:
+                    actual_max_open_positions = MAX_OPEN_POSITIONS
+            else:
+                actual_max_open_positions = MAX_OPEN_POSITIONS
+
             self.risk_manager = RiskManager({
                 'RISK_PCT': RISK_PCT,
                 'MAX_DAILY_LOSS_PCT': MAX_DAILY_LOSS_PCT,
                 'MAX_MONTHLY_LOSS_PCT': MAX_MONTHLY_LOSS_PCT,
-                'MAX_OPEN_POSITIONS': MAX_OPEN_POSITIONS,
+                'MAX_OPEN_POSITIONS': actual_max_open_positions,
                 'KELLY_FRACTION': KELLY_FRACTION,
                 'MIN_TRADES_FOR_KELLY': MIN_TRADES_FOR_KELLY,
                 'SL_ATR_MULT': SL_ATR_MULT,
@@ -529,8 +547,11 @@ class SuperBot:
                 except Exception as e:
                     log.warning(f"Erreur lors de la sélection/rotation crypto au cycle #{cycle_count} : {e}")
 
-                # Traiter chaque instrument
-                for symbol in self.instruments:
+                # Traiter chaque instrument (mélangé aléatoirement pour éviter tout biais d'ordre)
+                import random
+                scanned_instruments = list(self.instruments)
+                random.shuffle(scanned_instruments)
+                for symbol in scanned_instruments:
                     if not self.running:
                         break
 
@@ -598,30 +619,7 @@ class SuperBot:
             self.market_data[symbol] = df_with_indicators
 
             # === GESTION DE RISQUE CONTINUE DES POSITIONS OUVERTES ===
-            # Mettre à jour les trailing stops et break-evens pour les positions ouvertes
-            if symbol in self.positions:
-                current_price = df_with_indicators.iloc[-1]['close']
-                atr_value = df_with_indicators.iloc[-1].get('atr', 0)
-                
-                # Mettre à jour l'ATR dans la position pour le risk manager
-                if self.risk_manager and symbol in self.risk_manager.open_positions:
-                    pos_risk = self.risk_manager.open_positions[symbol]
-                    pos_risk['atr_value'] = atr_value
-                    
-                    old_sl = pos_risk.get('stop_loss', 0.0)
-                    
-                    # Lancer la mise à jour (calcul du trailing stop / break-even)
-                    self.risk_manager.update_open_position(symbol, current_price)
-                    
-                    new_sl = pos_risk.get('stop_loss', 0.0)
-                    
-                    # Si le stop loss a été modifié localement, mettre à jour chez le broker
-                    if new_sl != old_sl and new_sl > 0:
-                        log.info(f"Mise à jour du Stop Loss pour {symbol} chez le courtier : {old_sl:.5f} -> {new_sl:.5f}")
-                        success = self.broker.modify_sl_tp(symbol, new_sl, pos_risk.get('take_profit', 0.0))
-                        if success:
-                            # Mettre à jour notre dictionnaire local de suivi de position
-                            self.positions[symbol]['stop_loss'] = new_sl
+            self._update_active_position_risk(symbol, df_with_indicators)
 
             # Si le courtier est crypto et que le symbole n'est pas l'actif sélectionné
             if self.broker.get_asset_type() == "crypto":
@@ -635,109 +633,7 @@ class SuperBot:
             signal_data['symbol'] = symbol  # Ajouter le symbole au signal
 
             if signal_data['should_long'] or signal_data['should_short']:
-                self.stats['signals_generated'] += 1
-                log.info(
-                    f"Signal pour {symbol} : {signal_data['market_regime']} | "
-                    f"Score: {signal_data['total_score']:.1f} | "
-                    f"Long: {signal_data['should_long']} | Short: {signal_data['should_short']} | "
-                    f"RR: {signal_data['rr_ratio']:.2f}"
-                )
-
-                # 4. Vérifier les filtres de nouvelles et de sentiment
-                should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
-                if should_avoid:
-                    log.info(f"Trading évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
-                    return
-
-                # 5. Calculer la taille de position basée sur le risque
-                account_balance = self.broker.get_balance()
-                entry_price = signal_data['entry_price']
-
-                # Déterminer le stop loss et take profit
-                sl_price = signal_data['sl_price']
-                tp_price = signal_data['tp_price']
-
-                # Si les prix SL/TP ne sont pas fournis, les calculer basé sur l'ATR
-                if sl_price == 0 or tp_price == 0:
-                    atr_value = df_with_indicators.iloc[-1].get('atr', 0)
-                    if atr_value > 0:
-                        position_side = "LONG" if signal_data['should_long'] else "SHORT"
-                        sl_price, tp_price = self.risk_manager.calculate_sl_tp_levels(
-                            entry_price, atr_value, position_side
-                        )
-                    else:
-                        # Fallback : utiliser un pourcentage fixe provenant de la configuration
-                        risk_pct = RISK_PCT / 100.0  # Convertir de pourcentage en décimal
-                        if signal_data['should_long']:
-                            sl_price = entry_price * (1 - risk_pct)
-                            tp_price = entry_price * (1 + risk_pct * 2)  # RR 1:2
-                        else:
-                            sl_price = entry_price * (1 + risk_pct)
-                            tp_price = entry_price * (1 - risk_pct * 2)
-
-                # Calculer la taille de position
-                position_size, size_details = self.risk_manager.calculate_position_size(
-                    account_balance=account_balance,
-                    entry_price=entry_price,
-                    stop_loss=sl_price,
-                    symbol=symbol,
-                    sentiment_factor=self.news_manager.get_risk_factor() if self.news_manager else 1.0
-                )
-
-                if position_size <= 0:
-                    log.debug(f"Taille de position nulle ou rejetée pour {symbol}, pas d'action")
-                    return
-
-                log.info(
-                    f"Taille de position calculée pour {symbol} : {position_size:.6f} | "
-                    f"Risque : {size_details.get('actual_risk_pct', 0.0):.2f}% du compte"
-                )
-
-                # 6. Vérifier les limites de risque avant d'envoyer l'ordre
-                if not self.risk_manager._can_take_new_trade(account_balance):
-                    log.info(f"Limites de risque atteintes, pas de nouvel ordre pour {symbol}")
-                    return
-
-                # 7. Exécuter le trade
-                side = "buy" if signal_data['should_long'] else "sell"
-                log.info(
-                    f"Exécution du trade : {side.upper()} {position_size:.6f} {symbol} @ {entry_price:.4f} | "
-                    f"SL: {sl_price:.4f} | TP: {tp_price:.4f}"
-                )
-
-                # Placer l'ordre
-                order_result = self.broker.place_order(
-                    symbol=symbol,
-                    side=side,
-                    amount=position_size,
-                    sl=sl_price,
-                    tp=tp_price,
-                    comment=f"SuperBot signal - {signal_data['market_regime']} - Score:{signal_data['total_score']:.1f}"
-                )
-
-                if order_result:
-                    self.stats['trades_executed'] += 1
-                    log.info(f"Trade exécuté avec succès pour {symbol}")
-
-                    # Enregistrer le trade pour le suivi du risque
-                    trade_record = {
-                        'symbol': symbol,
-                        'side': side,
-                        'entry_price': entry_price,
-                        'position_size': position_size,
-                        'stop_loss': sl_price,
-                        'take_profit': tp_price,
-                        'timestamp': datetime.now(timezone.utc).isoformat(),
-                        'signal_score': signal_data['total_score'],
-                        'market_regime': signal_data['market_regime']
-                    }
-                    self.risk_manager.record_trade(trade_record)
-
-                    # Mettre à jour la position suivie
-                    self._update_position_tracking(symbol, side, position_size, entry_price)
-
-                else:
-                    log.error(f"Échec de l'exécution du trade pour {symbol}")
+                self._execute_signal_trade(symbol, signal_data, df_with_indicators)
             else:
                 log.info(
                     f"Scan {symbol} : {signal_data['market_regime']} | "
@@ -748,6 +644,142 @@ class SuperBot:
         except Exception as e:
             log.error(f"Erreur inattendue dans _process_symbol pour {symbol} : {e}")
             log.debug(traceback.format_exc())
+
+    def _update_active_position_risk(self, symbol: str, df_with_indicators):
+        """
+        Met à jour les trailing stops et break-evens pour les positions ouvertes.
+        """
+        if symbol in self.positions:
+            current_price = df_with_indicators.iloc[-1]['close']
+            atr_value = df_with_indicators.iloc[-1].get('atr', 0)
+            
+            # Mettre à jour l'ATR dans la position pour le risk manager
+            if self.risk_manager and symbol in self.risk_manager.open_positions:
+                pos_risk = self.risk_manager.open_positions[symbol]
+                pos_risk['atr_value'] = atr_value
+                
+                old_sl = pos_risk.get('stop_loss', 0.0)
+                
+                # Lancer la mise à jour (calcul du trailing stop / break-even)
+                self.risk_manager.update_open_position(symbol, current_price)
+                
+                new_sl = pos_risk.get('stop_loss', 0.0)
+                
+                # Si le stop loss a été modifié localement, mettre à jour chez le broker
+                if new_sl != old_sl and new_sl > 0:
+                    log.info(f"Mise à jour du Stop Loss pour {symbol} chez le courtier : {old_sl:.5f} -> {new_sl:.5f}")
+                    success = self.broker.modify_sl_tp(symbol, new_sl, pos_risk.get('take_profit', 0.0))
+                    if success:
+                        # Mettre à jour notre dictionnaire local de suivi de position
+                        self.positions[symbol]['stop_loss'] = new_sl
+
+    def _execute_signal_trade(self, symbol: str, signal_data: dict, df_with_indicators):
+        """
+        Valide les filtres macro, calcule la taille de position de manière sécurisée et exécute l'ordre.
+        """
+        self.stats['signals_generated'] += 1
+        log.info(
+            f"Signal pour {symbol} : {signal_data['market_regime']} | "
+            f"Score: {signal_data['total_score']:.1f} | "
+            f"Long: {signal_data['should_long']} | Short: {signal_data['should_short']} | "
+            f"RR: {signal_data['rr_ratio']:.2f}"
+        )
+
+        # 1. Vérifier les filtres de nouvelles et de sentiment
+        should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
+        if should_avoid:
+            log.info(f"Trading évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
+            return
+
+        # 2. Récupérer le solde et le prix d'entrée
+        account_balance = self.broker.get_balance()
+        entry_price = signal_data['entry_price']
+
+        # Déterminer le stop loss et take profit
+        sl_price = signal_data['sl_price']
+        tp_price = signal_data['tp_price']
+
+        # Si les prix SL/TP ne sont pas fournis, les calculer basé sur l'ATR
+        if sl_price == 0 or tp_price == 0:
+            atr_value = df_with_indicators.iloc[-1].get('atr', 0)
+            if atr_value > 0:
+                position_side = "LONG" if signal_data['should_long'] else "SHORT"
+                sl_price, tp_price = self.risk_manager.calculate_sl_tp_levels(
+                    entry_price, atr_value, position_side
+                )
+            else:
+                # Fallback : utiliser un pourcentage fixe provenant de la configuration
+                risk_pct = RISK_PCT / 100.0  # Convertir de pourcentage en décimal
+                if signal_data['should_long']:
+                    sl_price = entry_price * (1 - risk_pct)
+                    tp_price = entry_price * (1 + risk_pct * 2)  # RR 1:2
+                else:
+                    sl_price = entry_price * (1 + risk_pct)
+                    tp_price = entry_price * (1 - risk_pct * 2)
+
+        # 3. Calculer la taille de position avec le Risk Manager
+        position_size, size_details = self.risk_manager.calculate_position_size(
+            account_balance=account_balance,
+            entry_price=entry_price,
+            stop_loss=sl_price,
+            symbol=symbol,
+            sentiment_factor=self.news_manager.get_risk_factor() if self.news_manager else 1.0
+        )
+
+        if position_size <= 0:
+            log.debug(f"Taille de position nulle ou rejetée pour {symbol}, pas d'action")
+            return
+
+        log.info(
+            f"Taille de position calculée pour {symbol} : {position_size:.6f} | "
+            f"Risque : {size_details.get('actual_risk_pct', 0.0):.2f}% du compte"
+        )
+
+        # 4. Vérifier les limites de risque globales avant d'envoyer l'ordre
+        if not self.risk_manager._can_take_new_trade(account_balance):
+            log.info(f"Limites de risque atteintes, pas de nouvel ordre pour {symbol}")
+            return
+
+        # 5. Exécuter le trade chez le courtier
+        side = "buy" if signal_data['should_long'] else "sell"
+        log.info(
+            f"Exécution du trade : {side.upper()} {position_size:.6f} {symbol} @ {entry_price:.4f} | "
+            f"SL: {sl_price:.4f} | TP: {tp_price:.4f}"
+        )
+
+        # Placer l'ordre
+        order_result = self.broker.place_order(
+            symbol=symbol,
+            side=side,
+            amount=position_size,
+            sl=sl_price,
+            tp=tp_price,
+            comment=f"SuperBot signal - {signal_data['market_regime']} - Score:{signal_data['total_score']:.1f}"
+        )
+
+        if order_result:
+            self.stats['trades_executed'] += 1
+            log.info(f"Trade exécuté avec succès pour {symbol}")
+
+            # Enregistrer le trade pour le suivi du risque
+            trade_record = {
+                'symbol': symbol,
+                'side': side,
+                'entry_price': entry_price,
+                'position_size': position_size,
+                'stop_loss': sl_price,
+                'take_profit': tp_price,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'signal_score': signal_data['total_score'],
+                'market_regime': signal_data['market_regime']
+            }
+            self.risk_manager.record_trade(trade_record)
+
+            # Mettre à jour la position suivie
+            self._update_position_tracking(symbol, side, position_size, entry_price)
+
+        else:
+            log.error(f"Échec de l'exécution du trade pour {symbol}")
 
     def _select_and_rotate_crypto(self):
         """

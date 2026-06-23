@@ -1842,7 +1842,7 @@ function updateDynamicWidgets(assetType, marketData) {
     ];
 
     forexItems.forEach((item, index) => {
-      const data = marketData[item.sym] || [];
+      const data = marketData[item.sym] || marketData[item.sym.replace('/', '')] || [];
       let priceStr = '—';
       let changeStr = '0.00%';
       let changeClass = 'up';
@@ -2025,7 +2025,7 @@ function updateDynamicWidgets(assetType, marketData) {
   if (assetType === 'forex') {
     const items = ['EUR/USD', 'GBP/USD', 'USD/JPY'];
     items.forEach((sym, index) => {
-      const data = marketData[sym] || [];
+      const data = marketData[sym] || marketData[sym.replace('/', '')] || [];
       if (data.length > 0) {
         const prices = data.slice(-10).map(c => parseFloat(c.c));
         const color = prices[prices.length - 1] >= prices[0] ? '#10b981' : '#ef4444';

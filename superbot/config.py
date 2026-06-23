@@ -12,7 +12,7 @@ load_dotenv(dotenv_path=env_path)
 # =============================================================================
 # BROKER CONFIGURATION
 # =============================================================================
-BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, paper_forex, mt5, xtb
+BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, paper_forex, mt5
 
 # =============================================================================
 # METATRADER 5 (MT5) CONFIGURATION (associated with Fusion Markets)
@@ -21,14 +21,6 @@ MT5_LOGIN = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
 MT5_SERVER = os.getenv("MT5_SERVER", "FusionMarkets-Demo")
 MT5_PATH = os.getenv("MT5_PATH", "")  # Path to terminal64.exe (optional)
-
-# =============================================================================
-# XTB CONFIGURATION (connects via numeric account ID and password)
-# =============================================================================
-XTB_USER_ID = os.getenv("XTB_USER_ID", os.getenv("XTB_EMAIL", ""))
-XTB_EMAIL = XTB_USER_ID  # Alias de compatibilité
-XTB_PASSWORD = os.getenv("XTB_PASSWORD", "")
-XTB_SERVER = os.getenv("XTB_SERVER", "demo").lower()  # demo, real
 
 # =============================================================================
 # BINANCE FUTURES CONFIGURATION
@@ -218,8 +210,75 @@ BACKTEST_MODE = os.getenv("BACKTEST_MODE", "false").lower() == "true"
 LOG_TRADES = os.getenv("LOG_TRADES", "true").lower() == "true"
 ENABLE_DASHBOARD = os.getenv("ENABLE_DASHBOARD", "true").lower() == "true"
 
+# =============================================================================
+# CONFIGURATION VALIDATION ENGINE
+# =============================================================================
+def validate_config():
+    """
+    Validates key configuration settings to ensure safe trading conditions.
+    Only checks broker credentials if NOT in backtesting mode.
+    """
+    errors = []
+
+    # 1. Broker type check
+    valid_brokers = ["binance", "alpaca", "paper_forex", "mt5"]
+    if BROKER_TYPE.lower() not in valid_brokers:
+        errors.append(f"BROKER_TYPE '{BROKER_TYPE}' est invalide. Doit être l'un de : {valid_brokers}")
+
+    # 2. Broker credentials check (only if not backtesting)
+    if not BACKTEST_MODE:
+        if BROKER_TYPE.lower() == "mt5":
+            if MT5_LOGIN <= 0:
+                errors.append("MT5_LOGIN doit être un entier positif (votre identifiant de compte).")
+            if not MT5_PASSWORD:
+                errors.append("MT5_PASSWORD ne doit pas être vide.")
+            if not MT5_SERVER:
+                errors.append("MT5_SERVER ne doit pas être vide.")
+        elif BROKER_TYPE.lower() == "binance":
+            if not BINANCE_API_KEY or not BINANCE_API_SECRET:
+                errors.append("BINANCE_API_KEY et BINANCE_API_SECRET doivent être configurés.")
+        elif BROKER_TYPE.lower() == "alpaca":
+            if not ALPACA_API_KEY or not ALPACA_API_SECRET:
+                errors.append("ALPACA_API_KEY et ALPACA_API_SECRET doivent être configurés.")
+
+    # 3. Risk parameter bounds checks
+    if not (0.1 <= RISK_PCT <= 5.0):
+        errors.append(f"RISK_PCT ({RISK_PCT}%) est hors limites. Pour la sécurité de vos fonds en réel, il doit être compris entre 0.1% et 5.0% par transaction.")
+
+    if not (0.5 <= MAX_DAILY_LOSS_PCT <= 10.0):
+        errors.append(f"MAX_DAILY_LOSS_PCT ({MAX_DAILY_LOSS_PCT}%) est hors limites. Il doit être compris entre 0.5% et 10.0% pour protéger le capital.")
+
+    if not (1.0 <= MAX_MONTHLY_LOSS_PCT <= 20.0):
+        errors.append(f"MAX_MONTHLY_LOSS_PCT ({MAX_MONTHLY_LOSS_PCT}%) doit être compris entre 1.0% et 20.0%.")
+
+    if not (1 <= MAX_OPEN_POSITIONS <= 10):
+        errors.append(f"MAX_OPEN_POSITIONS ({MAX_OPEN_POSITIONS}) doit être compris entre 1 et 10.")
+
+    if not (0.5 <= SL_ATR_MULT <= 5.0):
+        errors.append(f"SL_ATR_MULT ({SL_ATR_MULT}) est anormal et doit être compris entre 0.5 et 5.0.")
+
+    if not (1.0 <= TP_ATR_MULT <= 10.0):
+        errors.append(f"TP_ATR_MULT ({TP_ATR_MULT}) doit être compris entre 1.0 et 10.0.")
+
+    if not (1 <= SCORE_MIN <= 10):
+        errors.append(f"SCORE_MIN ({SCORE_MIN}) doit être compris entre 1 et 10.")
+
+    if errors:
+        error_msg = (
+            "\n" + "="*80 + "\n"
+            "❌ ERREURS DE CONFIGURATION DU SUPERBOT DÉTECTÉES :\n"
+            + "\n".join(f"  • {err}" for err in errors) + "\n"
+            "Veuillez ajuster les valeurs correspondantes dans votre fichier '.env'.\n"
+            + "="*80 + "\n"
+        )
+        raise ValueError(error_msg)
+
+# Exécuter la validation automatiquement lors du chargement du module
+validate_config()
+
 # Export all config values
 __all__ = [
+    "validate_config",
     # Broker
     "BROKER_TYPE",
 

@@ -119,8 +119,15 @@ class TradingStrategy:
         # Vérifier les triggers (conditions d'entrée)
         trigger_long, trigger_short = self._check_entry_triggers(df_with_indicators, is_trending)
 
-        # Calculer le ratio risque/rendement potentiel
+        # Calculer le ratio risque/rendement potentiel (LONG par défaut)
         rr_ratio, sl_price, tp_price = self._calculate_potential_rr(df_with_indicators, latest)
+
+        # Ajuster les prix SL/TP si c'est un signal de vente (SHORT) pour qu'ils soient orientés correctement
+        if trigger_short and not trigger_long:
+            atr = latest.get('atr', 0)
+            if atr > 0:
+                sl_price = latest['close'] + (atr * self.config.get('SL_ATR_MULT', 1.5))
+                tp_price = latest['close'] - (atr * self.config.get('TP_ATR_MULT', 3.0))
 
         # Appliquer les filtres de sentiment et de nouvelles (à venir dans la phase 4)
         sentiment_factor = 1.0  # À implémenter avec le news manager
