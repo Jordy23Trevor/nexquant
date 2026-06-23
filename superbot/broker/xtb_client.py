@@ -19,7 +19,7 @@ except ImportError:
 
 from superbot.broker.base import Broker
 from superbot.config import (
-    XTB_EMAIL, XTB_PASSWORD, XTB_SERVER
+    XTB_USER_ID, XTB_PASSWORD, XTB_SERVER
 )
 
 log = logging.getLogger("xtb_client")
@@ -31,7 +31,7 @@ class XTBClient(Broker):
     """
 
     def __init__(self):
-        self.email = XTB_EMAIL
+        self.user_id = XTB_USER_ID
         self.password = XTB_PASSWORD
         self.server = XTB_SERVER or "demo"
         self.ssid = None
@@ -39,13 +39,18 @@ class XTBClient(Broker):
         self._price_cache = {}
         self._last_update = {}
 
-        if not self.email or not self.password:
+        if not self.user_id or not self.password:
             log.warning("Identifiants XTB non définis. Passage en mode simulation XTB.")
             self.simulation_mode = True
             return
 
+        if "@" in str(self.user_id):
+            log.warning("⚠️ Attention: L'identifiant XTB (XTB_USER_ID) configuré dans votre .env semble être une adresse e-mail.")
+            log.warning("   L'API XTB requiert votre NUMÉRO DE COMPTE numérique (ex: 123456) comme identifiant,")
+            log.warning("   et non votre adresse e-mail de connexion de la plateforme xStation.")
+
         self.simulation_mode = False
-        log.info(f"Connexion à XTB ({self.server.upper()}) avec l'email {self.email}...")
+        log.info(f"Connexion à XTB ({self.server.upper()}) avec l'identifiant {self.user_id}...")
 
         # Résoudre l'URL WebSocket
         if self.server.lower() == "real":
@@ -69,7 +74,7 @@ class XTBClient(Broker):
         login_req = {
             "command": "login",
             "arguments": {
-                "userId": self.email,
+                "userId": self.user_id,
                 "password": self.password
             }
         }
