@@ -38,7 +38,11 @@ class MT5Client(Broker):
         # Paramètres d'initialisation
         init_kwargs = {}
         if MT5_PATH:
-            init_kwargs["path"] = MT5_PATH
+            import os
+            resolved_path = MT5_PATH
+            if os.path.isdir(resolved_path):
+                resolved_path = os.path.join(resolved_path, "terminal64.exe")
+            init_kwargs["path"] = resolved_path
         if MT5_LOGIN > 0:
             init_kwargs["login"] = MT5_LOGIN
         if MT5_PASSWORD:

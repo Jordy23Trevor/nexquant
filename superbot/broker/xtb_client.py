@@ -49,9 +49,9 @@ class XTBClient(Broker):
 
         # Résoudre l'URL WebSocket
         if self.server.lower() == "real":
-            self.ws_url = "wss://ws.xtb.com/real"
+            self.ws_url = "wss://ws.xapi.pro/real"
         else:
-            self.ws_url = "wss://ws.xtb.com/demo"
+            self.ws_url = "wss://ws.xapi.pro/demo"
 
         try:
             self._connect()
