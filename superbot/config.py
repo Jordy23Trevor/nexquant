@@ -26,6 +26,7 @@ MT5_PATH = os.getenv("MT5_PATH", "")  # Path to terminal64.exe (optional)
 # XTB CONFIGURATION (connects via numeric account ID and password)
 # =============================================================================
 XTB_USER_ID = os.getenv("XTB_USER_ID", os.getenv("XTB_EMAIL", ""))
+XTB_EMAIL = XTB_USER_ID  # Alias de compatibilité
 XTB_PASSWORD = os.getenv("XTB_PASSWORD", "")
 XTB_SERVER = os.getenv("XTB_SERVER", "demo").lower()  # demo, real
 
