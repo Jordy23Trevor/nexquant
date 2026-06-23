@@ -504,23 +504,23 @@ class BinanceClient(Broker):
         tp = self._round_price(symbol, tp) if tp > 0 else 0
 
         def run():
-            orders = self._client.futures_get_open_algo_orders(symbol=binance_symbol)
+            orders = self._client.futures_get_open_orders(symbol=binance_symbol)
             sl_order = None
             tp_order = None
             for o in orders:
-                if o.get("orderType") == "STOP_MARKET":
+                if o.get("type") == "STOP_MARKET":
                     sl_order = o
-                elif o.get("orderType") == "TAKE_PROFIT_MARKET":
+                elif o.get("type") == "TAKE_PROFIT_MARKET":
                     tp_order = o
 
             # Mettre à jour le SL
             if sl > 0:
                 if sl_order:
                     try:
-                        self._client.futures_cancel_algo_order(symbol=binance_symbol, algoId=sl_order["algoId"])
+                        self._client.futures_cancel_order(symbol=binance_symbol, orderId=sl_order["orderId"])
                         time.sleep(0.2)
                     except BinanceAPIException as e:
-                        log.warning(f"️ Impossible d'annuler l'ancien SL algo : {e.message}")
+                        log.warning(f"️ Impossible d'annuler l'ancien SL : {e.message}")
 
                 try:
                     self._client.futures_create_order(
@@ -536,10 +536,10 @@ class BinanceClient(Broker):
             if tp > 0:
                 if tp_order:
                     try:
-                        self._client.futures_cancel_algo_order(symbol=binance_symbol, algoId=tp_order["algoId"])
+                        self._client.futures_cancel_order(symbol=binance_symbol, orderId=tp_order["orderId"])
                         time.sleep(0.2)
                     except BinanceAPIException as e:
-                        log.warning(f"️ Impossible d'annuler l'ancien TP algo : {e.message}")
+                        log.warning(f"️ Impossible d'annuler l'ancien TP : {e.message}")
 
                 try:
                     self._client.futures_create_order(

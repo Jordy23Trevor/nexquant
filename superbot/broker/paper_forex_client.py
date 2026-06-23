@@ -207,6 +207,8 @@ class PaperForexClient(Broker):
             "unrealized_pnl": 0.0,
             "liquidation_price": None,
             "margin_used": 0.0,
+            "stop_loss": 0.0,
+            "take_profit": 0.0,
         })
 
         if position["size"] != 0:
@@ -337,6 +339,8 @@ class PaperForexClient(Broker):
                         "unrealized_pnl": 0.0,
                         "liquidation_price": None,
                         "margin_used": 0.0,
+                        "stop_loss": sl if sl else 0.0,
+                        "take_profit": tp if tp else 0.0,
                     }
                     log.info(
                         f"{'▲' if side == 'buy' else '▼'} {side} {amount} {symbol} @ {entry_price:.4f} | "
@@ -434,8 +438,10 @@ class PaperForexClient(Broker):
         def run():
             try:
                 if sl is not None:
+                    self._positions[normalized]["stop_loss"] = sl
                     log.info(f"️  SL mis à jour pour {symbol} à {sl:.4f}")
                 if tp is not None:
+                    self._positions[normalized]["take_profit"] = tp
                     log.info(f"️  TP mis à jour pour {symbol} à {tp:.4f}")
                 return True
             except Exception as e:

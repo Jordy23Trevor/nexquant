@@ -163,73 +163,111 @@ class MT5Client(Broker):
         return df[['open', 'high', 'low', 'close', 'volume']]
 
     def get_position(self, symbol: str) -> Dict[str, Any]:
-        """Retourne la position ouverte sur un symbole."""
+        """
+        Retourne la position ouverte sur un symbole.
+        S'il y a plusieurs positions (Hedging), nous les combinons/agrégons.
+        """
         symbol = self.normalize_symbol(symbol)
         positions = mt5.positions_get(symbol=symbol)
         
         if not positions or len(positions) == 0:
             return {}
 
-        # S'il y a plusieurs positions, MT5 supporte le hedging. 
-        # Pour simplifier et unifier avec les autres clients, nous combinons les positions ou prenons la plus grande/première.
-        pos = positions[0]
+        total_volume = 0.0
+        weighted_entry = 0.0
+        total_profit = 0.0
         
-        # 0 = Buy (LONG), 1 = Sell (SHORT)
-        side = "LONG" if pos.type == mt5.POSITION_TYPE_BUY else "SHORT"
+        # Trouver la direction dominante ou utiliser la première position pour définir le type principal
+        first_pos = positions[0]
+        dominant_side = "LONG" if first_pos.type == mt5.POSITION_TYPE_BUY else "SHORT"
         
+        sl = first_pos.sl
+        tp = first_pos.tp
+
+        for pos in positions:
+            pos_side = "LONG" if pos.type == mt5.POSITION_TYPE_BUY else "SHORT"
+            if pos_side == dominant_side:
+                total_volume += pos.volume
+                weighted_entry += pos.price_open * pos.volume
+            else:
+                total_volume -= pos.volume
+                weighted_entry -= pos.price_open * pos.volume
+            total_profit += pos.profit
+
+        if total_volume == 0:
+            return {}
+
+        if total_volume < 0:
+            dominant_side = "SHORT" if dominant_side == "LONG" else "LONG"
+            total_volume = abs(total_volume)
+
+        avg_entry = abs(weighted_entry / total_volume) if total_volume > 0 else 0.0
+        
+        tick = mt5.symbol_info_tick(symbol)
+        mark_price = (tick.bid + tick.ask) / 2 if tick else avg_entry
+
         return {
-            "ticket": pos.ticket,
-            "side": side,
-            "size": pos.volume,
-            "entry_price": pos.price_open,
-            "mark_price": pos.price_current,
-            "unrealized_pnl": pos.profit,
-            "stop_loss": pos.sl,
-            "take_profit": pos.tp,
+            "ticket": first_pos.ticket,
+            "side": dominant_side,
+            "size": total_volume,
+            "entry_price": avg_entry,
+            "mark_price": mark_price,
+            "unrealized_pnl": total_profit,
+            "stop_loss": sl,
+            "take_profit": tp,
             "liquidation_price": None,
-            "margin_used": 0.0,  # MT5 gère la marge au niveau global
+            "margin_used": 0.0,
         }
 
     def close_position(self, symbol: str, reason: str = "") -> bool:
-        """Ferme la position ouverte sur un symbole."""
+        """Ferme toutes les positions ouvertes sur un symbole."""
         symbol = self.normalize_symbol(symbol)
-        pos = self.get_position(symbol)
-        if not pos or "ticket" not in pos:
+        positions = mt5.positions_get(symbol=symbol)
+        if not positions or len(positions) == 0:
             log.info(f"Aucune position ouverte à fermer pour {symbol} sur MT5.")
             return False
 
-        ticket = pos["ticket"]
-        volume = pos["size"]
-        side = pos["side"]
+        success = True
+        for pos in positions:
+            ticket = pos.ticket
+            volume = pos.volume
+            side = "LONG" if pos.type == mt5.POSITION_TYPE_BUY else "SHORT"
 
-        # Déterminer le type d'ordre opposé pour fermer la position
-        order_type = mt5.ORDER_TYPE_SELL if side == "LONG" else mt5.ORDER_TYPE_BUY
-        price = mt5.symbol_info_tick(symbol).bid if order_type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
+            # Déterminer le type d'ordre opposé pour fermer la position
+            order_type = mt5.ORDER_TYPE_SELL if side == "LONG" else mt5.ORDER_TYPE_BUY
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                log.error(f"Impossible d'obtenir les prix tick pour fermer la position #{ticket}")
+                success = False
+                continue
+                
+            price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
 
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": volume,
-            "type": order_type,
-            "position": ticket,
-            "price": price,
-            "deviation": 20,
-            "magic": 10099,
-            "comment": f"Close position MT5 - {reason}",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": volume,
+                "type": order_type,
+                "position": ticket,
+                "price": price,
+                "deviation": 20,
+                "magic": 10099,
+                "comment": f"Close #{ticket} - {reason}"[:31],
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
 
-        log.info(f"Fermeture position MT5 #{ticket} sur {symbol} (Taille: {volume}, Type: {side})...")
-        result = mt5.order_send(request)
-        
-        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            error_code = mt5.last_error()
-            log.error(f"Échec de la fermeture de position sur {symbol}: {result.comment if result else ''} (code: {error_code})")
-            return False
-
-        log.info(f"Position #{ticket} sur {symbol} fermée avec succès.")
-        return True
+            log.info(f"Fermeture position MT5 #{ticket} sur {symbol} (Taille: {volume}, Type: {side})...")
+            result = mt5.order_send(request)
+            
+            if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+                error_code = mt5.last_error()
+                log.error(f"Échec de la fermeture de position #{ticket} sur {symbol}: {result.comment if result else ''} (code: {error_code})")
+                success = False
+            else:
+                log.info(f"Position #{ticket} sur {symbol} fermée avec succès.")
+                
+        return success
 
     def place_order(self, symbol: str, side: str, amount: float,
                    sl: float, tp: float, reduce_only: bool = False,
@@ -279,7 +317,7 @@ class MT5Client(Broker):
             "tp": float(tp) if tp > 0 else 0.0,
             "deviation": 20,
             "magic": 10099,
-            "comment": comment or f"SuperBot order - {side_upper}",
+            "comment": str(comment or f"SuperBot order - {side_upper}")[:31],
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
@@ -297,33 +335,35 @@ class MT5Client(Broker):
         return True
 
     def modify_sl_tp(self, symbol: str, sl: float, tp: float) -> bool:
-        """Modifie le SL/TP d'une position existante."""
+        """Modifie le SL/TP de toutes les positions existantes sur un symbole."""
         symbol = self.normalize_symbol(symbol)
-        pos = self.get_position(symbol)
-        if not pos or "ticket" not in pos:
+        positions = mt5.positions_get(symbol=symbol)
+        if not positions or len(positions) == 0:
             log.warning(f"Impossible de modifier le SL/TP: aucune position sur {symbol}")
             return False
 
-        ticket = pos["ticket"]
+        success = True
+        for pos in positions:
+            ticket = pos.ticket
+            request = {
+                "action": mt5.TRADE_ACTION_SLTP,
+                "position": ticket,
+                "symbol": symbol,
+                "sl": float(sl) if sl > 0 else 0.0,
+                "tp": float(tp) if tp > 0 else 0.0,
+            }
 
-        request = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "position": ticket,
-            "symbol": symbol,
-            "sl": float(sl) if sl > 0 else 0.0,
-            "tp": float(tp) if tp > 0 else 0.0,
-        }
+            log.info(f"Modification SL/TP position MT5 #{ticket} ({symbol}) -> SL: {sl:.5f}, TP: {tp:.5f}")
+            result = mt5.order_send(request)
 
-        log.info(f"Modification SL/TP position MT5 #{ticket} ({symbol}) -> SL: {sl:.5f}, TP: {tp:.5f}")
-        result = mt5.order_send(request)
-
-        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            error_code = mt5.last_error()
-            log.error(f"Échec de la modification du SL/TP sur {symbol}: {result.comment if result else ''} (code err: {error_code})")
-            return False
-
-        log.info(f"Modification SL/TP sur position #{ticket} effectuée avec succès.")
-        return True
+            if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+                error_code = mt5.last_error()
+                log.error(f"Échec de la modification du SL/TP sur #{ticket} ({symbol}): {result.comment if result else ''} (code err: {error_code})")
+                success = False
+            else:
+                log.info(f"Modification SL/TP sur position #{ticket} effectuée avec succès.")
+                
+        return success
 
     def get_current_price(self, symbol: str) -> float:
         """Retourne le dernier prix (mid price)."""
@@ -347,10 +387,15 @@ class MT5Client(Broker):
     def normalize_symbol(self, symbol: str) -> str:
         """
         Adapte le symbole (ex: EUR/USD -> EURUSD).
-        Fusion Markets utilise des symboles sans barre oblique.
+        Fusion Markets utilise des symboles sans barre oblique et des codes spécifiques.
         """
-        clean = symbol.strip().upper()
-        return clean.replace("/", "")
+        clean = symbol.strip().upper().replace("/", "")
+        # Correspondance des matières premières Fusion Markets
+        if clean in ["WTIUSD", "WTI"]:
+            return "XTIUSD"
+        if clean in ["BRENTUSD", "BRENT", "BRNUSD"]:
+            return "XBRUSD"
+        return clean
 
     def __del__(self):
         """Libère le terminal à la suppression de l'objet client."""

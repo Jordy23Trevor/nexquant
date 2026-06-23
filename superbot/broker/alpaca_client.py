@@ -327,6 +327,7 @@ class AlpacaClient(Broker):
     def modify_sl_tp(self, symbol: str, sl: float, tp: float) -> bool:
         """
         Modifie le stop loss et take profit d'une position existante.
+        Au lieu d'annuler tous les ordres et d'en renvoyer un au marché, on remplace les ordres existants.
         """
         alpaca_symbol = self._normalize_symbol(symbol)
         pos = self.get_position(symbol)
@@ -341,27 +342,64 @@ class AlpacaClient(Broker):
 
         def run():
             try:
-                self._api.cancel_orders()
+                orders = self._api.list_orders(status="open")
+                success = False
+                
+                for order in orders:
+                    if order.symbol != alpaca_symbol:
+                        continue
+                    
+                    # Ordre Stop Loss (stop ou stop_limit)
+                    if order.type in ["stop", "stop_limit"] and sl is not None:
+                        try:
+                            self._api.replace_order(order.id, stop_price=sl)
+                            log.info(f"Stop Loss mis à jour pour {symbol} sur Alpaca : {sl}")
+                            success = True
+                        except Exception as e:
+                            log.error(f"Échec de mise à jour du SL pour {symbol} sur Alpaca : {e}")
+                    
+                    # Ordre Take Profit (limit)
+                    elif order.type == "limit" and tp is not None:
+                        try:
+                            self._api.replace_order(order.id, limit_price=tp)
+                            log.info(f"Take Profit mis à jour pour {symbol} sur Alpaca : {tp}")
+                            success = True
+                        except Exception as e:
+                            log.error(f"Échec de mise à jour du TP pour {symbol} sur Alpaca : {e}")
 
-                order_params = {
-                    "symbol": alpaca_symbol,
-                    "qty": size,
-                    "side": close_side,
-                    "type": "market",
-                    "time_in_force": "day",
-                }
-
-                if sl is not None or tp is not None:
-                    order_params["order_class"] = "bracket"
+                # Si aucun ordre n'existait, on en crée de nouveaux
+                if not success:
                     if sl is not None:
-                        order_params["stop_loss"] = {"stop_price": sl}
+                        try:
+                            self._api.submit_order(
+                                symbol=alpaca_symbol,
+                                qty=size,
+                                side=close_side,
+                                type="stop",
+                                stop_price=sl,
+                                time_in_force="gtc"
+                            )
+                            log.info(f"Nouveau Stop Loss créé pour {symbol} sur Alpaca : {sl}")
+                            success = True
+                        except Exception as e:
+                            log.error(f"Échec de création du nouveau SL pour {symbol} sur Alpaca : {e}")
+                    
                     if tp is not None:
-                        order_params["take_profit"] = {"limit_price": tp}
+                        try:
+                            self._api.submit_order(
+                                symbol=alpaca_symbol,
+                                qty=size,
+                                side=close_side,
+                                type="limit",
+                                limit_price=tp,
+                                time_in_force="gtc"
+                            )
+                            log.info(f"Nouveau Take Profit créé pour {symbol} sur Alpaca : {tp}")
+                            success = True
+                        except Exception as e:
+                            log.error(f"Échec de création du nouveau TP pour {symbol} sur Alpaca : {e}")
 
-                order = self._api.submit_order(**order_params)
-
-                log.info(f"️  SL/TP mis à jour {symbol} | SL: {sl if sl is not None else 'inchangé'} | TP: {tp if tp is not None else 'inchangé'}")
-                return True
+                return success
 
             except Exception as e:
                 log.error(f"Échec de modification SL/TP sur {symbol} : {e}")
