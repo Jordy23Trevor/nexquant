@@ -164,38 +164,20 @@ class SuperBot:
                 self.initial_balance = 10000.0
 
             # Déterminer les instruments selon le broker (clés spécifiques au broker en priorité)
-            broker_type = BROKER_TYPE  # "binance", "alpaca", "paper_forex"
-            broker_key = f"INSTRUMENTS_{broker_type.upper()}"  # ex: INSTRUMENTS_BINANCE
+            broker_type = BROKER_TYPE  # "binance", "alpaca", "paper_forex", "mt5"
+            broker_key = f"INSTRUMENTS_{broker_type.upper()}"  # ex: INSTRUMENTS_MT5
             env_instruments_broker = os.getenv(broker_key)
             env_instruments_generic = os.getenv("INSTRUMENTS")
 
             if env_instruments_broker:
-                self.instruments = [s.strip() for s in env_instruments_broker.split(",")]
+                self.instruments = [s.strip() for s in env_instruments_broker.split(",") if s.strip()]
                 log.info(f"Instruments spécifiques au broker ({broker_key}) : {self.instruments}")
             elif env_instruments_generic:
-                candidate = [s.strip() for s in env_instruments_generic.split(",")]
-                asset_type = self.broker.get_asset_type()
-                is_crypto_symbol = any("USDT" in s or "BTC" in s or "ETH" in s for s in candidate)
-                is_forex_symbol = any("/" in s and "USDT" not in s for s in candidate)
-                is_stock_symbol = any(s in ["SPY","QQQ","AAPL","TSLA","MSFT","AMZN"] for s in candidate)
-                compatible = (
-                    (asset_type == "crypto" and is_crypto_symbol) or
-                    (asset_type == "stock" and (is_stock_symbol or not is_crypto_symbol)) or
-                    (asset_type == "forex" and is_forex_symbol)
-                )
-                if compatible:
-                    self.instruments = candidate
-                    log.info(f"Instruments configurés via .env : {self.instruments}")
-                else:
-                    self.instruments = self.broker.get_default_instruments()
-                    log.warning(
-                        f"Instruments .env ({candidate}) incompatibles avec broker ''{broker_type}''(type={asset_type}). "
-                        f"Défauts utilisés : {self.instruments}. "
-                        f"Conseil : ajoutez {broker_key}=... dans votre .env."
-                    )
+                self.instruments = [s.strip() for s in env_instruments_generic.split(",") if s.strip()]
+                log.info(f"Instruments configurés via la variable générique INSTRUMENTS : {self.instruments}")
             else:
                 self.instruments = self.broker.get_default_instruments()
-                log.info(f"Aucun instrument configuré — défauts broker ({BROKER_TYPE}) : {self.instruments}")
+                log.info(f"Aucun instrument configuré — défauts courtier ({BROKER_TYPE}) : {self.instruments}")
 
             news_broker_key = f"NEWS_ASSETS_{BROKER_TYPE.upper()}"
             env_news_assets_broker = os.getenv(news_broker_key)

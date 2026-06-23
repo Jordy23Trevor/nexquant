@@ -45,6 +45,9 @@ ALPACA_API_VERSION = os.getenv("ALPACA_API_VERSION", "v2")
 FOREX_DEFAULT_LEVERAGE = int(os.getenv("FOREX_DEFAULT_LEVERAGE", "30"))  # Typical forex leverage
 FOREX_MARGIN_CALL_LEVEL = float(os.getenv("FOREX_MARGIN_CALL_LEVEL", "0.5"))  # 50% margin used triggers call
 FOREX_STOP_OUT_LEVEL = float(os.getenv("FOREX_STOP_OUT_LEVEL", "0.2"))  # 20% margin used triggers stop out
+TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "")
+ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY", "")
+FOREX_DATA_PROVIDER = os.getenv("FOREX_DATA_PROVIDER", "twelvedata")
 
 # =============================================================================
 # TRADING INSTRUMENTS & TIMEFRAMES
