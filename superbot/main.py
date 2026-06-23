@@ -523,6 +523,12 @@ class SuperBot:
                 except Exception as e:
                     log.warning(f"Erreur de synchronisation des positions au cycle #{cycle_count} : {e}")
 
+                # Sélectionner l'actif crypto actif et effectuer les rotations si nécessaire
+                try:
+                    self._select_and_rotate_crypto()
+                except Exception as e:
+                    log.warning(f"Erreur lors de la sélection/rotation crypto au cycle #{cycle_count} : {e}")
+
                 # Traiter chaque instrument
                 for symbol in self.instruments:
                     if not self.running:
@@ -591,6 +597,39 @@ class SuperBot:
             df_with_indicators = self.technical_indicators.calculate_all_indicators(df.copy())
             self.market_data[symbol] = df_with_indicators
 
+            # === GESTION DE RISQUE CONTINUE DES POSITIONS OUVERTES ===
+            # Mettre à jour les trailing stops et break-evens pour les positions ouvertes
+            if symbol in self.positions:
+                current_price = df_with_indicators.iloc[-1]['close']
+                atr_value = df_with_indicators.iloc[-1].get('atr', 0)
+                
+                # Mettre à jour l'ATR dans la position pour le risk manager
+                if self.risk_manager and symbol in self.risk_manager.open_positions:
+                    pos_risk = self.risk_manager.open_positions[symbol]
+                    pos_risk['atr_value'] = atr_value
+                    
+                    old_sl = pos_risk.get('stop_loss', 0.0)
+                    
+                    # Lancer la mise à jour (calcul du trailing stop / break-even)
+                    self.risk_manager.update_open_position(symbol, current_price)
+                    
+                    new_sl = pos_risk.get('stop_loss', 0.0)
+                    
+                    # Si le stop loss a été modifié localement, mettre à jour chez le broker
+                    if new_sl != old_sl and new_sl > 0:
+                        log.info(f"Mise à jour du Stop Loss pour {symbol} chez le courtier : {old_sl:.5f} -> {new_sl:.5f}")
+                        success = self.broker.modify_sl_tp(symbol, new_sl, pos_risk.get('take_profit', 0.0))
+                        if success:
+                            # Mettre à jour notre dictionnaire local de suivi de position
+                            self.positions[symbol]['stop_loss'] = new_sl
+
+            # Si le courtier est crypto et que le symbole n'est pas l'actif sélectionné
+            if self.broker.get_asset_type() == "crypto":
+                active_crypto = getattr(self, '_active_crypto_symbol', None)
+                if active_crypto and symbol != active_crypto:
+                    # Ne pas chercher à ouvrir de nouvelles positions sur cet actif
+                    return
+
             # 3. Analyser le marché et générer un signal de trading
             signal_data = self.strategy.analyze_market(df_with_indicators)
             signal_data['symbol'] = symbol  # Ajouter le symbole au signal
@@ -646,12 +685,12 @@ class SuperBot:
                 )
 
                 if position_size <= 0:
-                    log.debug(f"Taille de position nulle pour {symbol}, pas d'action")
+                    log.debug(f"Taille de position nulle ou rejetée pour {symbol}, pas d'action")
                     return
 
                 log.info(
                     f"Taille de position calculée pour {symbol} : {position_size:.6f} | "
-                    f"Risque : {size_details['actual_risk_pct']:.2f}% du compte"
+                    f"Risque : {size_details.get('actual_risk_pct', 0.0):.2f}% du compte"
                 )
 
                 # 6. Vérifier les limites de risque avant d'envoyer l'ordre
@@ -708,6 +747,122 @@ class SuperBot:
 
         except Exception as e:
             log.error(f"Erreur inattendue dans _process_symbol pour {symbol} : {e}")
+            log.debug(traceback.format_exc())
+
+    def _select_and_rotate_crypto(self):
+        """
+        Pour la crypto, sélectionne automatiquement le meilleur actif (BTC ou ETH)
+        et gère l'abandon/rotation de l'autre vers le nouvel actif sélectionné.
+        """
+        try:
+            if not self.broker or self.broker.get_asset_type() != "crypto":
+                return
+
+            btc_symbol = None
+            eth_symbol = None
+
+            # Détecter les symboles BTC et ETH parmi les instruments ou les valeurs par défaut du broker
+            symbols_to_check = list(self.instruments)
+            try:
+                for default_sym in self.broker.get_default_instruments():
+                    if default_sym not in symbols_to_check:
+                        symbols_to_check.append(default_sym)
+            except Exception:
+                pass
+
+            for s in symbols_to_check:
+                s_upper = s.upper()
+                if "BTC" in s_upper and ("USDT" in s_upper or "USD" in s_upper) and not btc_symbol:
+                    btc_symbol = s
+                elif "ETH" in s_upper and ("USDT" in s_upper or "USD" in s_upper) and not eth_symbol:
+                    eth_symbol = s
+
+            # Fallbacks si non trouvés dans la liste
+            if not btc_symbol:
+                btc_symbol = "BTC/USDT" if "/" in self.instruments[0] else "BTCUSDT"
+            if not eth_symbol:
+                eth_symbol = "ETH/USDT" if "/" in self.instruments[0] else "ETHUSDT"
+
+            log.debug(f"Analyse rotation crypto : BTC={btc_symbol}, ETH={eth_symbol}")
+
+            # Récupérer les données pour les deux actifs
+            btc_df = self._fetch_market_data(btc_symbol)
+            eth_df = self._fetch_market_data(eth_symbol)
+
+            if btc_df is None or eth_df is None or len(btc_df) < 50 or len(eth_df) < 50:
+                # Si l'un des deux échoue, on ne change rien
+                log.debug("Données insuffisantes pour effectuer la sélection de rotation crypto.")
+                return
+
+            # Calculer les indicateurs et analyser avec la stratégie
+            btc_indicators = self.technical_indicators.calculate_all_indicators(btc_df.copy())
+            eth_indicators = self.technical_indicators.calculate_all_indicators(eth_df.copy())
+
+            btc_signal = self.strategy.analyze_market(btc_indicators)
+            eth_signal = self.strategy.analyze_market(eth_indicators)
+
+            # Calculer un score de force de tendance/momentum pour la rotation
+            def compute_trend_score(df, sig) -> float:
+                last = df.iloc[-1]
+                score = float(sig.get('total_score', 0))
+                
+                # Bonus de tendance à long terme
+                ema_200 = last.get('ema_trend', last['close'])
+                if last['close'] > ema_200:
+                    score += 5.0
+                else:
+                    score -= 5.0
+
+                # Force de tendance ADX
+                adx = last.get('adx', 0)
+                if last['close'] > ema_200:
+                    score += adx / 10.0
+                else:
+                    score -= adx / 10.0
+
+                # RSI (momentum)
+                rsi = last.get('rsi', 50)
+                score += (rsi - 50) / 10.0
+
+                return score
+
+            btc_score = compute_trend_score(btc_indicators, btc_signal)
+            eth_score = compute_trend_score(eth_indicators, eth_signal)
+
+            log.info(f"Évaluation Crypto : BTC Score = {btc_score:.2f} | ETH Score = {eth_score:.2f}")
+
+            # Choix de l'actif
+            current_active = getattr(self, '_active_crypto_symbol', None)
+            
+            # Appliquer un buffer de rotation (différence > 2.0) pour éviter les allers-retours
+            if current_active is None:
+                selected = btc_symbol if btc_score >= eth_score else eth_symbol
+            elif current_active == btc_symbol:
+                selected = eth_symbol if eth_score > btc_score + 2.0 else btc_symbol
+            else:
+                selected = btc_symbol if btc_score > eth_score + 2.0 else eth_symbol
+
+            self._active_crypto_symbol = selected
+            log.info(f"Actif crypto sélectionné : {selected}")
+
+            # Abandon/rotation de position :
+            # Si nous détenons une position sur l'autre symbole, et que nous choisissons de basculer,
+            # on vérifie s'il faut abandonner l'actif actuel.
+            other_symbol = eth_symbol if selected == btc_symbol else btc_symbol
+            other_pos = self.positions.get(other_symbol)
+
+            if other_pos and other_pos.get('size', 0) > 0:
+                current_pos_score = btc_score if other_symbol == btc_symbol else eth_score
+                selected_score = eth_score if selected == eth_symbol else btc_score
+
+                # Si le nouvel actif est nettement meilleur (score supérieur de 3.0 points ou plus)
+                if selected_score > current_pos_score + 3.0:
+                    log.info(f"🔄 ROTATION CRYPTO : Fermeture de la position sur {other_symbol} (score {current_pos_score:.2f}) pour basculer sur {selected} (score {selected_score:.2f})")
+                    self.broker.close_position(other_symbol, reason="Rotation de portefeuille crypto")
+                    self._sync_positions_with_broker()
+
+        except Exception as e:
+            log.error(f"Erreur dans _select_and_rotate_crypto: {e}")
             log.debug(traceback.format_exc())
 
     def _fetch_market_data(self, symbol: str, limit: int = 500) -> Optional[any]:

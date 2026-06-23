@@ -27,8 +27,7 @@ log = logging.getLogger("paper_forex")
 
 class PaperForexClient(Broker):
     """
-    Moteur de simulation de trading forex utilisant des données gratuites
-    de Twelve Data ou Alpha Vantage.
+    Moteur de simulation de trading forex utilisant des données simulées.
     Permet le paper trading réaliste sans compte broker forex traditionnel.
     Simule l'exécution d'ordres, SL/TP, marge, effet de levier.
     """
@@ -40,7 +39,6 @@ class PaperForexClient(Broker):
         self._symbol_info: Dict[str, Dict] = {}
         self._price_cache: Dict[str, Dict] = {}
         self._last_update: Dict[str, datetime] = {}
-        self._balance = 10000.0
         self._initialize_symbols()
 
     def get_default_instruments(self) -> List[str]:
@@ -53,9 +51,9 @@ class PaperForexClient(Broker):
         return "forex"
 
     def _init_data_provider(self):
-        """Initialise le fournisseur de données (Yahoo Finance)."""
-        self.data_provider = "yahoo"
-        log.info("Fournisseur de données forex : Yahoo Finance (gratuit, sans clé)")
+        """Initialise le fournisseur de données (simulation uniquement)."""
+        self.data_provider = "simulation"
+        log.info("Fournisseur de données forex : simulation")
 
     def _initialize_symbols(self):
         """Initialise la liste des symboles forex soutenus avec leurs caractéristiques."""
@@ -99,39 +97,6 @@ class PaperForexClient(Broker):
             return f"{parts[0]}/{parts[1]}"
         else:
             return clean
-
-    def _fetch_price_yahoo(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Récupère le prix en temps réel depuis Yahoo Finance (sans clé API)."""
-        normalized = self._normalize_symbol(symbol)
-        # EUR/USD -> EURUSD=X
-        symbol_yh = normalized.replace("/", "") + "=X"
-
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol_yh}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-        }
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                result = data.get("chart", {}).get("result", [])
-                if result:
-                    meta = result[0].get("meta", {})
-                    price = meta.get("regularMarketPrice")
-                    if price is not None:
-                        price = float(price)
-                        return {
-                            "price": price,
-                            "timestamp": datetime.now(timezone.utc),
-                            "bid": price - 0.00005,
-                            "ask": price + 0.00005,
-                        }
-            else:
-                log.warning(f"⚠️ Yahoo Finance API error for {symbol}: {response.status_code}")
-        except Exception as e:
-            log.warning(f"⚠️ Failed to fetch price from Yahoo Finance for {symbol}: {e}")
-
-        return None
 
     def _fetch_price_simulation(self, symbol: str) -> Dict[str, Any]:
         """Génère un prix simulé basé sur le dernier prix connu ou une valeur de base."""
@@ -180,12 +145,7 @@ class PaperForexClient(Broker):
             if time_diff < 5:
                 return self._price_cache[normalized]["price"]
 
-        price_data = None
-        if self.data_provider == "yahoo":
-            price_data = self._fetch_price_yahoo(symbol)
-
-        if price_data is None:
-            price_data = self._fetch_price_simulation(symbol)
+        price_data = self._fetch_price_simulation(symbol)
 
         self._price_cache[normalized] = price_data
         self._last_update[normalized] = now
@@ -194,7 +154,7 @@ class PaperForexClient(Broker):
 
     def get_balance(self) -> float:
         """Solde disponible en devise de base du compte de simulation."""
-        return self._balance
+        return 10000.0
 
     def get_account_summary(self) -> Dict[str, Any]:
         """Résumé complet du compte de simulation."""
@@ -237,89 +197,46 @@ class PaperForexClient(Broker):
         }
 
     def get_position(self, symbol: str) -> Dict[str, Any]:
-        """Retourne la position ouverte sur un symbole, avec vérification des SL/TP."""
+        """Retourne la position ouverte sur un symbole."""
         normalized = self._normalize_symbol(symbol)
-        position = self._positions.get(normalized, {})
+        position = self._positions.get(normalized, {
+            "side": None,
+            "size": 0.0,
+            "entry_price": 0.0,
+            "mark_price": 0.0,
+            "unrealized_pnl": 0.0,
+            "liquidation_price": None,
+            "margin_used": 0.0,
+        })
 
-        if not position or position.get("size", 0.0) == 0.0:
-            return {}
+        if position["size"] != 0:
+            current_price = self.get_current_price(symbol)
+            position["mark_price"] = current_price
 
-        current_price = self.get_current_price(symbol)
-        position["mark_price"] = current_price
+            if position["side"] == "LONG":
+                position["unrealized_pnl"] = (current_price - position["entry_price"]) * abs(position["size"])
+            elif position["side"] == "SHORT":
+                position["unrealized_pnl"] = (position["entry_price"] - current_price) * abs(position["size"])
 
-        # Calculer le P&L non réalisé
-        side = position["side"]
-        size = position["size"]
-        entry_price = position["entry_price"]
+            symbol_info = self._get_symbol_info(symbol)
+            leverage = symbol_info["leverage"]
+            notional = abs(position["size"] * position["entry_price"])
+            position["margin_used"] = notional / leverage
 
-        if side == "LONG":
-            position["unrealized_pnl"] = (current_price - entry_price) * size
-        else:
-            position["unrealized_pnl"] = (entry_price - current_price) * size
-
-        # Calculer la marge utilisée et le prix de liquidation
-        symbol_info = self._get_symbol_info(symbol)
-        leverage = symbol_info["leverage"]
-        notional = abs(size * entry_price)
-        position["margin_used"] = notional / leverage
-
-        if side == "LONG":
-            price_drop = position["margin_used"] * leverage / size
-            position["liquidation_price"] = entry_price - price_drop
-        else:
-            price_rise = position["margin_used"] * leverage / size
-            position["liquidation_price"] = entry_price + price_rise
-
-        # Vérifier si SL, TP ou Liquidation a été touché!
-        sl = position.get("stop_loss", 0.0)
-        tp = position.get("take_profit", 0.0)
-        liq = position.get("liquidation_price")
-
-        hit = False
-        reason = ""
-
-        if side == "LONG":
-            if sl > 0.0 and current_price <= sl:
-                hit = True
-                reason = f"Stop Loss touché à {current_price:.5f} (SL: {sl:.5f})"
-            elif tp > 0.0 and current_price >= tp:
-                hit = True
-                reason = f"Take Profit touché à {current_price:.5f} (TP: {tp:.5f})"
-            elif liq and current_price <= liq:
-                hit = True
-                reason = f"Liquidation touchée à {current_price:.5f} (Liq: {liq:.5f})"
-        else: # SHORT
-            if sl > 0.0 and current_price >= sl:
-                hit = True
-                reason = f"Stop Loss touché à {current_price:.5f} (SL: {sl:.5f})"
-            elif tp > 0.0 and current_price <= tp:
-                hit = True
-                reason = f"Take Profit touché à {current_price:.5f} (TP: {tp:.5f})"
-            elif liq and current_price >= liq:
-                hit = True
-                reason = f"Liquidation touchée à {current_price:.5f} (Liq: {liq:.5f})"
-
-        if hit:
-            log.info(f"⚡ Exécution automatique d'ordre de sortie sur {symbol}: {reason}")
-            self.close_position(symbol, reason=reason)
-            return {}
+            if position["side"] == "LONG":
+                price_drop = position["margin_used"] * leverage / abs(position["size"])
+                position["liquidation_price"] = position["entry_price"] - price_drop
+            elif position["side"] == "SHORT":
+                price_rise = position["margin_used"] * leverage / abs(position["size"])
+                position["liquidation_price"] = position["entry_price"] + price_rise
 
         return position
-
-    def get_open_positions(self) -> Dict[str, Dict[str, Any]]:
-        """Retourne toutes les positions ouvertes actives."""
-        active = {}
-        for symbol in list(self._positions.keys()):
-            pos = self.get_position(symbol)
-            if pos and pos.get("size", 0.0) > 0.0:
-                active[symbol] = pos
-        return active
 
     def close_position(self, symbol: str, reason: str = "") -> bool:
         """Ferme la position ouverte au prix du marché."""
         normalized = self._normalize_symbol(symbol)
-        pos = self._positions.get(normalized, {})
-        if not pos or pos.get("size", 0.0) == 0.0:
+        pos = self.get_position(symbol)
+        if not pos or pos["size"] == 0:
             log.info(f"ℹ️  Aucune position à fermer sur {symbol}")
             return False
 
@@ -338,9 +255,6 @@ class PaperForexClient(Broker):
         else:
             pnl = (pos["entry_price"] - close_price) * size
 
-        # Mettre à jour le solde
-        self._balance += pnl
-
         log.info(
             f"Position {side} fermée sur {symbol} | "
             f"Taille: {size:.4f} | Entry: {pos['entry_price']:.4f} | "
@@ -355,8 +269,6 @@ class PaperForexClient(Broker):
             "unrealized_pnl": 0.0,
             "liquidation_price": None,
             "margin_used": 0.0,
-            "stop_loss": 0.0,
-            "take_profit": 0.0
         }
 
         self._cancel_related_orders(normalized)
@@ -380,7 +292,7 @@ class PaperForexClient(Broker):
 
         target_symbol = symbol if symbol else "EUR/USD"
         min_size = self.get_min_order_size(symbol=target_symbol)
-        max_size = self.get_max_order_size(symbol=target_symbol)
+        max_size = self.get_step_size(symbol=target_symbol) * 100000
 
         final_size = max(min(leveraged_size, max_size), min_size)
         return final_size
@@ -425,16 +337,14 @@ class PaperForexClient(Broker):
                         "unrealized_pnl": 0.0,
                         "liquidation_price": None,
                         "margin_used": 0.0,
-                        "stop_loss": sl if sl is not None else 0.0,
-                        "take_profit": tp if tp is not None else 0.0,
                     }
                     log.info(
                         f"{'▲' if side == 'buy' else '▼'} {side} {amount} {symbol} @ {entry_price:.4f} | "
                         f"SL: {sl if sl is not None else 'None'} | TP: {tp if tp is not None else 'None'} | {comment}"
                     )
                 else:
-                    pos = self._positions.get(normalized, {})
-                    if not pos or pos.get("size", 0.0) == 0:
+                    pos = self.get_position(symbol)
+                    if not pos or pos["size"] == 0:
                         log.warning(f"️  Aucune position à réduire sur {symbol}")
                         return False
 
@@ -460,8 +370,6 @@ class PaperForexClient(Broker):
                         else:
                             pnl = (pos["entry_price"] - close_price) * amount
 
-                        self._balance += pnl
-
                         log.info(
                             f"Position {current_side} réduite à zéro sur {symbol} | "
                             f"Taille fermée: {amount:.4f} | Entry: {pos['entry_price']:.4f} | "
@@ -476,8 +384,6 @@ class PaperForexClient(Broker):
                             "unrealized_pnl": 0.0,
                             "liquidation_price": None,
                             "margin_used": 0.0,
-                            "stop_loss": 0.0,
-                            "take_profit": 0.0,
                         }
                     else:
                         if current_side == "LONG":
@@ -485,7 +391,6 @@ class PaperForexClient(Broker):
                         else:
                             pnl = (pos["entry_price"] - entry_price) * amount
 
-                        self._balance += pnl
                         self._positions[normalized]["size"] = remaining_size
                         log.info(
                             f"Position {current_side} réduite sur {symbol} | "
@@ -518,23 +423,20 @@ class PaperForexClient(Broker):
         Modifie le stop loss et take profit d'une position existante.
         """
         normalized = self._normalize_symbol(symbol)
-        pos = self._positions.get(normalized, {})
-        if not pos or pos.get("size", 0.0) == 0.0:
+        pos = self.get_position(symbol)
+        if not pos or pos["size"] == 0:
             log.warning(f"️ modify_sl_tp : Aucune position ouverte sur {symbol}")
             return False
 
-        sl = round(sl, 5) if sl > 0 else 0.0
-        tp = round(tp, 5) if tp > 0 else 0.0
+        sl = round(sl, 5) if sl > 0 else None
+        tp = round(tp, 5) if tp > 0 else None
 
         def run():
             try:
-                if normalized in self._positions:
-                    if sl > 0:
-                        self._positions[normalized]["stop_loss"] = sl
-                        log.info(f"️  SL mis à jour pour {symbol} à {sl:.4f}")
-                    if tp > 0:
-                        self._positions[normalized]["take_profit"] = tp
-                        log.info(f"️  TP mis à jour pour {symbol} à {tp:.4f}")
+                if sl is not None:
+                    log.info(f"️  SL mis à jour pour {symbol} à {sl:.4f}")
+                if tp is not None:
+                    log.info(f"️  TP mis à jour pour {symbol} à {tp:.4f}")
                 return True
             except Exception as e:
                 log.error(f"Échec de modification SL/TP sur {symbol} : {e}")
@@ -568,120 +470,14 @@ class PaperForexClient(Broker):
 
     def get_max_order_size(self, symbol: str) -> float:
         """Retourne la taille maximale d'ordre autorisée pour un instrument."""
-        return 10000000.0
+        return 100.0
 
     def fetch_candles(self, symbol: str, timeframe: str, limit: int = 500) -> pd.DataFrame:
         """
-        Télécharge les bougies historiques ou les génère en simulation pour le forex.
+        Génère des bougies historiques en simulation pour le forex.
         """
         normalized = self._normalize_symbol(symbol)
-        
-        # Essayer de récupérer de vraies données de Yahoo Finance
-        df = None
-        if self.data_provider == "yahoo":
-            df = self._fetch_candles_yahoo(normalized, timeframe, limit)
-            
-        if df is not None and not df.empty:
-            return df
-            
-        # Sinon, générer des données simulées réalistes
         return self._generate_simulated_candles(normalized, timeframe, limit)
-
-    def _fetch_candles_yahoo(self, symbol: str, timeframe: str, limit: int) -> Optional[pd.DataFrame]:
-        """Télécharge les bougies de Yahoo Finance."""
-        normalized = self._normalize_symbol(symbol)
-        symbol_yh = normalized.replace("/", "") + "=X"
-
-        # Traduire le timeframe pour Yahoo Finance
-        tf_map = {
-            "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
-            "1h": "1h", "2h": "1h", "4h": "1h", "1d": "1d", "1w": "1wk"
-        }
-        interval = tf_map.get(timeframe, "1h")
-        
-        # Déterminer la période (range) nécessaire en fonction de limit et interval
-        if interval == "1m":
-            period = "1d"
-        elif interval == "5m":
-            period = "5d"
-        elif interval in ["15m", "30m"]:
-            period = "1mo"
-        elif interval == "1h":
-            period = "3mo" if limit > 500 else "1mo"
-        elif interval == "1d":
-            period = "1y" if limit > 250 else "6mo"
-        elif interval == "1wk":
-            period = "5y" if limit > 250 else "2y"
-        else:
-            period = "1mo"
-
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol_yh}"
-        params = {
-            "interval": interval,
-            "range": period
-        }
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-        }
-        try:
-            response = requests.get(url, params=params, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                result = data.get("chart", {}).get("result", [])
-                if result:
-                    candles_data = result[0]
-                    timestamps = candles_data.get("timestamp", [])
-                    indicators = candles_data.get("indicators", {}).get("quote", [{}])[0]
-                    
-                    opens = indicators.get("open", [])
-                    highs = indicators.get("high", [])
-                    lows = indicators.get("low", [])
-                    closes = indicators.get("close", [])
-                    volumes = indicators.get("volume", [1.0] * len(timestamps))
-                    
-                    if not timestamps or not closes:
-                        return None
-                        
-                    # Filtrer les valeurs None/NaN
-                    df_list = []
-                    for i in range(len(timestamps)):
-                        t = datetime.fromtimestamp(timestamps[i], timezone.utc)
-                        o = opens[i]
-                        h = highs[i]
-                        l = lows[i]
-                        c = closes[i]
-                        v = volumes[i] if volumes[i] is not None else 1.0
-                        if None not in [o, h, l, c]:
-                            df_list.append({
-                                "timestamp": t,
-                                "open": float(o),
-                                "high": float(h),
-                                "low": float(l),
-                                "close": float(c),
-                                "volume": float(v)
-                            })
-                            
-                    df = pd.DataFrame(df_list)
-                    if not df.empty:
-                        df = df.set_index("timestamp")
-                        df = df.sort_index()
-                        
-                        # Si l'utilisateur demande du 2h ou 4h, on peut resampler
-                        if timeframe == "2h":
-                            df = df.resample("2h").agg({
-                                "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"
-                            }).dropna()
-                        elif timeframe == "4h":
-                            df = df.resample("4h").agg({
-                                "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"
-                            }).dropna()
-                            
-                        return df.tail(limit)
-            else:
-                log.warning(f"⚠️ Yahoo Finance candle error for {symbol}: {response.status_code}")
-        except Exception as e:
-            log.warning(f"⚠️ Failed to fetch candles from Yahoo Finance for {symbol}: {e}")
-        return None
 
     def _generate_simulated_candles(self, symbol: str, timeframe: str, limit: int = 500) -> pd.DataFrame:
         """Génère un DataFrame OHLCV simulé pour le backtesting/paper trading."""

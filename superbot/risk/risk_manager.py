@@ -200,6 +200,15 @@ class RiskManager:
             actual_risk_amount = position_size * risk_per_unit
             actual_risk_pct = (actual_risk_amount / account_balance) * 100 if account_balance > 0 else 0
 
+            # Si le risque réel dépasse la limite de sécurité (ex: à cause de la taille de position minimale)
+            max_allowed_risk_pct = max(3.0, self.RISK_PCT * 2.0)
+            if actual_risk_pct > max_allowed_risk_pct:
+                log.warning(
+                    f"Risque réel de {actual_risk_pct:.2f}% dépasse la limite autorisée de {max_allowed_risk_pct:.2f}% "
+                    f"pour {symbol} (taille minimale de contrat trop grande pour la taille du compte). Trade rejeté."
+                )
+                return 0.0, {'error': 'Risk too high for account size due to contract minimums'}
+
             # Détails du calcul pour le logging et le débogage
             details = {
                 'account_balance': account_balance,

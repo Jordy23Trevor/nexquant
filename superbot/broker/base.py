@@ -203,14 +203,14 @@ def create_broker(broker_type: str = None, **kwargs) -> Broker:
     elif broker_type == "paper_forex":
         from superbot.broker.paper_forex_client import PaperForexClient
         return PaperForexClient(**kwargs)
-    elif broker_type == "oanda":
-        from superbot.broker.oanda_client import OandaClient
-        return OandaClient(**kwargs)
     elif broker_type == "mt5":
         from superbot.broker.mt5_client import MT5Client
         return MT5Client(**kwargs)
+    elif broker_type == "xtb":
+        from superbot.broker.xtb_client import XTBClient
+        return XTBClient(**kwargs)
     else:
-        supported = ["binance", "alpaca", "paper_forex", "oanda", "mt5"]
+        supported = ["binance", "alpaca", "paper_forex", "mt5", "xtb"]
         raise ValueError(
             f"Broker '{broker_type}' non supporté.\n"
             f"Brokers disponibles : {', '.join(supported)}\n"

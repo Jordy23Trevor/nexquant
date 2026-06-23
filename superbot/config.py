@@ -12,7 +12,22 @@ load_dotenv(dotenv_path=env_path)
 # =============================================================================
 # BROKER CONFIGURATION
 # =============================================================================
-BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, paper_forex, oanda, mt5
+BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, paper_forex, mt5, xtb
+
+# =============================================================================
+# METATRADER 5 (MT5) CONFIGURATION (associated with Fusion Markets)
+# =============================================================================
+MT5_LOGIN = int(os.getenv("MT5_LOGIN", "0"))
+MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
+MT5_SERVER = os.getenv("MT5_SERVER", "FusionMarkets-Demo")
+MT5_PATH = os.getenv("MT5_PATH", "")  # Path to terminal64.exe (optional)
+
+# =============================================================================
+# XTB CONFIGURATION (connects via email and password)
+# =============================================================================
+XTB_EMAIL = os.getenv("XTB_EMAIL", "")
+XTB_PASSWORD = os.getenv("XTB_PASSWORD", "")
+XTB_SERVER = os.getenv("XTB_SERVER", "demo").lower()  # demo, real
 
 # =============================================================================
 # BINANCE FUTURES CONFIGURATION
@@ -31,18 +46,8 @@ ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets
 ALPACA_API_VERSION = os.getenv("ALPACA_API_VERSION", "v2")
 
 # =============================================================================
-# FOREX BROKER & SIMULATION CONFIGURATION
+# PAPER FOREX ENGINE CONFIGURATION
 # =============================================================================
-# OANDA CONFIGURATION
-OANDA_API_KEY = os.getenv("OANDA_API_KEY", "").strip()
-OANDA_ACCOUNT_ID = os.getenv("OANDA_ACCOUNT_ID", "").strip()
-OANDA_ENVIRONMENT = os.getenv("OANDA_ENVIRONMENT", "practice").strip().lower()
-
-# METATRADER 5 CONFIGURATION
-MT5_LOGIN = int(os.getenv("MT5_LOGIN", "0"))
-MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
-MT5_SERVER = os.getenv("MT5_SERVER", "")
-
 # Paper trading parameters for forex simulation
 FOREX_DEFAULT_LEVERAGE = int(os.getenv("FOREX_DEFAULT_LEVERAGE", "30"))  # Typical forex leverage
 FOREX_MARGIN_CALL_LEVEL = float(os.getenv("FOREX_MARGIN_CALL_LEVEL", "0.5"))  # 50% margin used triggers call
@@ -73,7 +78,7 @@ EMA_FAST = int(os.getenv("EMA_FAST", "9"))
 EMA_SLOW = int(os.getenv("EMA_SLOW", "21"))
 EMA_TREND = int(os.getenv("EMA_TREND", "200"))  # Long-term trend
 HTF_EMA = int(os.getenv("HTF_EMA", "50"))  # Higher timeframe EMA
-D1_EMA = int(os.getenv("D1_EMA", "200"))  # Daily EMA (changed from 50 to avoid duplicate with HTF_EMA)
+D1_EMA = int(os.getenv("D1_EMA", "50"))  # Daily EMA
 W1_EMA = int(os.getenv("W1_EMA", "20"))  # Weekly EMA (Elder)
 
 # RSI
@@ -128,7 +133,7 @@ SCORE_MIN = int(os.getenv("SCORE_MIN", "6"))  # Minimum score to enter (out of 1
 # Drawdown limits (Elder's rules)
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))  # Max daily drawdown %
 MAX_MONTHLY_LOSS_PCT = float(os.getenv("MAX_MONTHLY_LOSS_PCT", "6.0"))  # Max monthly drawdown %
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "2"))  # Max concurrent positions
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))  # Max concurrent positions
 
 # Position sizing limits (will be adjusted by broker-specific min/max)
 MIN_POSITION_SIZE = float(os.getenv("MIN_POSITION_SIZE", "0.001"))
@@ -171,7 +176,7 @@ FEAR_GREED_EXTREME_GREED = int(os.getenv("FEAR_GREED_EXTREME_GREED", "80"))  # >
 # =============================================================================
 # WEBHOOK CONFIGURATION (for TradingView alerts)
 # =============================================================================
-WEBHOOK_ENABLED = (os.getenv("WEBHOOK_ENABLED") or os.getenv("ENABLE_WEBHOOK") or "false").lower() == "true"
+WEBHOOK_ENABLED = os.getenv("WEBHOOK_ENABLED", "false").lower() == "true"
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "change_this_to_a_strong_secret")
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
 WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "5000"))
@@ -223,9 +228,8 @@ __all__ = [
     # Alpaca
     "ALPACA_API_KEY", "ALPACA_API_SECRET", "ALPACA_BASE_URL", "ALPACA_API_VERSION",
 
-    # Forex Brokers & Simulation
-    "OANDA_API_KEY", "OANDA_ACCOUNT_ID", "OANDA_ENVIRONMENT",
-    "MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER",
+    # Paper Forex
+    "TWELVEDATA_API_KEY", "ALPHAVANTAGE_API_KEY", "FOREX_DATA_PROVIDER",
     "FOREX_DEFAULT_LEVERAGE", "FOREX_MARGIN_CALL_LEVEL", "FOREX_STOP_OUT_LEVEL",
 
     # Trading
