@@ -347,6 +347,85 @@ class RiskManager:
         except Exception as e:
             log.error(f"Erreur lors de l'enregistrement du trade: {e}")
 
+    def load_trade_history_from_disk(self):
+        """
+        Charge l'historique des trades enregistrés depuis le fichier JSON Lines.
+        """
+        try:
+            log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+            trades_file = os.path.join(log_dir, 'trades.jsonl')
+            if not os.path.exists(trades_file):
+                log.info("Aucun fichier d'historique de trades trouvé sur le disque.")
+                return
+
+            loaded_trades = []
+            with open(trades_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            trade = json.loads(line.strip())
+                            # Ne conserver que les trades clôturés ou ayant un P&L pertinent
+                            if 'pnl' in trade:
+                                loaded_trades.append(trade)
+                        except Exception:
+                            continue
+
+            # Garder les 100 plus récents
+            self.trade_history = loaded_trades[-100:]
+            log.info(f"Historique de trading chargé depuis le disque : {len(self.trade_history)} trades trouvés.")
+        except Exception as e:
+            log.error(f"Erreur lors du chargement de l'historique de trades : {e}")
+
+    def merge_broker_history(self, broker_trades: List[Dict[str, Any]]):
+        """
+        Fusionne l'historique du broker avec l'historique local en évitant les doublons.
+        """
+        if not broker_trades:
+            return
+
+        # Créer un ensemble d'identifiants uniques pour les trades locaux existants
+        existing_keys = set()
+        for t in self.trade_history:
+            ts = t.get('timestamp', '')
+            if isinstance(ts, str) and 'T' in ts:
+                ts = ts.split('.')[0]  # ignorer les microsecondes
+            key = (t.get('symbol'), t.get('side'), ts)
+            existing_keys.add(key)
+
+        new_trades = []
+        for t in broker_trades:
+            ts = t.get('timestamp')
+            if isinstance(ts, datetime):
+                ts_str = ts.isoformat().split('.')[0]
+                t_copy = t.copy()
+                t_copy['timestamp'] = ts.isoformat()
+            elif isinstance(ts, str):
+                ts_str = ts.split('.')[0]
+                t_copy = t.copy()
+            else:
+                ts_str = str(ts)
+                t_copy = t.copy()
+
+            key = (t_copy.get('symbol'), t_copy.get('side'), ts_str)
+            if key not in existing_keys:
+                new_trades.append(t_copy)
+                existing_keys.add(key)
+
+        # Ajouter les nouveaux trades et retrier par timestamp
+        self.trade_history.extend(new_trades)
+        
+        # S'assurer que le timestamp est analysable pour le tri
+        def get_ts(x):
+            return x.get('timestamp', '')
+
+        self.trade_history.sort(key=get_ts)
+        
+        # Garder seulement les 100 derniers
+        if len(self.trade_history) > 100:
+            self.trade_history = self.trade_history[-100:]
+
+        log.info(f"Fusion de l'historique broker terminée. Total trades en mémoire : {len(self.trade_history)}")
+
     def update_open_position(self, symbol: str, current_price: float):
         """
         Met à jour une position ouverte avec le prix actuel pour le trailing stop et le break-even.

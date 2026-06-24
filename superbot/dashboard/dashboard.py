@@ -100,6 +100,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         },
                         'positions': positions,
                         'stats': stats,
+                        'history': raw_data.get('history', []),
                         'market_data': raw_data.get('market_data', {}),
                         'broker_type': raw_data.get('broker_type', ''),
                         'asset_type': raw_data.get('asset_type', 'crypto'),
@@ -2532,26 +2533,52 @@ async function fetchData() {
     const sigTableBody = document.querySelector('#signals-table tbody');
     if (sigTableBody) {
       const pos = d.positions || {};
-      const keys = Object.keys(pos);
-      if (!keys.length) {
+      const hist = d.history || [];
+      const posKeys = Object.keys(pos);
+      
+      let rows = '';
+      
+      const dec = getDecimals();
+      const pref = getCurrencyPrefix();
+      
+      // Render active positions
+      posKeys.forEach(sym => {
+        const p = pos[sym] || {};
+        const side = (p.side || '').toUpperCase();
+        const timeStr = p.timestamp ? new Date(p.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}) : 'Actif';
+        rows += `<tr>
+          <td class="mono">${timeStr}</td>
+          <td class="name mono">${sym}</td>
+          <td><span class="badge badge-${side === 'LONG' ? 'long' : 'short'}">${side || '—'}</span></td>
+          <td class="mono">${pref}${fmt(p.entry_price, dec)}</td>
+          <td class="mono">${p.stop_loss > 0 ? pref + fmt(p.stop_loss, dec) : '—'}</td>
+          <td class="mono">${p.take_profit > 0 ? pref + fmt(p.take_profit, dec) : '—'}</td>
+          <td><span class="tx-status success">En Cours</span></td>
+        </tr>`;
+      });
+      
+      // Render historical closed trades
+      hist.forEach(t => {
+        const side = (t.side || '').toUpperCase();
+        const dateObj = new Date(t.timestamp);
+        const timeStr = isNaN(dateObj.getTime()) ? 'Clôturé' : dateObj.toLocaleDateString('fr-FR', {month:'2-digit', day:'2-digit'}) + ' ' + dateObj.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+        const pnlVal = parseFloat(t.pnl || 0);
+        const pnlStr = (pnlVal >= 0 ? '+' : '') + fmt(pnlVal, 2) + ' ' + selectedCurrency;
+        rows += `<tr>
+          <td class="mono">${timeStr}</td>
+          <td class="name mono">${t.symbol}</td>
+          <td><span class="badge badge-${side === 'LONG' || side === 'BUY' ? 'long' : 'short'}">${side || '—'}</span></td>
+          <td class="mono">${pref}${fmt(t.entry_price || 0, dec)}</td>
+          <td class="mono">${pref}${fmt(t.exit_price || 0, dec)} (Sortie)</td>
+          <td class="mono">—</td>
+          <td><span class="tx-status ${pnlVal >= 0 ? 'success' : 'danger'}">${pnlVal >= 0 ? 'Gain' : 'Perte'} (${pnlStr})</span></td>
+        </tr>`;
+      });
+      
+      if (!rows) {
         sigTableBody.innerHTML = '<tr><td colspan="7" class="empty"><i class="fa-solid fa-circle-nodes"></i> En attente de signaux ou trades actifs...</td></tr>';
       } else {
-        sigTableBody.innerHTML = keys.map(sym => {
-          const p = pos[sym] || {};
-          const side = (p.side || '').toUpperCase();
-          const timeStr = p.timestamp ? new Date(p.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}) : 'Actif';
-          const dec = getDecimals();
-          const pref = getCurrencyPrefix();
-          return `<tr>
-            <td class="mono">${timeStr}</td>
-            <td class="name mono">${sym}</td>
-            <td><span class="badge badge-${side === 'LONG' ? 'long' : 'short'}">${side || '—'}</span></td>
-            <td class="mono">${pref}${fmt(p.entry_price, dec)}</td>
-            <td class="mono">${p.stop_loss > 0 ? pref + fmt(p.stop_loss, dec) : '—'}</td>
-            <td class="mono">${p.take_profit > 0 ? pref + fmt(p.take_profit, dec) : '—'}</td>
-            <td><span class="tx-status success">En Cours</span></td>
-          </tr>`;
-        }).join('');
+        sigTableBody.innerHTML = rows;
       }
     }
 

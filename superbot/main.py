@@ -245,6 +245,16 @@ class SuperBot:
             })
             log.info("Gestionnaire de risques initialisé")
 
+            # Charger l'historique de trading réel (disque + broker)
+            try:
+                self.risk_manager.load_trade_history_from_disk()
+                broker_history = self.broker.get_trade_history(days=30)
+                if broker_history:
+                    self.risk_manager.merge_broker_history(broker_history)
+                log.info(f"Historique de trading final chargé : {len(self.risk_manager.trade_history)} trades en mémoire.")
+            except Exception as e:
+                log.warning(f"Impossible de pré-charger l'historique de trading : {e}")
+
             # 3. Créer la stratégie de trading
             self.strategy = TradingStrategy({
                 'SCORE_MIN': SCORE_MIN,
@@ -365,6 +375,59 @@ class SuperBot:
                         }
                 except Exception as e:
                     log.debug(f"Erreur lors de la récupération de la position de {symbol} : {e}")
+
+            # Détecter les positions fermées
+            for symbol, old_pos in self.positions.items():
+                if symbol not in active_positions:
+                    log.info(f"Position fermée détectée pour {symbol}")
+                    entry_price = old_pos.get('entry_price', 0.0)
+                    side = old_pos.get('side', 'LONG')
+                    size = old_pos.get('size', 0.0)
+                    
+                    exit_price = 0.0
+                    pnl = 0.0
+                    
+                    # 1. Tenter de récupérer l'info exacte via l'historique du broker
+                    try:
+                        history = self.broker.get_trade_history(days=1)
+                        matching_trade = None
+                        for t in history:
+                            if t['symbol'] == symbol:
+                                matching_trade = t
+                                break
+                        if matching_trade:
+                            exit_price = matching_trade['exit_price']
+                            pnl = matching_trade['pnl']
+                            entry_price = matching_trade.get('entry_price') or entry_price
+                            log.info(f"Détails du trade récupérés depuis l'historique broker pour {symbol} : Exit={exit_price}, P&L={pnl}")
+                    except Exception as e:
+                        log.debug(f"Impossible de récupérer l'historique broker pour la fermeture de {symbol} : {e}")
+                        
+                    # 2. Si non trouvé, calculer de manière théorique
+                    if exit_price == 0.0:
+                        try:
+                            exit_price = self.broker.get_current_price(symbol)
+                            if side == 'LONG':
+                                pnl = (exit_price - entry_price) * size
+                            else:
+                                pnl = (entry_price - exit_price) * size
+                            log.info(f"Calcul théorique de la fermeture pour {symbol} : Exit={exit_price}, P&L={pnl:.2f}")
+                        except Exception as e:
+                            log.error(f"Erreur lors du calcul théorique de fermeture pour {symbol} : {e}")
+                            
+                    # Enregistrer le trade clôturé
+                    if self.risk_manager:
+                        trade_record = {
+                            'symbol': symbol,
+                            'side': 'buy' if side == 'LONG' else 'sell',
+                            'entry_price': entry_price,
+                            'exit_price': exit_price,
+                            'position_size': size,
+                            'pnl': pnl,
+                            'timestamp': datetime.now(timezone.utc).isoformat(),
+                            'status': 'closed'
+                        }
+                        self.risk_manager.record_trade(trade_record)
 
             # Mettre à jour self.positions
             self.positions = active_positions
@@ -1117,6 +1180,14 @@ class SuperBot:
 
         try:
             # Préparer les données pour le dashboard
+            serialized_history = []
+            if self.risk_manager:
+                for t in self.risk_manager.trade_history:
+                    t_copy = t.copy()
+                    if isinstance(t_copy.get('timestamp'), datetime):
+                        t_copy['timestamp'] = t_copy['timestamp'].isoformat()
+                    serialized_history.append(t_copy)
+
             dashboard_data = {
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'broker_type': BROKER_TYPE,
@@ -1125,10 +1196,11 @@ class SuperBot:
                     **self.stats.copy(),
                     'running': self.running,
                     'uptime_seconds': (datetime.now(timezone.utc) - self.stats['start_time']).total_seconds() if self.stats.get('start_time') else 0,
-                    'total_trades': self.stats.get('trades_executed', 0),
-                    'win_trades': 0,  # computed by risk_manager
+                    'total_trades': len(self.risk_manager.trade_history) if self.risk_manager else 0,
+                    'win_trades': len([t for t in self.risk_manager.trade_history if t.get('pnl', 0) > 0]) if self.risk_manager else 0,
                 },
                 'positions': {},
+                'history': serialized_history,
                 'market_data': {},
                 'account': {},
                 'risk_metrics': {},

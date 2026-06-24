@@ -4,7 +4,7 @@ Associated with Fusion Markets.
 """
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 import pandas as pd
 
@@ -120,6 +120,64 @@ class MT5Client(Broker):
             "account_type": "MT5_REAL" if acc_info.trade_mode == mt5.ACCOUNT_TRADE_MODE_REAL else "MT5_DEMO",
             "company": acc_info.company
         }
+
+    def get_trade_history(self, days: int = 30) -> List[Dict[str, Any]]:
+        """
+        Récupère l'historique des trades fermés sur les N derniers jours depuis MT5.
+        """
+        if not mt5:
+            log.error("Module MetaTrader5 non disponible")
+            return []
+
+        if not mt5.initialize():
+            log.error("Échec d'initialisation de MT5 dans get_trade_history")
+            return []
+
+        try:
+            from_date = datetime.now() - timedelta(days=days)
+            to_date = datetime.now()
+
+            deals = mt5.history_deals_get(from_date, to_date)
+            if deals is None:
+                log.warning(f"Aucun deal d'historique trouvé ou erreur: {mt5.last_error()}")
+                return []
+
+            trades = []
+            # Première passe : Identifier les deals de fermeture (EXIT)
+            for deal in deals:
+                if deal.entry == 1 and deal.symbol:  # entry == 1 est l'EXIT d'une position
+                    side = "buy" if deal.type == 1 else "sell"
+                    pnl = deal.profit + deal.commission + deal.swap + deal.fee
+                    
+                    trades.append({
+                        'symbol': deal.symbol,
+                        'side': side,
+                        'entry_price': 0.0,  # sera résolu après
+                        'exit_price': deal.price,
+                        'pnl': pnl,
+                        'size': deal.volume,
+                        'timestamp': datetime.fromtimestamp(deal.time, timezone.utc),
+                        'ticket': deal.ticket,
+                        'position_id': deal.position_id
+                    })
+
+            # Deuxième passe : Trouver le prix d'entrée à partir du position_id
+            pos_entries = {}
+            for deal in deals:
+                if deal.entry == 0 and deal.symbol:  # entry == 0 est l'ENTRY d'une position
+                    pos_entries[deal.position_id] = deal.price
+
+            for t in trades:
+                pos_id = t['position_id']
+                if pos_id in pos_entries:
+                    t['entry_price'] = pos_entries[pos_id]
+
+            # Trier les trades du plus récent au plus ancien
+            trades.sort(key=lambda x: x['timestamp'], reverse=True)
+            return trades
+        except Exception as e:
+            log.error(f"Erreur lors de la récupération de l'historique MT5 : {e}")
+            return []
 
     def _get_mt5_timeframe(self, timeframe: str) -> int:
         """Associe un timeframe string à la constante correspondante MT5."""
