@@ -748,20 +748,32 @@ class TradingStrategy:
                             prev.get('macd', 0) <= prev.get('macd_signal', 0))
                 supertrend_up = latest.get('supertrend_trend', 0) > 0 and prev.get('supertrend_trend', 0) <= 0
 
+                # Pullback / trend continuation trigger to avoid missing established trends
+                trend_alignment = (latest.get('ema_fast', 0) > latest.get('ema_slow', 0) and
+                                   latest.get('macd', 0) > latest.get('macd_signal', 0) and
+                                   latest.get('supertrend_trend', 0) > 0 and
+                                   latest.get('rsi', 50) < 65)  # Avoid buying when overextended
+
                 # --- RÈGLES ALEXANDER ELDER ---
                 # Ne jamais acheter si le système d'impulsion est rouge (tendance et momentum contraires)
                 elder_allow_long = latest.get('elder_impulse', 0) != -1
                 # Tendance de fond Triple Screen (Screen 1) doit être haussière
                 elder_screen1_ok = latest.get('elder_screen1_up', True)
 
-                trigger_long = (ema_cross or macd_cross or supertrend_up) and elder_allow_long and elder_screen1_ok
+                trigger_long = (ema_cross or macd_cross or supertrend_up or trend_alignment) and elder_allow_long and elder_screen1_ok
 
             elif self.indicators.is_downtrend(df):
                 ema_cross = (latest.get('ema_fast', 0) < latest.get('ema_slow', 0) and
                            prev.get('ema_fast', 0) >= prev.get('ema_slow', 0))
                 macd_cross = (latest.get('macd', 0) < latest.get('macd_signal', 0) and
-                            prev.get('macd', 0) >= prev.get('macd_signal', 0))
+                            prev.get('macd', 0) <= prev.get('macd_signal', 0))
                 supertrend_down = latest.get('supertrend_trend', 0) < 0 and prev.get('supertrend_trend', 0) >= 0
+
+                # Pullback / trend continuation trigger to avoid missing established trends
+                trend_alignment = (latest.get('ema_fast', 0) < latest.get('ema_slow', 0) and
+                                   latest.get('macd', 0) < latest.get('macd_signal', 0) and
+                                   latest.get('supertrend_trend', 0) < 0 and
+                                   latest.get('rsi', 50) > 35)  # Avoid selling when oversold
 
                 # --- RÈGLES ALEXANDER ELDER ---
                 # Ne jamais vendre si le système d'impulsion est vert (tendance et momentum contraires)
@@ -769,7 +781,7 @@ class TradingStrategy:
                 # Tendance de fond Triple Screen (Screen 1) doit être baissière
                 elder_screen1_ok = latest.get('elder_screen1_down', True)
 
-                trigger_short = (ema_cross or macd_cross or supertrend_down) and elder_allow_short and elder_screen1_ok
+                trigger_short = (ema_cross or macd_cross or supertrend_down or trend_alignment) and elder_allow_short and elder_screen1_ok
         else:
             rsi = latest.get('rsi', 50)
             rsi_os = self.config.get('RSI_OS', 30)
