@@ -34,7 +34,7 @@ class MT5Client(Broker):
             )
 
         log.info(f"Initialisation de MetaTrader 5 (Serveur: {MT5_SERVER})...")
-        
+
         # Paramètres d'initialisation
         init_kwargs = {}
         if MT5_PATH:
@@ -140,7 +140,7 @@ class MT5Client(Broker):
         """Récupère les bougies historiques depuis MT5."""
         symbol = self.normalize_symbol(symbol)
         mt5_tf = self._get_mt5_timeframe(timeframe)
-        
+
         # S'assurer que le symbole est visible/sélectionné dans le Market Watch de MT5
         mt5.symbol_select(symbol, True)
 
@@ -165,22 +165,22 @@ class MT5Client(Broker):
     def get_position(self, symbol: str) -> Dict[str, Any]:
         """
         Retourne la position ouverte sur un symbole.
-        S'il y a plusieurs positions (Hedging), nous les combinons/agrégons.
+        S'il y a plusieurs positions (Hedging), nous les combinons/aggrégons.
         """
         symbol = self.normalize_symbol(symbol)
         positions = mt5.positions_get(symbol=symbol)
-        
+
         if not positions or len(positions) == 0:
             return {}
 
         total_volume = 0.0
         weighted_entry = 0.0
         total_profit = 0.0
-        
+
         # Trouver la direction dominante ou utiliser la première position pour définir le type principal
         first_pos = positions[0]
         dominant_side = "LONG" if first_pos.type == mt5.POSITION_TYPE_BUY else "SHORT"
-        
+
         sl = first_pos.sl
         tp = first_pos.tp
 
@@ -202,14 +202,19 @@ class MT5Client(Broker):
             total_volume = abs(total_volume)
 
         avg_entry = abs(weighted_entry / total_volume) if total_volume > 0 else 0.0
-        
+
         tick = mt5.symbol_info_tick(symbol)
         mark_price = (tick.bid + tick.ask) / 2 if tick else avg_entry
+
+        # Convertir la taille de lots en unités de base currency pour être cohérent avec les autres brokers
+        info = mt5.symbol_info(symbol)
+        contract_size = info.trade_contract_size if info and info.trade_contract_size > 0 else 100000.0
+        total_volume_units = total_volume * contract_size
 
         return {
             "ticket": first_pos.ticket,
             "side": dominant_side,
-            "size": total_volume,
+            "size": total_volume_units,
             "entry_price": avg_entry,
             "mark_price": mark_price,
             "unrealized_pnl": total_profit,
@@ -240,7 +245,7 @@ class MT5Client(Broker):
                 log.error(f"Impossible d'obtenir les prix tick pour fermer la position #{ticket}")
                 success = False
                 continue
-                
+
             price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
 
             request = {
@@ -252,21 +257,21 @@ class MT5Client(Broker):
                 "price": price,
                 "deviation": 20,
                 "magic": 10099,
-                "comment": f"Close #{ticket} - {reason}"[:31],
+                "comment": f"Close #{ticket} - {reason}"[:29],
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
 
             log.info(f"Fermeture position MT5 #{ticket} sur {symbol} (Taille: {volume}, Type: {side})...")
             result = mt5.order_send(request)
-            
+
             if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
                 error_code = mt5.last_error()
                 log.error(f"Échec de la fermeture de position #{ticket} sur {symbol}: {result.comment if result else ''} (code: {error_code})")
                 success = False
             else:
                 log.info(f"Position #{ticket} sur {symbol} fermée avec succès.")
-                
+
         return success
 
     def place_order(self, symbol: str, side: str, amount: float,
@@ -302,27 +307,64 @@ class MT5Client(Broker):
             log.error(f"Type d'action d'ordre inconnu : {side}")
             return False
 
-        # S'assurer que le volume respecte les contraintes du courtier
-        amount = max(amount, self.get_min_order_size(symbol))
-        step = self.get_step_size(symbol)
-        amount = round(amount / step) * step
+        # S'assurer que la quantité respecte les contraintes du courtier (calculé en unités)
+        min_units = self.get_min_order_size(symbol)
+        step_units = self.get_step_size(symbol)
+        amount = max(amount, min_units)
+        amount = round(amount / step_units) * step_units
+
+        # Convertir en lots pour MT5
+        info = mt5.symbol_info(symbol)
+        contract_size = info.trade_contract_size if info and info.trade_contract_size > 0 else 100000.0
+        amount_lots = amount / contract_size
+
+        # S'assurer du respect des limites minimales et du pas en lots
+        volume_min = info.volume_min if info else 0.01
+        volume_step = info.volume_step if info else 0.01
+        amount_lots = max(amount_lots, volume_min)
+        amount_lots = round(amount_lots / volume_step) * volume_step
+        amount_lots = round(amount_lots, 4)
+
+        # Nettoyer le commentaire pour nous assurer qu'il contient des caractères sûrs pour MT5
+        # Générer la chaîne de commentaire de base
+        base_comment = comment or f"SuperBot order - {side_upper}"
+        # Remplacer tout caractère non ASCII ou non imprimable par un souligné, puis garder uniquement
+        # lettres, chiffres, espaces, tirets et soulignés (caractères sûrs pour MT5)
+        cleaned_chars = []
+        for c in str(base_comment):
+            if ord(c) >= 128 or not c.isprintable():
+                cleaned_chars.append('_')
+            else:
+                # Autoriser lettres, chiffres, espace, tiret, souligné, point
+                if c.isalnum() or c in (' ', '-', '_', '.'):
+                    cleaned_chars.append(c)
+                else:
+                    cleaned_chars.append('_')
+        cleaned = ''.join(cleaned_chars)
+        # Fournir un retour si le nettoyage résulte en une chaîne vide
+        if not cleaned:
+            cleaned = f"SBOT-{side_upper}"
+        # Tronquer à la limite de 29 caractères acceptée par le wrapper python MT5
+        final_comment = cleaned[:29]
+        # Journaliser le commentaire final pour le débogage (optionnel)
+        log.debug(f"Commentaire MT5 final : '{final_comment}' (original: '{base_comment}')")
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": symbol,
-            "volume": float(amount),
+            "volume": float(amount_lots),
             "type": order_type,
             "price": price,
             "sl": float(sl) if sl > 0 else 0.0,
             "tp": float(tp) if tp > 0 else 0.0,
             "deviation": 20,
             "magic": 10099,
-            "comment": str(comment or f"SuperBot order - {side_upper}")[:31],
+            "comment": final_comment,
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
 
-        log.info(f"Envoi de l'ordre MT5 : {side_upper} {amount} {symbol} @ {price:.5f} (SL: {sl:.5f}, TP: {tp:.5f})")
+        log.info(f"Envoi de l'ordre MT5 : {side_upper} {amount_lots} {symbol} @ {price:.5f} (SL: {sl:.5f}, TP: {tp:.5f})")
         result = mt5.order_send(request)
 
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -362,7 +404,7 @@ class MT5Client(Broker):
                 success = False
             else:
                 log.info(f"Modification SL/TP sur position #{ticket} effectuée avec succès.")
-                
+
         return success
 
     def get_current_price(self, symbol: str) -> float:
@@ -377,12 +419,18 @@ class MT5Client(Broker):
     def get_min_order_size(self, symbol: str) -> float:
         symbol = self.normalize_symbol(symbol)
         info = mt5.symbol_info(symbol)
-        return info.volume_min if info else 0.01
+        if info:
+            contract_size = info.trade_contract_size if info.trade_contract_size > 0 else 100000.0
+            return info.volume_min * contract_size
+        return 1000.0
 
     def get_step_size(self, symbol: str) -> float:
         symbol = self.normalize_symbol(symbol)
         info = mt5.symbol_info(symbol)
-        return info.volume_step if info else 0.01
+        if info:
+            contract_size = info.trade_contract_size if info.trade_contract_size > 0 else 100000.0
+            return info.volume_step * contract_size
+        return 1000.0
 
     def normalize_symbol(self, symbol: str) -> str:
         """

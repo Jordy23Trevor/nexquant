@@ -126,26 +126,25 @@ class NewsManager:
 
     def _update_all_sources(self):
         """Met à jour toutes les sources de nouvelles disponibles."""
-        with self.news_lock:
-            try:
-                # Mettre à jour le Fear & Greed Index
-                self._update_fear_greed()
+        try:
+            # Mettre à jour le Fear & Greed Index
+            self._update_fear_greed()
 
-                # Mettre à jour les nouvelles Forex Factory (pour forex)
-                self._update_forex_factory_news()
+            # Mettre à jour les nouvelles Forex Factory (pour forex)
+            self._update_forex_factory_news()
 
-                # Mettre à jour les nouvelles crypto (CoinGecko, CryptoCompare)
-                self._update_crypto_news()
+            # Mettre à jour les nouvelles crypto (CoinGecko, CryptoCompare)
+            self._update_crypto_news()
 
-                # Mettre à jour les données des réseaux sociaux (simplifié)
-                self._update_social_sentiment()
+            # Mettre à jour les données des réseaux sociaux (simplifié)
+            self._update_social_sentiment()
 
-                # Calculer le score de sentiment global
-                self._calculate_global_sentiment()
+            # Calculer le score de sentiment global
+            self._calculate_global_sentiment()
 
-                log.debug("Mise à jour des nouvelles terminée")
-            except Exception as e:
-                log.error(f"Erreur lors de la mise à jour des sources: {e}")
+            log.debug("Mise à jour des nouvelles terminée")
+        except Exception as e:
+            log.error(f"Erreur lors de la mise à jour des sources: {e}")
 
     def _update_fear_greed(self):
         """Met à jour l'indice Fear & Greed."""
@@ -648,6 +647,11 @@ class NewsManager:
                     # Vérifier si l'événement est dans la fenêtre d'évitement
                     if event.timestamp >= cutoff_after and event.timestamp <= cutoff_before:
                         # Événement récent ou imminent détecté
+                        log.info(
+                            f"News avoidance triggered for {symbol if symbol else 'any symbol'}: "
+                            f"{event.currency} {event.title} at {event.timestamp} "
+                            f"(avoidance window: {minutes_before}min before, {minutes_after}min after)"
+                        )
                         return True, event
 
         return False, None

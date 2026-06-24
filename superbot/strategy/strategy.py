@@ -456,15 +456,16 @@ class TradingStrategy:
             details['adx_strength'] = 0
 
         # 7. DI+ > DI- (pour tendance haussière) ou DI- > DI+ (pour tendance baissière) - 1 point
-        ema_fast_slope = latest.get('ema_fast', 0) - prev.get('ema_fast', 0)
+        plus_di = latest.get('plus_di', 0)
+        minus_di = latest.get('minus_di', 0)
         if self.indicators.is_uptrend(df):
-            if ema_fast_slope > 0:
+            if plus_di > minus_di:
                 score += 1
                 details['trend_momentum'] = 1
             else:
                 details['trend_momentum'] = 0
         elif self.indicators.is_downtrend(df):
-            if ema_fast_slope < 0:
+            if minus_di > plus_di:
                 score += 1
                 details['trend_momentum'] = 1
             else:

@@ -383,7 +383,7 @@ class SuperBot:
                     }
                     for symbol, pos in active_positions.items()
                 }
-            log.debug(f"Synchronisation des positions réussie : {list(active_positions.keys())}")
+            log.info(f"Synchronisation des positions réussie : {list(active_positions.keys())}")
         except Exception as e:
             log.error(f"Erreur lors de la synchronisation des positions avec le broker : {e}")
 
@@ -614,13 +614,29 @@ class SuperBot:
             signal_data = self.strategy.analyze_market(df_with_indicators)
             signal_data['symbol'] = symbol  # Ajouter le symbole au signal
 
-            if signal_data['should_long'] or signal_data['should_short']:
+            # DEBUG: log signal details and pre-check news avoidance
+            score_raw = signal_data['total_score']
+            score_min = self.strategy.score_min
+            rr = signal_data['rr_ratio']
+            should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
+            news_ok = not should_avoid
+            log.info(
+                f"Signal DEBUG {symbol}: regime={signal_data['market_regime']} "
+                f"score_raw={score_raw:.1f} score_min={score_min} "
+                f"should_long={signal_data['should_long']} should_short={signal_data['should_short']} "
+                f"RR={rr:.2f} news_ok={news_ok}"
+            )
+
+            if should_avoid:
+                log.info(f"Trading évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
+                return
+            elif signal_data['should_long'] or signal_data['should_short']:
                 self._execute_signal_trade(symbol, signal_data, df_with_indicators)
             else:
                 log.info(
                     f"Scan {symbol} : {signal_data['market_regime']} | "
-                    f"Score: {signal_data['total_score']:.1f}/{self.strategy.score_min} | "
-                    f"Pas de signal (Trigger L: {signal_data['trigger_long']}, S: {signal_data['trigger_short']}, R:R: {signal_data['rr_ratio']:.2f})"
+                    f"Score: {score_raw:.1f}/{score_min} | "
+                    f"Pas de signal (Trigger L: {signal_data['trigger_long']}, S: {signal_data['trigger_short']}, R:R: {rr:.2f})"
                 )
 
         except Exception as e:
@@ -708,6 +724,12 @@ class SuperBot:
             sentiment_factor=self.news_manager.get_risk_factor() if self.news_manager else 1.0
         )
 
+        # DEBUG: Log detailed risk sizing information
+        log.info(
+            f"Risk sizing {symbol}: size={position_size:.6f} | "
+            f"details={size_details}"
+        )
+
         if position_size <= 0:
             log.debug(f"Taille de position nulle ou rejetée pour {symbol}, pas d'action")
             return
@@ -758,7 +780,7 @@ class SuperBot:
             self.risk_manager.record_trade(trade_record)
 
             # Mettre à jour la position suivie
-            self._update_position_tracking(symbol, side, position_size, entry_price)
+            self._update_position_tracking(symbol, side, position_size, entry_price, sl_price, tp_price)
 
         else:
             log.error(f"Échec de l'exécution du trade pour {symbol}")
@@ -913,7 +935,7 @@ class SuperBot:
             log.error(f"Erreur lors de la récupération des données pour {symbol} : {e}")
             return None
 
-    def _update_position_tracking(self, symbol: str, side: str, size: float, entry_price: float):
+    def _update_position_tracking(self, symbol: str, side: str, size: float, entry_price: float, stop_loss: float = 0.0, take_profit: float = 0.0):
         """
         Met à jour le suivi des positions ouvertes.
 
@@ -922,6 +944,8 @@ class SuperBot:
             side: Côté de la position ('buy' ou 'sell')
             size: Taille de la position
             entry_price: Prix d'entrée
+            stop_loss: Niveau de Stop Loss
+            take_profit: Niveau de Take Profit
         """
         position_side = "LONG" if side == "buy" else "SHORT"
 
@@ -929,6 +953,8 @@ class SuperBot:
             'side': position_side,
             'size': size,
             'entry_price': entry_price,
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
             'timestamp': datetime.now(timezone.utc),
             'status': 'open'
         }
@@ -1071,7 +1097,7 @@ class SuperBot:
                 self.risk_manager.record_trade(trade_record)
 
                 # Mettre à jour la position suivie
-                self._update_position_tracking(symbol, action, position_size, entry_price)
+                self._update_position_tracking(symbol, action, position_size, entry_price, sl_price, tp_price)
                 return {"status": "success", "action": action, "symbol": symbol, "size": position_size, "entry": entry_price}
             else:
                 log.error(f"Échec de l'exécution du trade webhook pour {symbol}")
