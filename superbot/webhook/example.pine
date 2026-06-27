@@ -1,0 +1,311 @@
+//@version=6
+strategy("BTC/USD PRO Bot v6.0", shorttitle="BTC PRO", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.04, slippage=3, pyramiding=0, calc_on_every_tick=false)
+
+// ==== PARAMETRES ====
+grp_trend  = "Indicateurs de Tendance"
+grp_mom    = "Momentum"
+grp_risk   = "Gestion du Risque"
+grp_filter = "Filtres"
+grp_ui     = "Affichage"
+
+// EMAs
+ema_fast_len  = input.int(9,   "EMA Rapide",  group=grp_trend)
+ema_slow_len  = input.int(21,  "EMA Lente",   group=grp_trend)
+ema_trend_len = input.int(200, "EMA Tendance", group=grp_trend)
+
+// HTF
+htf           = input.timeframe("240", "Timeframe Confirmation (HTF)", group=grp_trend)
+htf_ema_len   = input.int(50, "EMA HTF", group=grp_trend)
+
+// SuperTrend
+st_mult       = input.float(3.0, "SuperTrend Multiplier", step=0.1, group=grp_trend)
+st_atr        = input.int(10,   "SuperTrend ATR Period",  group=grp_trend)
+
+// RSI
+rsi_len       = input.int(14, "RSI Periode",  group=grp_mom)
+rsi_ob        = input.int(70, "RSI Surachat", group=grp_mom)
+rsi_os        = input.int(30, "RSI Survente", group=grp_mom)
+
+// MACD
+macd_fast     = input.int(12, "MACD Fast",   group=grp_mom)
+macd_slow     = input.int(26, "MACD Slow",   group=grp_mom)
+macd_sig      = input.int(9,  "MACD Signal", group=grp_mom)
+
+// ADX
+adx_len       = input.int(14, "ADX Periode", group=grp_trend)
+adx_min       = input.float(22.0, "ADX Min (Tendance)", step=0.5, group=grp_trend)
+
+// Risk
+atr_sl        = input.float(2.0, "ATR x (Stop Loss)",   step=0.1, group=grp_risk)
+atr_tp        = input.float(4.0, "ATR x (Take Profit)", step=0.1, group=grp_risk)
+atr_len       = input.int(14, "ATR Periode", group=grp_risk)
+
+// Score
+score_min     = input.int(5, "Score Minimum (sur 10)", minval=1, maxval=10, group=grp_filter)
+
+// Affichage
+show_ema      = input.bool(true,  "Afficher EMAs",        group=grp_ui)
+show_signals  = input.bool(true,  "Afficher Signaux",     group=grp_ui)
+show_sr       = input.bool(true,  "Afficher S/R Pivots",  group=grp_ui)
+show_dashboard = input.bool(true, "Afficher Dashboard",   group=grp_ui)
+
+// ==== CALCUL DES INDICATEURS ====
+
+// EMAs
+ema_f = ta.ema(close, ema_fast_len)
+ema_s = ta.ema(close, ema_slow_len)
+ema_t = ta.ema(close, ema_trend_len)
+
+// HTF EMA
+htf_ema_val = request.security(syminfo.tickerid, htf, ta.ema(close, htf_ema_len))
+
+// RSI
+rsi = ta.rsi(close, rsi_len)
+
+// MACD
+[macd_line, macd_signal_line, macd_hist] = ta.macd(close, macd_fast, macd_slow, macd_sig)
+
+// ADX avec calcul manuel du DMI
+up = high - high[1]
+dn = low[1] - low
+plus_dm  = up > dn and up > 0 ? up : 0
+minus_dm = dn > up and dn > 0 ? dn : 0
+
+tr = math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+atr_val = ta.sma(tr, adx_len)
+
+di_plus  = ta.sma(plus_dm, adx_len) / atr_val * 100
+di_minus = ta.sma(minus_dm, adx_len) / atr_val * 100
+
+dx = math.abs(di_plus - di_minus) / (di_plus + di_minus) * 100
+adx_val = ta.sma(dx, adx_len)
+
+// SuperTrend (implementation manuelle)
+var float final_ub = na
+var float final_lb = na
+matr = ta.atr(st_atr)
+basic_ub = hl2 + st_mult * matr
+basic_lb = hl2 - st_mult * matr
+final_ub := basic_ub < nz(final_ub[1]) or close[1] > nz(final_ub[1]) ? basic_ub : nz(final_ub[1])
+final_lb := basic_lb > nz(final_lb[1]) or close[1] < nz(final_lb[1]) ? basic_lb : nz(final_lb[1])
+st_val = close <= nz(final_ub[1]) ? final_ub : final_lb
+st_dir = close > st_val ? 1 : -1
+
+// ATR
+atr = ta.atr(atr_len)
+
+// Bollinger Bands
+[bb_upper, bb_mid, bb_lower] = ta.bb(close, 20, 2.0)
+
+// MFI
+mfi = ta.mfi(hlc3, 14)
+
+// Stochastique RSI
+stoch_val = ta.stoch(rsi, rsi_len, 3, 3)
+stoch_k = stoch_val
+stoch_d = ta.sma(stoch_k, 3)
+
+// Pivot Points (session precedente)
+var float pivot   = na
+var float pivot_r1 = na
+var float pivot_s1 = na
+var float pivot_r2 = na
+var float pivot_s2 = na
+
+if ta.change(time("D")) > 0
+    hy = high[1]
+    ly = low[1]
+    cy = close[1]
+    pivot   := (hy + ly + cy) / 3
+    pivot_r1 := 2 * pivot - ly
+    pivot_s1 := 2 * pivot - hy
+    pivot_r2 := pivot + (hy - ly)
+    pivot_s2 := pivot - (hy - ly)
+
+// ==== SCORING ADAPTATIF (Tendance vs Range) ====
+regime   = adx_val > adx_min ? "TRENDING" : "RANGING"
+is_trend = adx_val > adx_min
+
+// TENDANCE : 10 criteres
+long_trend = ((ema_f > ema_s ? 1 : 0) +
+           (close > ema_t ? 1 : 0) +
+           (close > htf_ema_val ? 1 : 0) +
+           (macd_line > macd_signal_line ? 1 : 0) +
+           (st_dir > 0 ? 1 : 0) +
+           (di_plus > di_minus ? 1 : 0) +
+           (mfi > 50 ? 1 : 0) +
+           (close > bb_mid ? 1 : 0) +
+           (rsi > 50 ? 1 : 0) +
+           (macd_hist > 0 ? 1 : 0))
+
+short_trend = ((ema_f < ema_s ? 1 : 0) +
+            (close < ema_t ? 1 : 0) +
+            (close < htf_ema_val ? 1 : 0) +
+            (macd_line < macd_signal_line ? 1 : 0) +
+            (st_dir < 0 ? 1 : 0) +
+            (di_minus > di_plus ? 1 : 0) +
+            (mfi < 50 ? 1 : 0) +
+            (close < bb_mid ? 1 : 0) +
+            (rsi < 50 ? 1 : 0) +
+            (macd_hist < 0 ? 1 : 0))
+
+// RANGE : 10 criteres
+hammer       = (low[1] - math.min(open[1], close[1])) > 2 * math.abs(close[1] - open[1]) and (math.max(open[1], close[1]) - high[1]) < math.abs(close[1] - open[1]) * 0.3
+shooting_star = (high[1] - math.max(open[1], close[1])) > 2 * math.abs(close[1] - open[1]) and (math.min(open[1], close[1]) - low[1]) < math.abs(close[1] - open[1]) * 0.3
+bull_engulf  = close[1] < open[1] and close > open and close > open[1] and open < close[1]
+bear_engulf  = close[1] > open[1] and close < open and close < open[1] and open > close[1]
+
+at_support   = not na(pivot_s1) and (close <= pivot_s1 or close <= pivot_s2)
+at_resistance = not na(pivot_r1) and (close >= pivot_r1 or close >= pivot_r2)
+
+long_range = ((rsi < 40 ? 1 : 0) +
+           (stoch_k > stoch_d ? 1 : 0) +
+           (close < bb_mid ? 1 : 0) +
+           (mfi < 30 ? 1 : 0) +
+           (hammer ? 1 : 0) +
+           (bull_engulf ? 1 : 0) +
+           (macd_hist > macd_hist[1] ? 1 : 0) +
+           (at_support ? 1 : 0) +
+           (close > low[1] and close[1] < open[1] ? 1 : 0) +
+           (rsi > rsi[1] and close < close[1] ? 1 : 0))
+
+short_range = ((rsi > 60 ? 1 : 0) +
+            (stoch_k < stoch_d ? 1 : 0) +
+            (close > bb_mid ? 1 : 0) +
+            (mfi > 70 ? 1 : 0) +
+            (shooting_star ? 1 : 0) +
+            (bear_engulf ? 1 : 0) +
+            (macd_hist < macd_hist[1] ? 1 : 0) +
+            (at_resistance ? 1 : 0)) + (close < high[1] and close[1] > open[1] ? 1 : 0) + (rsi < rsi[1] and close > close[1] ? 1 : 0)
+
+l_score = int(is_trend ? long_trend  : long_range)
+s_score = int(is_trend ? short_trend : short_range)
+
+// ==== DECLENCHEURS D'ENTREE ====
+ema_cross_up  = ta.crossover(ema_f, ema_s)
+ema_cross_dn  = ta.crossunder(ema_f, ema_s)
+macd_cross_up = ta.crossover(macd_line,  macd_signal_line)
+macd_cross_dn = ta.crossunder(macd_line, macd_signal_line)
+st_flip_up    = st_dir > 0 and st_dir[1] < 0
+st_flip_dn    = st_dir < 0 and st_dir[1] > 0
+stoch_up      = ta.crossover(stoch_k,  stoch_d) and stoch_k < 30
+stoch_dn      = ta.crossunder(stoch_k, stoch_d) and stoch_k > 70
+
+long_trig  = ema_cross_up or macd_cross_up or st_flip_up or stoch_up
+short_trig = ema_cross_dn or macd_cross_dn or st_flip_dn or stoch_dn
+
+// ==== NIVEAUX SL / TP ====
+long_sl  = close - atr * atr_sl
+long_tp  = close + atr * atr_tp
+short_sl = close + atr * atr_sl
+short_tp = close - atr * atr_tp
+
+// ==== SIGNAUX FINAUX ====
+long_signal  = long_trig  and l_score >= score_min
+short_signal = short_trig and s_score >= score_min
+
+// Sortie : retournement fort (>=8)
+exit_long  = s_score >= 8 and strategy.position_size > 0
+exit_short = l_score >= 8 and strategy.position_size < 0
+
+// ==== ORDRES STRATEGY (Backtesting + Live) ====
+if long_signal
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Exit Long", "Long", stop=long_sl, limit=long_tp)
+    alert("{\"secret\":\"Ksjt@237\",\"action\":\"BUY\",\"symbol\":\"" + syminfo.ticker + "\",\"price\":" + str.tostring(close, "#.##") + ",\"sl\":" + str.tostring(long_sl, "#.##") + ",\"tp\":" + str.tostring(long_tp, "#.##") + ",\"score\":" + str.tostring(l_score) + ",\"comment\":\"Pine Script BUY\"}", alert.freq_once_per_bar)
+
+if short_signal
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Exit Short", "Short", stop=short_sl, limit=short_tp)
+    alert("{\"secret\":\"Ksjt@237\",\"action\":\"SELL\",\"symbol\":\"" + syminfo.ticker + "\",\"price\":" + str.tostring(close, "#.##") + ",\"sl\":" + str.tostring(short_sl, "#.##") + ",\"tp\":" + str.tostring(short_tp, "#.##") + ",\"score\":" + str.tostring(s_score) + ",\"comment\":\"Pine Script SELL\"}", alert.freq_once_per_bar)
+
+if exit_long
+    strategy.close("Long", comment="Retournement")
+    alert("{\"secret\":\"Ksjt@237\",\"action\":\"CLOSE\",\"symbol\":\"" + syminfo.ticker + "\",\"price\":" + str.tostring(close, "#.##") + ",\"comment\":\"EXIT LONG\"}", alert.freq_once_per_bar)
+
+if exit_short
+    strategy.close("Short", comment="Retournement")
+    alert("{\"secret\":\"Ksjt@237\",\"action\":\"CLOSE\",\"symbol\":\"" + syminfo.ticker + "\",\"price\":" + str.tostring(close, "#.##") + ",\"comment\":\"EXIT SHORT\"}", alert.freq_once_per_bar)
+
+// ==== AFFICHAGE ====
+
+// EMAs
+plot(show_ema ? ema_f     : na, "EMA 9",   color=color.new(color.blue,   0), linewidth=1)
+plot(show_ema ? ema_s     : na, "EMA 21",  color=color.new(color.orange, 0), linewidth=1)
+plot(show_ema ? ema_t     : na, "EMA 200", color=color.new(color.white,  0), linewidth=2)
+plot(show_ema ? htf_ema_val : na, "HTF EMA", color=color.new(color.purple, 0), linewidth=2, style=plot.style_circles)
+
+// SuperTrend
+plot(st_dir > 0  ? st_val : na, "ST Haussier", color=color.new(color.green, 0), linewidth=2)
+plot(st_dir < 0 ? st_val : na, "ST Baissier", color=color.new(color.red,   0), linewidth=2)
+
+// Pivots
+plot(show_sr ? pivot_r1 : na, "R1", color=color.new(color.red,   60), linewidth=1, style=plot.style_circles)
+plot(show_sr ? pivot_s1 : na, "S1", color=color.new(color.green, 60), linewidth=1, style=plot.style_circles)
+plot(show_sr ? pivot_r2 : na, "R2", color=color.new(color.red,   80), linewidth=1, style=plot.style_stepline)
+plot(show_sr ? pivot_s2 : na, "S2", color=color.new(color.green, 80), linewidth=1, style=plot.style_stepline)
+
+// Signaux visuels
+plotshape(show_signals and long_signal,  "Long",  shape.triangleup,   location.belowbar, color.lime,   size=size.normal, text="L")
+plotshape(show_signals and short_signal, "Short", shape.triangledown, location.abovebar, color.red,    size=size.normal, text="S")
+plotshape(show_signals and exit_long,    "EL",    shape.xcross,       location.abovebar, color.orange, size=size.small)
+plotshape(show_signals and exit_short,   "ES",    shape.xcross,       location.belowbar, color.orange, size=size.small)
+
+// Arriere-plan selon le regime
+bgcolor(adx_val > adx_min ? color.new(color.blue, 97) : color.new(color.yellow, 97), title="Regime Marche")
+
+// ==== FONCTION HELPER ====
+f_cell(tbl, col, row, txt, clr) => table.cell(tbl, col, row, txt, text_color=clr, text_size=size.small)
+
+// ==== DASHBOARD (Table) ====
+var table dash = na
+
+if show_dashboard
+    if na(dash)
+        dash := table.new(position.top_right, 2, 10,
+            bgcolor=color.new(color.black, 70), 
+            border_color=color.gray, 
+            border_width=1,
+            frame_color=color.gray, 
+            frame_width=1)
+
+    f_cell(dash, 0, 0, "BTC PRO Bot v6", color.white)
+    f_cell(dash, 1, 0, str.tostring(close, "#,##0.00"), color.white)
+
+    f_cell(dash, 0, 1, "Regime", color.gray)
+    f_cell(dash, 1, 1, regime, adx_val > adx_min ? color.blue : color.yellow)
+
+    f_cell(dash, 0, 2, "Score L", color.gray)
+    f_cell(dash, 1, 2, str.tostring(l_score) + "/10", l_score >= score_min ? color.lime : color.orange)
+
+    f_cell(dash, 0, 3, "Score S", color.gray)
+    f_cell(dash, 1, 3, str.tostring(s_score) + "/10", s_score >= score_min ? color.red : color.orange)
+
+    f_cell(dash, 0, 4, "RSI", color.gray)
+    f_cell(dash, 1, 4, str.tostring(math.round(rsi, 1)), rsi > rsi_ob ? color.red : rsi < rsi_os ? color.lime : color.white)
+
+    f_cell(dash, 0, 5, "ADX", color.gray)
+    f_cell(dash, 1, 5, str.tostring(math.round(adx_val, 1)), adx_val > adx_min ? color.blue : color.gray)
+
+    f_cell(dash, 0, 6, "ST", color.gray)
+    f_cell(dash, 1, 6, st_dir > 0 ? "UP BULL" : "DOWN BEAR", st_dir > 0 ? color.lime : color.red)
+
+    f_cell(dash, 0, 7, "MFI", color.gray)
+    f_cell(dash, 1, 7, str.tostring(math.round(mfi, 1)), mfi > 70 ? color.red : mfi < 30 ? color.lime : color.white)
+
+    f_cell(dash, 0, 8, "ATR", color.gray)
+    f_cell(dash, 1, 8, str.tostring(math.round(atr, 0)) + "$", color.white)
+
+    f_cell(dash, 0, 9, "Signal", color.gray)
+    signal_txt = long_signal  ? "LONG"  :
+                 short_signal ? "SHORT" :
+                 exit_long    ? "EXIT L":
+                 exit_short   ? "EXIT S": "Wait"
+    signal_clr = long_signal  ? color.lime :
+                 short_signal ? color.red  :
+                 (exit_long or exit_short) ? color.orange : color.gray
+    f_cell(dash, 1, 9, signal_txt, signal_clr)
+
+// Plots caches (pour les alertes webhook)
+plot(l_score, "Score Long",  display=display.none)
+plot(s_score, "Score Short", display=display.none)
