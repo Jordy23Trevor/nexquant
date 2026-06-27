@@ -465,7 +465,6 @@ class SuperBot:
                             log.warning(f"🚫 {symbol} BLOQUÉ - Perte session: {self.session_pnl_by_symbol[symbol]:.2f} USD (seuil: -{threshold_usd:.2f} USD / {self.ASSET_BLOCK_LOSS_THRESHOLD*100:.1f}%)")
                         elif pnl < 0:
                             log.info(f"📉 {symbol} : {self.session_pnl_by_symbol[symbol]:.2f} USD de perte cumulée en session")
-
             # Mettre à jour self.positions
             self.positions = active_positions
 

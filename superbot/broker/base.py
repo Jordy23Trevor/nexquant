@@ -153,7 +153,6 @@ class Broker(abc.ABC):
             "tick_size": 0.01,
             "tick_value": 0.01,
         }
-
     def get_trade_history(self, days: int = 30) -> List[Dict[str, Any]]:
         """
         Retourne l'historique des trades clôturés sur les N derniers jours.
