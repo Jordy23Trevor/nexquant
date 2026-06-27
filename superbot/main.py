@@ -221,11 +221,17 @@ class SuperBot:
             log.info("Broker initialisé")
             
             try:
-                self.initial_balance = self.broker.get_balance()
-                log.info(f"Solde initial détecté : {self.initial_balance}")
+                acc_summary = self.broker.get_account_summary()
+                self.initial_balance = float(acc_summary.get("equity") or acc_summary.get("balance") or self.broker.get_balance())
+                log.info(f"Solde/Équité initial détecté : {self.initial_balance}")
             except Exception as e:
-                log.warning(f"️  Impossible de récupérer le solde initial : {e}")
-                self.initial_balance = 10000.0
+                log.warning(f"⚠️  Impossible de récupérer le solde initial via le résumé du compte : {e}")
+                try:
+                    self.initial_balance = self.broker.get_balance()
+                    log.info(f"Solde initial détecté (fallback get_balance) : {self.initial_balance}")
+                except Exception as e2:
+                    log.warning(f"⚠️  Impossible de récupérer le solde initial : {e2}")
+                    self.initial_balance = 10000.0
 
             # Déterminer les instruments selon le broker (clés spécifiques au broker en priorité)
             broker_type = active_broker_type  # "binance", "alpaca", "paper_forex", "mt5"
@@ -722,9 +728,10 @@ class SuperBot:
                     
                     # Envoyer l'état de l'équité
                     try:
-                        balance = self.broker.get_balance()
-                        pnl_total = balance - self.initial_balance
-                        self.telemetry.push_equity(equity=balance, pnl_total=pnl_total, drawdown=0.0)
+                        acc_summary = self.broker.get_account_summary()
+                        equity = float(acc_summary.get("equity") or acc_summary.get("balance") or self.broker.get_balance())
+                        pnl_total = equity - self.initial_balance
+                        self.telemetry.push_equity(equity=equity, pnl_total=pnl_total, drawdown=0.0)
                     except Exception as e:
                         log.debug(f"Erreur envoi équité télémétrie : {e}")
 
