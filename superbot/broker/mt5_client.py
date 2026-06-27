@@ -26,29 +26,35 @@ class MT5Client(Broker):
     Client Broker MetaTrader 5 connecté aux serveurs de Fusion Markets.
     """
 
-    def __init__(self):
+    def __init__(self, login: int = None, password: str = None, server: str = None, path: str = None, api_key: str = None, api_secret: str = None, **kwargs):
         if mt5 is None:
             raise ImportError(
                 "Le module python MetaTrader5 n'est pas installé.\n"
                 "Veuillez l'installer via 'pip install MetaTrader5' (système Windows uniquement)."
             )
 
-        log.info(f"Initialisation de MetaTrader 5 (Serveur: {MT5_SERVER})...")
+        # Résoudre les paramètres (SaaS transmet les clés via api_key et api_secret)
+        actual_login = int(login or api_key or MT5_LOGIN)
+        actual_password = password or api_secret or MT5_PASSWORD
+        actual_server = server or MT5_SERVER
+        actual_path = path or MT5_PATH
+
+        log.info(f"Initialisation de MetaTrader 5 (Serveur: {actual_server})...")
 
         # Paramètres d'initialisation
         init_kwargs = {}
-        if MT5_PATH:
+        if actual_path:
             import os
-            resolved_path = MT5_PATH
+            resolved_path = actual_path
             if os.path.isdir(resolved_path):
                 resolved_path = os.path.join(resolved_path, "terminal64.exe")
             init_kwargs["path"] = resolved_path
-        if MT5_LOGIN > 0:
-            init_kwargs["login"] = MT5_LOGIN
-        if MT5_PASSWORD:
-            init_kwargs["password"] = MT5_PASSWORD
-        if MT5_SERVER:
-            init_kwargs["server"] = MT5_SERVER
+        if actual_login > 0:
+            init_kwargs["login"] = actual_login
+        if actual_password:
+            init_kwargs["password"] = actual_password
+        if actual_server:
+            init_kwargs["server"] = actual_server
 
         # Initialiser la connexion au terminal MT5
         if not mt5.initialize(**init_kwargs):
@@ -61,12 +67,12 @@ class MT5Client(Broker):
             )
 
         # Connexion au compte de trading
-        if MT5_LOGIN > 0:
-            authorized = mt5.login(login=MT5_LOGIN, password=MT5_PASSWORD, server=MT5_SERVER)
+        if actual_login > 0:
+            authorized = mt5.login(login=actual_login, password=actual_password, server=actual_server)
             if not authorized:
                 error_code = mt5.last_error()
-                log.error(f"Échec de l'authentification MT5 pour le compte {MT5_LOGIN} : {error_code}")
-                raise RuntimeError(f"Échec de l'authentification MT5 (compte: {MT5_LOGIN}, code d'erreur: {error_code})")
+                log.error(f"Échec de l'authentification MT5 pour le compte {actual_login} : {error_code}")
+                raise RuntimeError(f"Échec de l'authentification MT5 (compte: {actual_login}, code d'erreur: {error_code})")
 
         acc_info = mt5.account_info()
         if acc_info:

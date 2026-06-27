@@ -45,13 +45,13 @@ class BinanceClient(Broker):
     Compatible avec TradingView (même API key).
     """
 
-    def __init__(self):
+    def __init__(self, api_key: str = None, api_secret: str = None, testnet: bool = None, **kwargs):
         if not BINANCE_AVAILABLE:
             raise ImportError(
                 "python-binance non installé.\n"
                 "   → pip install python-binance"
             )
-        self._init_client()
+        self._init_client(api_key, api_secret, testnet)
         self._symbol_info: Dict[str, Any] = {}
 
     def get_default_instruments(self) -> List[str]:
@@ -103,16 +103,20 @@ class BinanceClient(Broker):
                 time.sleep(backoff)
                 backoff *= 2.0
 
-    def _init_client(self):
+    def _init_client(self, api_key=None, api_secret=None, testnet=None):
         """Initialise le client Binance avec gestion du testnet."""
-        if BINANCE_TESTNET:
+        key = api_key or BINANCE_API_KEY
+        secret = api_secret or BINANCE_API_SECRET
+        is_testnet = BINANCE_TESTNET if testnet is None else testnet
+
+        if is_testnet:
             self._client = BnClient(
-                BINANCE_API_KEY, BINANCE_API_SECRET,
+                key, secret,
                 testnet=True,
             )
             log.info("Connecté au TESTNET Binance Futures")
         else:
-            self._client = BnClient(BINANCE_API_KEY, BINANCE_API_SECRET)
+            self._client = BnClient(key, secret)
             log.info("Connecté à Binance Futures (RÉEL)")
 
         # Synchroniser l'heure d'abord (évite les erreurs de timestamp)

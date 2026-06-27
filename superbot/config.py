@@ -228,8 +228,9 @@ def validate_config():
     if BROKER_TYPE.lower() not in valid_brokers:
         errors.append(f"BROKER_TYPE '{BROKER_TYPE}' est invalide. Doit être l'un de : {valid_brokers}")
 
-    # 2. Broker credentials check (only if not backtesting)
-    if not BACKTEST_MODE:
+    # 2. Broker credentials check (only if not backtesting and not using SaaS mode)
+    using_saas = bool(os.getenv("NEXQUANT_USER_ID") and os.getenv("NEXQUANT_INGEST_TOKEN"))
+    if not BACKTEST_MODE and not using_saas:
         if BROKER_TYPE.lower() == "mt5":
             if MT5_LOGIN <= 0:
                 errors.append("MT5_LOGIN doit être un entier positif (votre identifiant de compte).")

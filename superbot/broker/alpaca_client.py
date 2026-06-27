@@ -29,13 +29,13 @@ class AlpacaClient(Broker):
     Supporte les ordres market, limit, stop, trailing stop, etc.
     """
 
-    def __init__(self):
+    def __init__(self, api_key: str = None, api_secret: str = None, base_url: str = None, **kwargs):
         if not ALPACA_AVAILABLE:
             raise ImportError(
                 "alpaca-trade-api non installé.\n"
                 "   → pip install alpaca-trade-api"
             )
-        self._init_client()
+        self._init_client(api_key, api_secret, base_url)
 
     def get_default_instruments(self) -> List[str]:
         return ["SPY", "QQQ", "AAPL"]
@@ -46,18 +46,21 @@ class AlpacaClient(Broker):
     def get_asset_type(self) -> str:
         return "stock"
 
-    def _init_client(self):
+    def _init_client(self, api_key=None, api_secret=None, base_url=None):
         """Initialise le client Alpaca."""
+        key = api_key or ALPACA_API_KEY
+        secret = api_secret or ALPACA_API_SECRET
+        url = base_url or ALPACA_BASE_URL
         self._api = tradeapi.REST(
-            ALPACA_API_KEY,
-            ALPACA_API_SECRET,
-            base_url=ALPACA_BASE_URL,
+            key,
+            secret,
+            base_url=url,
             api_version=ALPACA_API_VERSION
         )
 
         try:
             account = self._api.get_account()
-            log.info(f"Connecté à Alpaca ({'paper' if 'paper' in ALPACA_BASE_URL else 'live'})")
+            log.info(f"Connecté à Alpaca ({'paper' if 'paper' in url else 'live'})")
             log.info(f"   Compte: {account.account_number} | Status: {account.status}")
         except Exception as e:
             log.error(f"Échec de connexion à Alpaca : {e}")

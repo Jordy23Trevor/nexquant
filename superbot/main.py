@@ -87,6 +87,8 @@ except ImportError:
 
 # Configurer le logging
 import logging
+from superbot.telemetry import TelemetryClient, TelemetryLoggingHandler
+
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -96,6 +98,13 @@ logging.basicConfig(
     ]
 )
 log = logging.getLogger("main")
+
+# Initialisation globale de la télémétrie pour les logs
+telemetry_client = TelemetryClient()
+if telemetry_client.enabled:
+    telemetry_handler = TelemetryLoggingHandler(telemetry_client)
+    telemetry_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logging.getLogger().addHandler(telemetry_handler)
 
 class SuperBot:
     """
@@ -109,6 +118,8 @@ class SuperBot:
 
         # État du bot
         self.running = False
+        self.is_paused = False
+        self.telemetry = telemetry_client
         self.shutdown_event = threading.Event()
 
         # Composants principaux
@@ -157,9 +168,56 @@ class SuperBot:
         try:
             log.info("Initialisation des composants...")
 
-            # 1. Créer le broker
-            log.info(f"Création du broker : {BROKER_TYPE}")
-            self.broker = create_broker(BROKER_TYPE)
+            # 1. Synchronisation de la configuration Cloud & Télémétrie
+            self.remote_config = None
+            active_broker_type = BROKER_TYPE
+            broker_kwargs = {}
+
+            if self.telemetry.enabled:
+                log.info("Tentative de synchronisation de la configuration cloud...")
+                res = self.telemetry.sync_config(current_version="v1.0.0")
+                if res:
+                    if res.get("is_expired"):
+                        log.error("❌ Licence expirée ou inactive. Le bot ne peut pas démarrer.")
+                        sys.exit(1)
+                    if res.get("ok"):
+                        self.remote_config = res
+                        log.info("Configuration cloud synchronisée avec succès.")
+                        
+                        # Mettre à jour les paramètres de trading
+                        cloud_cfg = res.get("config", {})
+                        self.adaptive_risk_pct = cloud_cfg.get("risk_pct", self.adaptive_risk_pct)
+                        self.adaptive_score_min = cloud_cfg.get("score_min", self.adaptive_score_min)
+                        
+                        if not cloud_cfg.get("is_running", True):
+                            self.is_paused = True
+                            log.info("⏸️ Le bot démarre en état de PAUSE (configuré ainsi sur le Cloud).")
+
+                        # Récupérer les informations du Broker depuis le Cloud
+                        broker_info = res.get("broker")
+                        if broker_info:
+                            active_broker_type = broker_info.get("broker_type", BROKER_TYPE)
+                            # Si c'est MT5, rajouter les clés de connexion spécifiques
+                            if active_broker_type == "mt5":
+                                broker_kwargs["login"] = broker_info.get("login")
+                                broker_kwargs["password"] = broker_info.get("password")
+                                broker_kwargs["server"] = broker_info.get("server")
+                                broker_kwargs["path"] = broker_info.get("path")
+                            else:
+                                broker_kwargs["api_key"] = broker_info.get("api_key")
+                                broker_kwargs["api_secret"] = broker_info.get("api_secret")
+                            log.info(f"Utilisation du broker configuré sur le Cloud : {active_broker_type}")
+                        
+                        # Vérification des mises à jour
+                        update_info = res.get("update", {})
+                        if update_info.get("available"):
+                            log.warning(f"🔔 Une nouvelle version du bot est disponible : {update_info.get('latest_version')}")
+                            if update_info.get("mandatory"):
+                                log.error("❌ Cette mise à jour est obligatoire. Veuillez mettre à jour le bot pour continuer.")
+                                sys.exit(1)
+
+            log.info(f"Création du broker : {active_broker_type}")
+            self.broker = create_broker(active_broker_type, **broker_kwargs)
             log.info("Broker initialisé")
             
             try:
@@ -170,7 +228,7 @@ class SuperBot:
                 self.initial_balance = 10000.0
 
             # Déterminer les instruments selon le broker (clés spécifiques au broker en priorité)
-            broker_type = BROKER_TYPE  # "binance", "alpaca", "paper_forex", "mt5"
+            broker_type = active_broker_type  # "binance", "alpaca", "paper_forex", "mt5"
             broker_key = f"INSTRUMENTS_{broker_type.upper()}"  # ex: INSTRUMENTS_MT5
             env_instruments_broker = os.getenv(broker_key)
             env_instruments_generic = os.getenv("INSTRUMENTS")
@@ -183,9 +241,9 @@ class SuperBot:
                 log.info(f"Instruments configurés via la variable générique INSTRUMENTS : {self.instruments}")
             else:
                 self.instruments = self.broker.get_default_instruments()
-                log.info(f"Aucun instrument configuré — défauts courtier ({BROKER_TYPE}) : {self.instruments}")
+                log.info(f"Aucun instrument configuré — défauts courtier ({active_broker_type}) : {self.instruments}")
 
-            news_broker_key = f"NEWS_ASSETS_{BROKER_TYPE.upper()}"
+            news_broker_key = f"NEWS_ASSETS_{active_broker_type.upper()}"
             env_news_assets_broker = os.getenv(news_broker_key)
             env_news_assets_generic = os.getenv("NEWS_ASSETS")
             if env_news_assets_broker:
@@ -196,7 +254,7 @@ class SuperBot:
                 log.info(f"Actifs de nouvelles configurés via .env : {self.news_assets}")
             else:
                 self.news_assets = self.broker.get_default_news_assets()
-                log.info(f"Actifs de nouvelles — défauts broker ({BROKER_TYPE}) : {self.news_assets}")
+                log.info(f"Actifs de nouvelles — défauts broker ({active_broker_type}) : {self.news_assets}")
 
             # 2. Créer le gestionnaire de risques
             asset_type = self.broker.get_asset_type()
@@ -453,6 +511,27 @@ class SuperBot:
                         }
                         self.risk_manager.record_trade(trade_record)
 
+                        # Envoi de la clôture à la télémétrie Cloud
+                        if self.telemetry.enabled:
+                            try:
+                                pnl_pct = ((exit_price - entry_price) / entry_price * 100) if entry_price > 0 else 0.0
+                                if side == 'SHORT':
+                                    pnl_pct = -pnl_pct
+                                
+                                self.telemetry.push_position(
+                                    symbol=symbol,
+                                    side=side,
+                                    qty=size,
+                                    entry_price=entry_price,
+                                    current_price=exit_price,
+                                    pnl=pnl,
+                                    pnl_pct=pnl_pct,
+                                    status="closed",
+                                    broker=self.broker.get_asset_type()
+                                )
+                            except Exception as e:
+                                log.debug(f"Erreur envoi position (fermeture) télémétrie : {e}")
+
                         # 🎯 TRACKING P&L PAR ACTIF POUR BLOCAGE DYNAMIQUE
                         # Ajouter le P&L au cumul de session
                         current_pnl = self.session_pnl_by_symbol.get(symbol, 0.0)
@@ -609,6 +688,80 @@ class SuperBot:
             cycle_start_time = time.time()
 
             try:
+                # 📡 TÉLÉMÉTRIE CLOUD : Synchronisation et heartbeat à chaque cycle
+                if self.telemetry.enabled:
+                    res = self.telemetry.sync_config(current_version="v1.0.0")
+                    if res:
+                        if res.get("is_expired"):
+                            log.error("❌ Licence expirée ou inactive détectée. Arrêt automatique du bot.")
+                            self.stop()
+                            break
+                        
+                        cloud_cfg = res.get("config", {})
+                        self.adaptive_risk_pct = cloud_cfg.get("risk_pct", self.adaptive_risk_pct)
+                        self.adaptive_score_min = cloud_cfg.get("score_min", self.adaptive_score_min)
+                        
+                        # Commande de pause/reprise depuis l'interface web
+                        cloud_running = cloud_cfg.get("is_running", True)
+                        if not cloud_running and not self.is_paused:
+                            log.info("⏸️ Commande de PAUSE reçue depuis le Cloud.")
+                            self.is_paused = True
+                        elif cloud_running and self.is_paused:
+                            log.info("▶️ Commande de REPRISE reçue depuis le Cloud.")
+                            self.is_paused = False
+                            
+                    # Envoyer le signal de vie (heartbeat)
+                    self.telemetry.push_heartbeat(
+                        is_running=self.running and not self.is_paused,
+                        broker_type=self.broker.get_asset_type(),
+                        testnet=getattr(self.broker, 'testnet', True) or getattr(self.broker, 'account_type', 'PAPER') == 'PAPER' or 'demo' in str(getattr(self.broker, 'server', '')).lower() or 'demo' in str(getattr(self.broker, 'company', '')).lower()
+                    )
+                    
+                    # Envoyer l'état de l'équité
+                    try:
+                        balance = self.broker.get_balance()
+                        pnl_total = balance - self.initial_balance
+                        self.telemetry.push_equity(equity=balance, pnl_total=pnl_total, drawdown=0.0)
+                    except Exception as e:
+                        log.debug(f"Erreur envoi équité télémétrie : {e}")
+
+                    # Envoyer les positions ouvertes
+                    try:
+                        for symbol, pos in self.positions.items():
+                            pnl = pos.get("unrealized_pnl", 0.0)
+                            entry = pos.get("entry_price", 0.0)
+                            current = pos.get("mark_price", entry)
+                            pnl_pct = ((current - entry) / entry * 100) if entry > 0 else 0.0
+                            if pos.get("side") == "SHORT":
+                                pnl_pct = -pnl_pct
+                            
+                            self.telemetry.push_position(
+                                symbol=symbol,
+                                side=pos.get("side", "LONG"),
+                                qty=pos.get("size", 0.0),
+                                entry_price=entry,
+                                current_price=current,
+                                pnl=pnl,
+                                pnl_pct=pnl_pct,
+                                status="open",
+                                broker=self.broker.get_asset_type()
+                            )
+                    except Exception as e:
+                        log.debug(f"Erreur envoi positions télémétrie : {e}")
+
+                # Gestion du mode pause
+                if self.is_paused:
+                    log.info("😴 Bot en pause. En attente du signal de démarrage depuis la plateforme web...")
+                    cycle_duration = time.time() - cycle_start_time
+                    target_cycle_time = 60
+                    if cycle_duration < target_cycle_time:
+                        sleep_time = target_cycle_time - cycle_duration
+                        slept = 0
+                        while slept < sleep_time and self.running and not self.shutdown_event.is_set():
+                            time.sleep(min(1, sleep_time - slept))
+                            slept += 1
+                    continue
+
                 # 📅 RESET QUOTIDIEN DES BLOCAGES D'ACTIFS
                 today = datetime.now().date()
                 if today != self.session_date:
@@ -1044,6 +1197,22 @@ class SuperBot:
         }
 
         log.debug(f"Position suivie mise à jour pour {symbol} : {position_side} {size}")
+
+        if self.telemetry.enabled:
+            try:
+                self.telemetry.push_position(
+                    symbol=symbol,
+                    side=position_side,
+                    qty=size,
+                    entry_price=entry_price,
+                    current_price=entry_price,
+                    pnl=0.0,
+                    pnl_pct=0.0,
+                    status="open",
+                    broker=self.broker.get_asset_type()
+                )
+            except Exception as e:
+                log.debug(f"Erreur envoi position (update tracking) télémétrie : {e}")
 
     def _process_webhook_signal(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
