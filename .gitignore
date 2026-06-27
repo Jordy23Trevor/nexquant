@@ -31,3 +31,16 @@ logs/
 *.jpg
 *.jpeg
 *.gif
+
+# Node.js / React Webapp ignores
+node_modules/
+dist/
+dist-ssr/
+.output/
+.vinxi/
+.tanstack/
+.nitro/
+.wrangler/
+.dev.vars
+.lovable/
+

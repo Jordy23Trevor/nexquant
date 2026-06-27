@@ -1,0 +1,134 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* NexQuant — Fintech premium sombre design system */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-grid: var(--grid);
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+:root, .dark {
+  --radius: 0.75rem;
+  /* Backgrounds */
+  --background: oklch(0.16 0.013 275);          /* #0f0f14 */
+  --surface-1:  oklch(0.20 0.015 275);          /* base panel */
+  --surface-2:  oklch(0.24 0.018 277);          /* elevated */
+  --foreground: oklch(0.97 0.005 270);
+  --card: oklch(0.22 0.017 277);                /* #1e1e2e */
+  --card-foreground: oklch(0.97 0.005 270);
+  --popover: oklch(0.20 0.015 275);
+  --popover-foreground: oklch(0.97 0.005 270);
+
+  /* Brand */
+  --primary: oklch(0.64 0.19 280);              /* indigo #6366f1 */
+  --primary-foreground: oklch(0.99 0 0);
+  --accent:  oklch(0.82 0.13 200);              /* cyan #22d3ee */
+  --accent-foreground: oklch(0.16 0.013 275);
+
+  /* Neutrals */
+  --secondary: oklch(0.27 0.02 275);
+  --secondary-foreground: oklch(0.97 0.005 270);
+  --muted: oklch(0.27 0.02 275);
+  --muted-foreground: oklch(0.66 0.02 270);
+
+  /* Semantic */
+  --success: oklch(0.74 0.18 152);              /* green */
+  --success-foreground: oklch(0.12 0.02 152);
+  --warning: oklch(0.82 0.16 80);               /* amber */
+  --warning-foreground: oklch(0.18 0.02 80);
+  --destructive: oklch(0.66 0.24 25);           /* red */
+  --destructive-foreground: oklch(0.99 0 0);
+
+  /* Borders / inputs */
+  --border: oklch(1 0 0 / 8%);
+  --input:  oklch(1 0 0 / 10%);
+  --ring:   oklch(0.64 0.19 280 / 60%);
+  --grid:   oklch(1 0 0 / 4%);
+
+  /* Charts */
+  --chart-1: oklch(0.64 0.19 280);
+  --chart-2: oklch(0.82 0.13 200);
+  --chart-3: oklch(0.74 0.18 152);
+  --chart-4: oklch(0.82 0.16 80);
+  --chart-5: oklch(0.66 0.24 25);
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html, body { background-color: var(--color-background); color: var(--color-foreground); }
+  body {
+    font-family: var(--font-display);
+    font-feature-settings: "ss01","cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+  .font-mono, code, kbd, pre, samp { font-family: var(--font-mono); }
+}
+
+@layer components {
+  .panel {
+    background: linear-gradient(180deg, var(--surface-1), var(--surface-2));
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .glow-primary {
+    box-shadow: 0 0 0 1px oklch(0.64 0.19 280 / 0.4),
+                0 10px 40px -10px oklch(0.64 0.19 280 / 0.5);
+  }
+  .grid-bg {
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+  .ticker-glow-up   { color: var(--success); text-shadow: 0 0 12px oklch(0.74 0.18 152 / 0.6); }
+  .ticker-glow-down { color: var(--destructive); text-shadow: 0 0 12px oklch(0.66 0.24 25 / 0.6); }
+  .badge-dot::before {
+    content: ""; display: inline-block; width: 6px; height: 6px;
+    border-radius: 9999px; margin-right: 6px; background: currentColor;
+    box-shadow: 0 0 8px currentColor;
+  }
+  .gradient-text {
+    background: linear-gradient(90deg, oklch(0.82 0.13 200), oklch(0.64 0.19 280));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+}
