@@ -408,6 +408,16 @@ class AlpacaClient(Broker):
 
     # ─── Méthodes utilitaires ────────────────────────────────────────
 
+    def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
+        """
+        Retourne les informations du symbole (contract_size, tick_size, tick_value) pour Alpaca.
+        """
+        return {
+            "contract_size": 1.0,
+            "tick_size": 0.01,
+            "tick_value": 0.01,
+        }
+
     def get_min_order_size(self, symbol: str) -> float:
         """Retourne la taille minimale d'ordre autorisée pour un instrument."""
         return self._get_min_size(symbol)

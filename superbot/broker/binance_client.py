@@ -556,6 +556,19 @@ class BinanceClient(Broker):
 
         return self._call_api(run, False)
 
+    def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
+        """
+        Retourne les informations du symbole (contract_size, tick_size, tick_value) pour Binance.
+        """
+        symbol = self.normalize_symbol(symbol)
+        info = self._get_symbol_info(symbol)
+        tick_size = info.get("tick_size", 0.01)
+        return {
+            "contract_size": 1.0,
+            "tick_size": tick_size,
+            "tick_value": tick_size,
+        }
+
     def get_min_order_size(self, symbol: str) -> float:
         """Retourne la taille minimale d'ordre autorisée pour un instrument."""
         binance_symbol = symbol.replace("/", "").upper()

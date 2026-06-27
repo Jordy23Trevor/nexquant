@@ -42,6 +42,13 @@ class RiskManager:
         self.MIN_POSITION_SIZE = config.get('MIN_POSITION_SIZE', 0.001)  # Taille min position
         self.MAX_POSITION_SIZE = config.get('MAX_POSITION_SIZE', 1000.0)  # Taille max position
 
+        # Multiplicateurs ATR dynamiques par type d'actif
+        self.ATR_MULTIPLIERS = {
+            'forex': {'sl': 1.5, 'tp': 3.0},
+            'stock': {'sl': 2.0, 'tp': 4.0},
+            'crypto': {'sl': 2.5, 'tp': 5.0}
+        }
+
         # Historique des trades pour le calcul de Kelly
         self.trade_history: List[Dict[str, Any]] = []
         self.daily_pnl = 0.0
@@ -123,7 +130,8 @@ class RiskManager:
                                stop_loss: float, symbol: str = "",
                                sentiment_factor: float = 1.0,
                                volatility_data: Optional[Dict[str, Any]] = None,
-                               correlation_data: Optional[Dict[str, Any]] = None) -> Tuple[float, Dict[str, Any]]:
+                               correlation_data: Optional[Dict[str, Any]] = None,
+                               broker: Optional[Any] = None) -> Tuple[float, Dict[str, Any]]:
         """
         Calcule la taille de position optimale basée sur le risque, Kelly, et divers facteurs.
 
@@ -135,32 +143,44 @@ class RiskManager:
             sentiment_factor: Facteur de sentiment des nouvelles (0-2, où 1 = neutre)
             volatility_data: Données de volatilité pour ajustement
             correlation_data: Données de corrélation pour ajustement de portefeuille
+            broker: Instance du courtier actif
 
         Returns:
             Tuple de (taille_de_position, détails_du_calcul)
         """
         try:
-            # 1. Calculer le risque par unité (en prix)
-            risk_per_unit = abs(entry_price - stop_loss)
-            if risk_per_unit <= 0:
-                log.warning(f"Risque par unité invalide pour {symbol}: {risk_per_unit}")
+            # 1. Récupérer les spécifications du symbole (taille du contrat, tick size, tick value)
+            contract_size = 1.0
+            tick_size = 0.01
+            tick_value = 0.01
+            
+            if broker is not None and hasattr(broker, 'get_symbol_info'):
+                try:
+                    sym_info = broker.get_symbol_info(symbol)
+                    contract_size = sym_info.get('contract_size', 1.0)
+                    tick_size = sym_info.get('tick_size', 0.01)
+                    tick_value = sym_info.get('tick_value', 0.01)
+                except Exception as e:
+                    log.warning(f"Impossible de récupérer les spécifications de symbole pour {symbol}: {e}")
+
+            # 2. Calculer le risque par unité en devise de compte
+            price_risk = abs(entry_price - stop_loss)
+            if price_risk <= 0:
+                log.warning(f"Risque par unité invalide pour {symbol}: {price_risk}")
                 return 0.0, {'error': 'Invalid risk per unit'}
 
-            # 2. Calculer le risque en pourcentage du compte
+            # Formule universelle de risque par unité dans la monnaie de compte
+            risk_per_unit = (price_risk / tick_size) * (tick_value / contract_size)
+
+            # 3. Calculer le risque en pourcentage du compte
             risk_pct = self.RISK_PCT / 100.0  # Convertir en décimal
 
-            # 3. Ajuster le risque basé sur le sentiment des nouvelles
+            # 4. Ajuster le risque basé sur le sentiment des nouvelles
             # sentiment_factor: < 1 = réduire le risque, > 1 = augmenter légèrement
             adjusted_risk_pct = risk_pct * sentiment_factor
 
             # S'assurer que le risque ajusté reste dans des limites raisonnables
             adjusted_risk_pct = max(0.005, min(0.05, adjusted_risk_pct))  # Entre 0.5% et 5%
-
-            # 4. Ajuster basé sur la volatilité (si disponible)
-            if volatility_data and 'atr' in volatility_data:
-                # Plus grande volatilité = taille de position plus petite pour le même risque en $
-                # Ceci est déjà pris en compte par le risque en unités de prix, donc pas d'ajustement supplémentaire nécessaire ici
-                pass
 
             # 5. Ajuster basé sur la corrélation du portefeuille (si disponible)
             correlation_adjustment = 1.0
@@ -171,7 +191,6 @@ class RiskManager:
                     correlation_adjustment = 0.7
                 elif avg_corr > 0.5:  # Corrélation modérée
                     correlation_adjustment = 0.85
-                # Faible corrélation (< 0.5) = pas d'ajustement ou augmentation légère
 
             # 6. Calculer la taille de position de base basée sur le risque
             risk_amount = account_balance * adjusted_risk_pct * correlation_adjustment
@@ -182,7 +201,7 @@ class RiskManager:
             if kelly_fraction is not None and len(self.trade_history) >= self.MIN_TRADES_FOR_KELLY:
                 # Kelly suggère la fraction optimale du bankroll à miser
                 kelly_position_size = account_balance * kelly_fraction / risk_per_unit
-                # Combiner approche risque fixe et Kelly (souvent on utilise une fraction de Kelly)
+                # Combiner approche risque fixe et Kelly
                 position_size = (base_position_size * (1 - self.KELLY_FRACTION) +
                                kelly_position_size * self.KELLY_FRACTION)
                 log.debug(f"Kelly appliqué: base={base_position_size:.4f}, kelly={kelly_position_size:.4f}, final={position_size:.4f}")
@@ -193,21 +212,43 @@ class RiskManager:
                 else:
                     log.debug("Kelly non disponible, utilisation du risque fixe")
 
-            # 8. Appliquer les limites de taille de position
-            position_size = max(self.MIN_POSITION_SIZE, min(position_size, self.MAX_POSITION_SIZE))
+            # 8. Récupérer les limites de taille spécifiques au broker
+            min_size = self.MIN_POSITION_SIZE
+            step_size = None
+            if broker is not None:
+                try:
+                    min_size = broker.get_min_order_size(symbol)
+                    step_size = broker.get_step_size(symbol)
+                except Exception as e:
+                    log.warning(f"Impossible de récupérer les limites broker pour {symbol}: {e}")
+
+            # Appliquer les limites de taille de position
+            position_size = max(min_size, min(position_size, self.MAX_POSITION_SIZE))
+
+            if step_size is not None and step_size > 0:
+                position_size = round(position_size / step_size) * step_size
 
             # 9. Calculer le risque réel en pourcentage
             actual_risk_amount = position_size * risk_per_unit
             actual_risk_pct = (actual_risk_amount / account_balance) * 100 if account_balance > 0 else 0
 
-            # Si le risque réel dépasse la limite de sécurité (ex: à cause de la taille de position minimale)
+            # Si le risque réel dépasse la limite de sécurité
             max_allowed_risk_pct = max(3.0, self.RISK_PCT * 2.0)
             if actual_risk_pct > max_allowed_risk_pct:
-                log.warning(
-                    f"Risque réel de {actual_risk_pct:.2f}% dépasse la limite autorisée de {max_allowed_risk_pct:.2f}% "
-                    f"pour {symbol} (taille minimale de contrat trop grande pour la taille du compte). Trade rejeté."
-                )
-                return 0.0, {'error': 'Risk too high for account size due to contract minimums'}
+                if position_size == min_size:
+                    log.warning(
+                        f"Risque réel de {actual_risk_pct:.2f}% dépasse la limite autorisée de {max_allowed_risk_pct:.2f}% "
+                        f"pour {symbol} (taille minimale de contrat trop grande pour la taille du compte). Trade rejeté."
+                    )
+                    return 0.0, {'error': 'Risk too high for account size due to contract minimums'}
+                else:
+                    # Capper la taille pour respecter la limite
+                    log.info(f"Capping de la taille de position de {position_size:.6f} à la limite de risque de {max_allowed_risk_pct:.2f}%")
+                    position_size = (max_allowed_risk_pct / 100.0) * account_balance / risk_per_unit
+                    if step_size is not None and step_size > 0:
+                        position_size = round(position_size / step_size) * step_size
+                    actual_risk_amount = position_size * risk_per_unit
+                    actual_risk_pct = (actual_risk_amount / account_balance) * 100 if account_balance > 0 else 0
 
             # Détails du calcul pour le logging et le débogage
             details = {
@@ -215,6 +256,7 @@ class RiskManager:
                 'entry_price': entry_price,
                 'stop_loss': stop_loss,
                 'risk_per_unit': risk_per_unit,
+                'price_risk': price_risk,
                 'base_risk_pct': risk_pct * 100,
                 'sentiment_factor': sentiment_factor,
                 'correlation_adjustment': correlation_adjustment,
@@ -244,18 +286,31 @@ class RiskManager:
             return None
 
         try:
-            # Calculer le taux de victoire et le gain moyen/perte moyenne
-            winning_trades = [t for t in self.trade_history if t.get('pnl', 0) > 0]
-            losing_trades = [t for t in self.trade_history if t.get('pnl', 0) <= 0]
+            # Filtrer uniquement les trades CLÔTURÉS avec un P&L valide
+            trades_with_pnl = [t for t in self.trade_history if t.get('pnl') is not None and t.get('status') == 'closed']
 
-            if len(winning_trades) == 0 or len(losing_trades) == 0:
+            # Pas assez de trades clôturés pour Kelly
+            if len(trades_with_pnl) < self.MIN_TRADES_FOR_KELLY:
+                log.debug(f"Pas assez de trades clôturés pour Kelly: {len(trades_with_pnl)}/{self.MIN_TRADES_FOR_KELLY}")
                 return None
 
-            win_rate = len(winning_trades) / len(self.trade_history)
-            avg_win = np.mean([t['pnl'] for t in winning_trades]) if winning_trades else 0
-            avg_loss = abs(np.mean([t['pnl'] for t in losing_trades])) if losing_trades else 0
+            # Séparer gagnants et perdants uniquement sur les trades avec P&L valide
+            winning_trades = [t for t in trades_with_pnl if t.get('pnl', 0) > 0]
+            losing_trades = [t for t in trades_with_pnl if t.get('pnl', 0) <= 0]
+
+            if len(winning_trades) == 0 or len(losing_trades) == 0:
+                log.debug(f"Kelly: winning={len(winning_trades)}, losing={len(losing_trades)} - impossible de calculer")
+                return None
+
+            # Calculer le win rate sur les trades clôturés uniquement
+            win_rate = len(winning_trades) / len(trades_with_pnl)
+
+            # Extraire les P&L avec validation
+            avg_win = np.mean([t['pnl'] for t in winning_trades if 'pnl' in t]) if winning_trades else 0
+            avg_loss = abs(np.mean([t['pnl'] for t in losing_trades if 'pnl' in t])) if losing_trades else 0
 
             if avg_loss == 0:
+                log.debug("Kelly: avg_loss = 0, impossible de calculer")
                 return None
 
             # Ratio gain/perte
@@ -267,50 +322,46 @@ class RiskManager:
                 kelly_fraction = (win_loss_ratio * win_rate - (1 - win_rate)) / win_loss_ratio
                 # Kelly peut être négatif (pas d'avantage) ou trop élevé, on le borne
                 kelly_fraction = max(0.0, min(kelly_fraction, 0.9))  # Maximum 90% (très agressif)
+                log.debug(f"Kelly calculé: win_rate={win_rate:.2%}, win_loss_ratio={win_loss_ratio:.2f}, kelly={kelly_fraction:.2%}")
                 return kelly_fraction
             else:
+                log.debug(f"Kelly: win_loss_ratio={win_loss_ratio} <= 0")
                 return None
 
+        except KeyError as e:
+            log.error(f"Erreur KeyError lors du calcul de la fraction de Kelly: clé manquante {e} - Vérifiez que tous les trades ont un champ 'pnl'")
+            return None
         except Exception as e:
             log.error(f"Erreur lors du calcul de la fraction de Kelly: {e}")
             return None
 
     def calculate_sl_tp_levels(self, entry_price: float, atr_value: float,
-                              position_side: str) -> Tuple[float, float]:
+                                  position_side: str, asset_type: str = "forex") -> Tuple[float, float]:
         """
-        Calcule les niveaux de stop loss et take profit basés sur l'ATR.
-
-        Args:
-            entry_price: Prix d'entrée
-            atr_value: Valeur de l'ATR (Average True Range)
-            position_side: 'LONG' ou 'SHORT'
-
-        Returns:
-            Tuple de (stop_loss, take_profit)
+        Calcule les niveaux de stop loss et take profit basés sur l'ATR, avec multiplicateurs selon l'actif.
         """
         if atr_value <= 0:
-            # Fallback : utiliser un pourcentage fixe si l'ATR n'est pas disponible
-            risk_pct = 0.02  # 2% de risque par défaut
+            risk_pct = 0.02
             if position_side == "LONG":
                 sl_price = entry_price * (1 - risk_pct)
-                tp_price = entry_price * (1 + risk_pct * 2)  # RR 1:2
-            else:  # SHORT
+                tp_price = entry_price * (1 + risk_pct * 2)
+            else:
                 sl_price = entry_price * (1 + risk_pct)
                 tp_price = entry_price * (1 - risk_pct * 2)
             return sl_price, tp_price
 
+        mults = self.ATR_MULTIPLIERS.get(asset_type, self.ATR_MULTIPLIERS['forex'])
+        sl_mult, tp_mult = mults['sl'], mults['tp']
+
         if position_side == "LONG":
-            sl_price = entry_price - (self.SL_ATR_MULT * atr_value)
-            tp_price = entry_price + (self.TP_ATR_MULT * atr_value)
-        else:  # SHORT
-            sl_price = entry_price + (self.SL_ATR_MULT * atr_value)
-            tp_price = entry_price - (self.TP_ATR_MULT * atr_value)
+            sl_price = entry_price - (sl_mult * atr_value)
+            tp_price = entry_price + (tp_mult * atr_value)
+        else:
+            sl_price = entry_price + (sl_mult * atr_value)
+            tp_price = entry_price - (tp_mult * atr_value)
 
-        # S'assurer que les prix sont positifs et raisonnables
-        sl_price = max(0.0001, sl_price)
-        tp_price = max(0.0001, tp_price)
+        return max(0.0001, sl_price), max(0.0001, tp_price)
 
-        return sl_price, tp_price
 
     def record_trade(self, trade_record: Dict[str, Any]):
         """
@@ -346,6 +397,87 @@ class RiskManager:
 
         except Exception as e:
             log.error(f"Erreur lors de l'enregistrement du trade: {e}")
+
+    def load_trade_history_from_disk(self):
+        """
+        Charge l'historique des trades enregistrés depuis le fichier JSON Lines.
+        Ne charge que les trades CLÔTURÉS avec un P&L valide pour éviter les erreurs Kelly.
+        """
+        try:
+            log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+            trades_file = os.path.join(log_dir, 'trades.jsonl')
+            if not os.path.exists(trades_file):
+                log.info("Aucun fichier d'historique de trades trouvé sur le disque.")
+                return
+
+            loaded_trades = []
+            with open(trades_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            trade = json.loads(line.strip())
+                            # Ne conserver que les trades clôturés AVEC un P&L valide
+                            # Un trade ouvert n'a pas de champ 'pnl' ou a 'status' != 'closed'
+                            if trade.get('status') == 'closed' and trade.get('pnl') is not None:
+                                loaded_trades.append(trade)
+                        except Exception:
+                            continue
+
+            # Garder les 100 plus récents
+            self.trade_history = loaded_trades[-100:]
+            log.info(f"Historique de trading chargé depuis le disque : {len(self.trade_history)} trades clôturés trouvés.")
+        except Exception as e:
+            log.error(f"Erreur lors du chargement de l'historique de trades : {e}")
+
+    def merge_broker_history(self, broker_trades: List[Dict[str, Any]]):
+        """
+        Fusionne l'historique du broker avec l'historique local en évitant les doublons.
+        """
+        if not broker_trades:
+            return
+
+        # Créer un ensemble d'identifiants uniques pour les trades locaux existants
+        existing_keys = set()
+        for t in self.trade_history:
+            ts = t.get('timestamp', '')
+            if isinstance(ts, str) and 'T' in ts:
+                ts = ts.split('.')[0]  # ignorer les microsecondes
+            key = (t.get('symbol'), t.get('side'), ts)
+            existing_keys.add(key)
+
+        new_trades = []
+        for t in broker_trades:
+            ts = t.get('timestamp')
+            if isinstance(ts, datetime):
+                ts_str = ts.isoformat().split('.')[0]
+                t_copy = t.copy()
+                t_copy['timestamp'] = ts.isoformat()
+            elif isinstance(ts, str):
+                ts_str = ts.split('.')[0]
+                t_copy = t.copy()
+            else:
+                ts_str = str(ts)
+                t_copy = t.copy()
+
+            key = (t_copy.get('symbol'), t_copy.get('side'), ts_str)
+            if key not in existing_keys:
+                new_trades.append(t_copy)
+                existing_keys.add(key)
+
+        # Ajouter les nouveaux trades et retrier par timestamp
+        self.trade_history.extend(new_trades)
+        
+        # S'assurer que le timestamp est analysable pour le tri
+        def get_ts(x):
+            return x.get('timestamp', '')
+
+        self.trade_history.sort(key=get_ts)
+        
+        # Garder seulement les 100 derniers
+        if len(self.trade_history) > 100:
+            self.trade_history = self.trade_history[-100:]
+
+        log.info(f"Fusion de l'historique broker terminée. Total trades en mémoire : {len(self.trade_history)}")
 
     def update_open_position(self, symbol: str, current_price: float):
         """

@@ -38,7 +38,7 @@ sys.stdout = SafeStreamWrapper(sys.stdout)
 sys.stderr = SafeStreamWrapper(sys.stderr)
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 import threading
 import traceback
 
@@ -132,6 +132,12 @@ class SuperBot:
         self.adaptive_score_min = SCORE_MIN
         self._adaptation_counter = 0
         self._adaptation_every = 10  # cycles
+
+        # Blocage dynamique des actifs perdants
+        self.blocked_symbols: Set[str] = set()
+        self.session_pnl_by_symbol: Dict[str, float] = {}
+        self.session_date = datetime.now().date()
+        self.ASSET_BLOCK_LOSS_THRESHOLD = float(os.getenv('ASSET_BLOCK_LOSS_THRESHOLD', 50.0))  # USD
 
         # Statistiques et monitoring
         self.stats = {
@@ -244,6 +250,16 @@ class SuperBot:
                 'MAX_POSITION_SIZE': actual_max_pos
             })
             log.info("Gestionnaire de risques initialisé")
+
+            # Charger l'historique de trading réel (disque + broker)
+            try:
+                self.risk_manager.load_trade_history_from_disk()
+                broker_history = self.broker.get_trade_history(days=30)
+                if broker_history:
+                    self.risk_manager.merge_broker_history(broker_history)
+                log.info(f"Historique de trading final chargé : {len(self.risk_manager.trade_history)} trades en mémoire.")
+            except Exception as e:
+                log.warning(f"Impossible de pré-charger l'historique de trading : {e}")
 
             # 3. Créer la stratégie de trading
             self.strategy = TradingStrategy({
@@ -365,6 +381,90 @@ class SuperBot:
                         }
                 except Exception as e:
                     log.debug(f"Erreur lors de la récupération de la position de {symbol} : {e}")
+
+            # Détecter les positions fermées
+            for symbol, old_pos in self.positions.items():
+                if symbol not in active_positions:
+                    log.info(f"Position fermée détectée pour {symbol}")
+                    entry_price = old_pos.get('entry_price', 0.0)
+                    side = old_pos.get('side', 'LONG')
+                    size = old_pos.get('size', 0.0)
+                    
+                    exit_price = 0.0
+                    pnl = 0.0
+                    
+                    # 1. Tenter de récupérer l'info exacte via l'historique du broker
+                    try:
+                        history = self.broker.get_trade_history(days=1)
+                        matching_trade = None
+                        for t in history:
+                            if t['symbol'] == symbol:
+                                trade_time = t.get('timestamp')
+                                pos_time = old_pos.get('timestamp')
+                                if trade_time and pos_time:
+                                    if isinstance(trade_time, str):
+                                        trade_time = datetime.fromisoformat(trade_time.replace('Z', '+00:00'))
+                                    if isinstance(pos_time, str):
+                                        pos_time = datetime.fromisoformat(pos_time.replace('Z', '+00:00'))
+                                    
+                                    # Handle tzinfo difference
+                                    if trade_time.tzinfo is None and pos_time.tzinfo is not None:
+                                        trade_time = trade_time.replace(tzinfo=timezone.utc)
+                                    elif trade_time.tzinfo is not None and pos_time.tzinfo is None:
+                                        pos_time = pos_time.replace(tzinfo=timezone.utc)
+                                        
+                                    if trade_time >= pos_time:
+                                        matching_trade = t
+                                        break
+                                else:
+                                    matching_trade = t
+                                    break
+                        if matching_trade:
+                            exit_price = matching_trade['exit_price']
+                            pnl = matching_trade['pnl']
+                            entry_price = matching_trade.get('entry_price') or entry_price
+                            log.info(f"Détails du trade récupérés depuis l'historique broker pour {symbol} : Exit={exit_price}, P&L={pnl}")
+                    except Exception as e:
+                        log.debug(f"Impossible de récupérer l'historique broker pour la fermeture de {symbol} : {e}")
+                        
+                    # 2. Si non trouvé, calculer de manière théorique
+                    if exit_price == 0.0:
+                        try:
+                            exit_price = self.broker.get_current_price(symbol)
+                            if side == 'LONG':
+                                pnl = (exit_price - entry_price) * size
+                            else:
+                                pnl = (entry_price - exit_price) * size
+                            log.info(f"Calcul théorique de la fermeture pour {symbol} : Exit={exit_price}, P&L={pnl:.2f}")
+                        except Exception as e:
+                            log.error(f"Erreur lors du calcul théorique de fermeture pour {symbol} : {e}")
+                            
+                    # Enregistrer le trade clôturé
+                    if self.risk_manager:
+                        trade_record = {
+                            'symbol': symbol,
+                            'side': 'buy' if side == 'LONG' else 'sell',
+                            'entry_price': entry_price,
+                            'exit_price': exit_price,
+                            'position_size': size,
+                            'pnl': pnl,
+                            'timestamp': datetime.now(timezone.utc).isoformat(),
+                            'status': 'closed'
+                        }
+                        self.risk_manager.record_trade(trade_record)
+
+                        # 🎯 TRACKING P&L PAR ACTIF POUR BLOCAGE DYNAMIQUE
+                        # Ajouter le P&L au cumul de session
+                        current_pnl = self.session_pnl_by_symbol.get(symbol, 0.0)
+                        self.session_pnl_by_symbol[symbol] = current_pnl + pnl
+
+                        # Vérifier si le seuil de perte est atteint (basé sur % du capital initial)
+                        threshold_usd = self.initial_balance * self.ASSET_BLOCK_LOSS_THRESHOLD
+                        if self.session_pnl_by_symbol[symbol] < -threshold_usd:
+                            self.blocked_symbols.add(symbol)
+                            log.warning(f"🚫 {symbol} BLOQUÉ - Perte session: {self.session_pnl_by_symbol[symbol]:.2f} USD (seuil: -{threshold_usd:.2f} USD / {self.ASSET_BLOCK_LOSS_THRESHOLD*100:.1f}%)")
+                        elif pnl < 0:
+                            log.info(f"📉 {symbol} : {self.session_pnl_by_symbol[symbol]:.2f} USD de perte cumulée en session")
 
             # Mettre à jour self.positions
             self.positions = active_positions
@@ -510,6 +610,18 @@ class SuperBot:
             cycle_start_time = time.time()
 
             try:
+                # 📅 RESET QUOTIDIEN DES BLOCAGES D'ACTIFS
+                today = datetime.now().date()
+                if today != self.session_date:
+                    blocked_count = len(self.blocked_symbols)
+                    self.blocked_symbols.clear()
+                    self.session_pnl_by_symbol.clear()
+                    self.session_date = today
+                    if blocked_count > 0:
+                        log.info(f"📅 Reset quotidien : {blocked_count} actifs débloqués pour nouvelle session")
+                    else:
+                        log.debug("📅 Reset quotidien des blocages d'actifs")
+
                 # Mettre à jour les statistiques
                 cycle_count += 1
                 self.stats['cycles_completed'] = cycle_count
@@ -603,11 +715,25 @@ class SuperBot:
             # === GESTION DE RISQUE CONTINUE DES POSITIONS OUVERTES ===
             self._update_active_position_risk(symbol, df_with_indicators)
 
+            # 🚫 BLOCAGE DYNAMIQUE : Skip si actif bloqué pour cette session
+            if symbol in self.blocked_symbols:
+                log.info(f"⛔ {symbol} bloqué pour cette session (perte cumulée > seuil)")
+                return
+
             # Si le courtier est crypto et que le symbole n'est pas l'actif sélectionné
             if self.broker.get_asset_type() == "crypto":
                 active_crypto = getattr(self, '_active_crypto_symbol', None)
                 if active_crypto and symbol != active_crypto:
                     # Ne pas chercher à ouvrir de nouvelles positions sur cet actif
+                    return
+
+            # 🕒 FILTRE SESSION US (Alpaca/Stocks)
+            if self.broker.get_asset_type() == "stock":
+                now_utc = datetime.now(timezone.utc).time()
+                start_session = datetime.strptime("14:30", "%H:%M").time()
+                end_session = datetime.strptime("21:00", "%H:%M").time()
+                if not (start_session <= now_utc <= end_session):
+                    log.debug(f"Hors session US ({now_utc}) : skip {symbol}")
                     return
 
             # 3. Analyser le marché et générer un signal de trading
@@ -703,7 +829,7 @@ class SuperBot:
             if atr_value > 0:
                 position_side = "LONG" if signal_data['should_long'] else "SHORT"
                 sl_price, tp_price = self.risk_manager.calculate_sl_tp_levels(
-                    entry_price, atr_value, position_side
+                    entry_price, atr_value, position_side, asset_type=self.broker.get_asset_type()
                 )
             else:
                 # Fallback : utiliser un pourcentage fixe provenant de la configuration
@@ -721,7 +847,8 @@ class SuperBot:
             entry_price=entry_price,
             stop_loss=sl_price,
             symbol=symbol,
-            sentiment_factor=self.news_manager.get_risk_factor() if self.news_manager else 1.0
+            sentiment_factor=self.news_manager.get_risk_factor() if self.news_manager else 1.0,
+            broker=self.broker
         )
 
         # DEBUG: Log detailed risk sizing information
@@ -787,115 +914,73 @@ class SuperBot:
 
     def _select_and_rotate_crypto(self):
         """
-        Pour la crypto, sélectionne automatiquement le meilleur actif (BTC ou ETH)
-        et gère l'abandon/rotation de l'autre vers le nouvel actif sélectionné.
+        Pour la crypto, sélectionne automatiquement le meilleur actif parmi tous les instruments
+        configurés et gère la rotation si un actif devient nettement plus performant.
         """
         try:
             if not self.broker or self.broker.get_asset_type() != "crypto":
                 return
 
-            btc_symbol = None
-            eth_symbol = None
+            # 1. Calculer les scores pour TOUS les instruments crypto configurés
+            scores = {}
+            for symbol in self.instruments:
+                try:
+                    df = self._fetch_market_data(symbol)
+                    if df is None or len(df) < 50:
+                        continue
 
-            # Détecter les symboles BTC et ETH parmi les instruments ou les valeurs par défaut du broker
-            symbols_to_check = list(self.instruments)
-            try:
-                for default_sym in self.broker.get_default_instruments():
-                    if default_sym not in symbols_to_check:
-                        symbols_to_check.append(default_sym)
-            except Exception:
-                pass
+                    indicators = self.technical_indicators.calculate_all_indicators(df.copy())
+                    signal = self.strategy.analyze_market(indicators)
 
-            for s in symbols_to_check:
-                s_upper = s.upper()
-                if "BTC" in s_upper and ("USDT" in s_upper or "USD" in s_upper) and not btc_symbol:
-                    btc_symbol = s
-                elif "ETH" in s_upper and ("USDT" in s_upper or "USD" in s_upper) and not eth_symbol:
-                    eth_symbol = s
+                    # Calcul du score de force de tendance/momentum
+                    last = df.iloc[-1]
+                    score = float(signal.get('total_score', 0))
 
-            # Fallbacks si non trouvés dans la liste
-            if not btc_symbol:
-                btc_symbol = "BTC/USDT" if "/" in self.instruments[0] else "BTCUSDT"
-            if not eth_symbol:
-                eth_symbol = "ETH/USDT" if "/" in self.instruments[0] else "ETHUSDT"
+                    # Bonus de tendance à long terme
+                    ema_200 = last.get('ema_trend', last['close'])
+                    score += 5.0 if last['close'] > ema_200 else -5.0
 
-            log.debug(f"Analyse rotation crypto : BTC={btc_symbol}, ETH={eth_symbol}")
+                    # Force de tendance ADX
+                    adx = last.get('adx', 0)
+                    score += (adx / 10.0) if last['close'] > ema_200 else -(adx / 10.0)
 
-            # Récupérer les données pour les deux actifs
-            btc_df = self._fetch_market_data(btc_symbol)
-            eth_df = self._fetch_market_data(eth_symbol)
+                    # RSI (momentum)
+                    rsi = last.get('rsi', 50)
+                    score += (rsi - 50) / 10.0
 
-            if btc_df is None or eth_df is None or len(btc_df) < 50 or len(eth_df) < 50:
-                # Si l'un des deux échoue, on ne change rien
-                log.debug("Données insuffisantes pour effectuer la sélection de rotation crypto.")
+                    scores[symbol] = score
+                except Exception as e:
+                    log.debug(f"Erreur lors du calcul du score pour {symbol} : {e}")
+
+            if not scores:
+                log.debug("Aucun instrument crypto valide pour la rotation.")
                 return
 
-            # Calculer les indicateurs et analyser avec la stratégie
-            btc_indicators = self.technical_indicators.calculate_all_indicators(btc_df.copy())
-            eth_indicators = self.technical_indicators.calculate_all_indicators(eth_df.copy())
+            # 2. Sélectionner l'actif avec le score le plus élevé
+            selected = max(scores, key=scores.get)
+            selected_score = scores[selected]
 
-            btc_signal = self.strategy.analyze_market(btc_indicators)
-            eth_signal = self.strategy.analyze_market(eth_indicators)
+            log.info(f"Évaluation Crypto : {len(scores)} actifs scannés | Meilleur : {selected} (Score: {selected_score:.2f})")
 
-            # Calculer un score de force de tendance/momentum pour la rotation
-            def compute_trend_score(df, sig) -> float:
-                last = df.iloc[-1]
-                score = float(sig.get('total_score', 0))
-                
-                # Bonus de tendance à long terme
-                ema_200 = last.get('ema_trend', last['close'])
-                if last['close'] > ema_200:
-                    score += 5.0
-                else:
-                    score -= 5.0
-
-                # Force de tendance ADX
-                adx = last.get('adx', 0)
-                if last['close'] > ema_200:
-                    score += adx / 10.0
-                else:
-                    score -= adx / 10.0
-
-                # RSI (momentum)
-                rsi = last.get('rsi', 50)
-                score += (rsi - 50) / 10.0
-
-                return score
-
-            btc_score = compute_trend_score(btc_indicators, btc_signal)
-            eth_score = compute_trend_score(eth_indicators, eth_signal)
-
-            log.info(f"Évaluation Crypto : BTC Score = {btc_score:.2f} | ETH Score = {eth_score:.2f}")
-
-            # Choix de l'actif
+            # 3. Rotation avec buffer pour éviter les allers-retours
             current_active = getattr(self, '_active_crypto_symbol', None)
-            
-            # Appliquer un buffer de rotation (différence > 2.0) pour éviter les allers-retours
+
             if current_active is None:
-                selected = btc_symbol if btc_score >= eth_score else eth_symbol
-            elif current_active == btc_symbol:
-                selected = eth_symbol if eth_score > btc_score + 2.0 else btc_symbol
-            else:
-                selected = btc_symbol if btc_score > eth_score + 2.0 else eth_symbol
+                self._active_crypto_symbol = selected
+            elif current_active != selected:
+                current_score = scores.get(current_active, -999)
+                # On bascule seulement si le nouveau est nettement meilleur (> 2.0 points)
+                if selected_score > current_score + 2.0:
+                    log.info(f"🔄 ROTATION CRYPTO : Bascule de {current_active} ({current_score:.2f}) vers {selected} ({selected_score:.2f})")
+                    self._active_crypto_symbol = selected
 
-            self._active_crypto_symbol = selected
-            log.info(f"Actif crypto sélectionné : {selected}")
-
-            # Abandon/rotation de position :
-            # Si nous détenons une position sur l'autre symbole, et que nous choisissons de basculer,
-            # on vérifie s'il faut abandonner l'actif actuel.
-            other_symbol = eth_symbol if selected == btc_symbol else btc_symbol
-            other_pos = self.positions.get(other_symbol)
-
-            if other_pos and other_pos.get('size', 0) > 0:
-                current_pos_score = btc_score if other_symbol == btc_symbol else eth_score
-                selected_score = eth_score if selected == eth_symbol else btc_score
-
-                # Si le nouvel actif est nettement meilleur (score supérieur de 3.0 points ou plus)
-                if selected_score > current_pos_score + 3.0:
-                    log.info(f"🔄 ROTATION CRYPTO : Fermeture de la position sur {other_symbol} (score {current_pos_score:.2f}) pour basculer sur {selected} (score {selected_score:.2f})")
-                    self.broker.close_position(other_symbol, reason="Rotation de portefeuille crypto")
-                    self._sync_positions_with_broker()
+                    # Fermeture de l'ancienne position si elle existe
+                    if current_active in self.positions:
+                        log.info(f"Fermeture de la position sur {current_active} pour rotation vers {selected}")
+                        self.broker.close_position(current_active, reason="Rotation de portefeuille crypto")
+                        self._sync_positions_with_broker()
+                else:
+                    log.debug(f"Rotation ignorée : {selected} ({selected_score:.2f}) n'est pas assez supérieur à {current_active} ({current_score:.2f})")
 
         except Exception as e:
             log.error(f"Erreur dans _select_and_rotate_crypto: {e}")
@@ -1056,7 +1141,8 @@ class SuperBot:
                 entry_price=entry_price,
                 stop_loss=sl_price,
                 symbol=symbol,
-                sentiment_factor=self.news_manager.get_risk_factor() if self.news_manager else 1.0
+                sentiment_factor=self.news_manager.get_risk_factor() if self.news_manager else 1.0,
+                broker=self.broker
             )
 
             if position_size <= 0:
@@ -1117,6 +1203,14 @@ class SuperBot:
 
         try:
             # Préparer les données pour le dashboard
+            serialized_history = []
+            if self.risk_manager:
+                for t in self.risk_manager.trade_history:
+                    t_copy = t.copy()
+                    if isinstance(t_copy.get('timestamp'), datetime):
+                        t_copy['timestamp'] = t_copy['timestamp'].isoformat()
+                    serialized_history.append(t_copy)
+
             dashboard_data = {
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'broker_type': BROKER_TYPE,
@@ -1125,10 +1219,11 @@ class SuperBot:
                     **self.stats.copy(),
                     'running': self.running,
                     'uptime_seconds': (datetime.now(timezone.utc) - self.stats['start_time']).total_seconds() if self.stats.get('start_time') else 0,
-                    'total_trades': self.stats.get('trades_executed', 0),
-                    'win_trades': 0,  # computed by risk_manager
+                    'total_trades': len(self.risk_manager.trade_history) if self.risk_manager else 0,
+                    'win_trades': len([t for t in self.risk_manager.trade_history if t.get('pnl', 0) > 0]) if self.risk_manager else 0,
                 },
                 'positions': {},
+                'history': serialized_history,
                 'market_data': {},
                 'account': {},
                 'risk_metrics': {},
@@ -1231,15 +1326,21 @@ class SuperBot:
 
     def _get_recent_win_rate(self) -> float:
         """
-        Calcule le taux de victoire sur les 20 derniers trades enregistrés.
+        Calcule le taux de victoire sur les 20 derniers trades CLÔTURÉS.
+
         Returns:
             Taux de victoire entre 0.0 et 1.0, ou 0.0 si pas assez de trades.
         """
-        if not self.risk_manager.trade_history:
+        # Filtrer uniquement les trades clôturés avec P&L valide
+        closed_trades = [t for t in self.risk_manager.trade_history if t.get('status') == 'closed' and t.get('pnl') is not None]
+
+        if not closed_trades:
             return 0.0
-        recent = self.risk_manager.trade_history[-20:]
+
+        recent = closed_trades[-20:]
         if not recent:
             return 0.0
+
         winning = sum(1 for t in recent if t.get('pnl', 0) > 0)
         return winning / len(recent)
 
@@ -1277,11 +1378,14 @@ class SuperBot:
         Détecte une éventuelle dérive du modèle en surveillant le taux de victoire récent.
         Si le taux de victoire chute de manière significative, un avertissement est enregistré.
         """
-        if len(self.risk_manager.trade_history) < 10:
+        # Filtrer uniquement les trades CLÔTURÉS avec P&L valide
+        closed_trades = [t for t in self.risk_manager.trade_history if t.get('status') == 'closed' and t.get('pnl') is not None]
+
+        if len(closed_trades) < 10:
             return  # Pas assez de données pour détecter une dérive
 
-        # Calculer le taux de victoire sur les 10 derniers trades
-        recent = self.risk_manager.trade_history[-10:]
+        # Calculer le taux de victoire sur les 10 derniers trades clôturés
+        recent = closed_trades[-10:]
         winning = sum(1 for t in recent if t.get('pnl', 0) > 0)
         win_rate = winning / len(recent) if recent else 0.0
 

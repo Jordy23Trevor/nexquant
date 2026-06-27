@@ -143,6 +143,24 @@ class Broker(abc.ABC):
         """Retourne le type d'actif tradé par ce broker (ex: 'crypto', 'stock', 'forex')."""
         pass
 
+    def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
+        """
+        Retourne les informations du symbole (contract_size, tick_size, tick_value).
+        Par défaut retourne des valeurs génériques (crypto/action).
+        """
+        return {
+            "contract_size": 1.0,
+            "tick_size": 0.01,
+            "tick_value": 0.01,
+        }
+
+    def get_trade_history(self, days: int = 30) -> List[Dict[str, Any]]:
+        """
+        Retourne l'historique des trades clôturés sur les N derniers jours.
+        Par défaut retourne une liste vide si non supporté par le broker.
+        """
+        return []
+
     def calculate_position_size(self, entry_price: float, sl_price: float,
                                risk_amount: float, leverage: int = 1,
                                symbol: str = "") -> float:
