@@ -127,7 +127,66 @@ export const Route = createFileRoute("/api/public/ingest")({
               last_heartbeat: new Date().toISOString(),
             });
           } else if (kind === "position") {
-            await supabaseAdmin.from("positions").insert({ user_id, ...payload });
+            if (payload.status === "open") {
+              const { data: existing } = await supabaseAdmin
+                .from("positions")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("symbol", payload.symbol)
+                .eq("status", "open")
+                .maybeSingle();
+
+              if (existing) {
+                await supabaseAdmin
+                  .from("positions")
+                  .update({
+                    side: payload.side,
+                    qty: payload.qty,
+                    entry_price: payload.entry_price,
+                    current_price: payload.current_price,
+                    pnl: payload.pnl,
+                    pnl_pct: payload.pnl_pct,
+                    broker: payload.broker,
+                  })
+                  .eq("id", existing.id);
+              } else {
+                await supabaseAdmin.from("positions").insert({
+                  user_id,
+                  ...payload,
+                  opened_at: new Date().toISOString(),
+                });
+              }
+            } else if (payload.status === "closed") {
+              const { data: existingOpen } = await supabaseAdmin
+                .from("positions")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("symbol", payload.symbol)
+                .eq("status", "open")
+                .order("opened_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+              if (existingOpen) {
+                await supabaseAdmin
+                  .from("positions")
+                  .update({
+                    status: "closed",
+                    current_price: payload.current_price,
+                    pnl: payload.pnl,
+                    pnl_pct: payload.pnl_pct,
+                    closed_at: new Date().toISOString(),
+                  })
+                  .eq("id", existingOpen.id);
+              } else {
+                await supabaseAdmin.from("positions").insert({
+                  user_id,
+                  ...payload,
+                  opened_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+                  closed_at: new Date().toISOString(),
+                });
+              }
+            }
           } else if (kind === "log") {
             await supabaseAdmin.from("bot_logs").insert({ user_id, ...payload });
           } else if (kind === "regime") {
