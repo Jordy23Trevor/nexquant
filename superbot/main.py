@@ -688,6 +688,9 @@ class SuperBot:
             cycle_start_time = time.time()
 
             try:
+                # Réinitialiser le cache des données de marché pour ce cycle
+                self._market_data_cache = {}
+
                 # 📡 TÉLÉMÉTRIE CLOUD : Synchronisation et heartbeat à chaque cycle
                 if self.telemetry.enabled:
                     res = self.telemetry.sync_config(current_version="v1.0.0")
@@ -872,10 +875,10 @@ class SuperBot:
                 log.info(f"⛔ {symbol} bloqué pour cette session (perte cumulée > seuil)")
                 return
 
-            # Si le courtier est crypto et que le symbole n'est pas l'actif sélectionné
+            # Si le courtier est crypto et que le symbole n'est pas parmi les actifs sélectionnés
             if self.broker.get_asset_type() == "crypto":
-                active_crypto = getattr(self, '_active_crypto_symbol', None)
-                if active_crypto and symbol != active_crypto:
+                active_cryptos = getattr(self, '_active_crypto_symbols', [])
+                if active_cryptos and symbol not in active_cryptos:
                     # Ne pas chercher à ouvrir de nouvelles positions sur cet actif
                     return
 
@@ -1066,8 +1069,9 @@ class SuperBot:
 
     def _select_and_rotate_crypto(self):
         """
-        Pour la crypto, sélectionne automatiquement le meilleur actif parmi tous les instruments
-        configurés et gère la rotation si un actif devient nettement plus performant.
+        Pour la crypto, sélectionne automatiquement les meilleurs actifs (jusqu'à K positions max)
+        parmi tous les instruments configurés et gère la rotation si un nouvel actif devient nettement
+        plus performant que l'un des actifs sélectionnés.
         """
         try:
             if not self.broker or self.broker.get_asset_type() != "crypto":
@@ -1108,35 +1112,59 @@ class SuperBot:
                 log.debug("Aucun instrument crypto valide pour la rotation.")
                 return
 
-            # 2. Sélectionner l'actif avec le score le plus élevé
-            selected = max(scores, key=scores.get)
-            selected_score = scores[selected]
+            # Déterminer la limite de positions pour ce broker
+            limit_pos = self.risk_manager.MAX_OPEN_POSITIONS if self.risk_manager else 2
+            limit_pos = max(1, min(limit_pos, len(scores)))
 
-            log.info(f"Évaluation Crypto : {len(scores)} actifs scannés | Meilleur : {selected} (Score: {selected_score:.2f})")
+            # Trier les instruments par score décroissant
+            sorted_symbols = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
 
-            # 3. Rotation avec buffer pour éviter les allers-retours
-            current_active = getattr(self, '_active_crypto_symbol', None)
+            # Récupérer les actifs actuellement actifs
+            current_active = list(getattr(self, '_active_crypto_symbols', []))
+            if not current_active:
+                current_active = sorted_symbols[:limit_pos]
+                log.info(f"Initialisation des actifs crypto actifs : {current_active}")
 
-            if current_active is None:
-                self._active_crypto_symbol = selected
-            elif current_active != selected:
-                current_score = scores.get(current_active, -999)
-                # On bascule seulement si le nouveau est nettement meilleur (> 2.0 points)
-                if selected_score > current_score + 2.0:
-                    log.info(f"🔄 ROTATION CRYPTO : Bascule de {current_active} ({current_score:.2f}) vers {selected} ({selected_score:.2f})")
-                    self._active_crypto_symbol = selected
+            # Si le nombre d'actifs actifs est inférieur à limit_pos, on en ajoute
+            while len(current_active) < limit_pos:
+                added = False
+                for sym in sorted_symbols:
+                    if sym not in current_active:
+                        current_active.append(sym)
+                        added = True
+                        break
+                if not added:
+                    break
 
-                    # Fermeture de l'ancienne position si elle existe
-                    if current_active in self.positions:
-                        log.info(f"Fermeture de la position sur {current_active} pour rotation vers {selected}")
-                        self.broker.close_position(current_active, reason="Rotation de portefeuille crypto")
+            # Gérer la rotation
+            for i in range(len(current_active)):
+                active_sym = current_active[i]
+                active_score = scores.get(active_sym, -999)
+
+                inactive_symbols = [s for s in sorted_symbols if s not in current_active]
+                if not inactive_symbols:
+                    break
+
+                best_inactive = inactive_symbols[0]
+                best_inactive_score = scores[best_inactive]
+
+                if best_inactive_score > active_score + 2.0:
+                    log.info(f"🔄 ROTATION CRYPTO : Bascule de {active_sym} ({active_score:.2f}) vers {best_inactive} ({best_inactive_score:.2f})")
+                    current_active[i] = best_inactive
+
+                    if active_sym in self.positions:
+                        log.info(f"Fermeture de la position sur {active_sym} pour rotation vers {best_inactive}")
+                        self.broker.close_position(active_sym, reason="Rotation de portefeuille crypto")
                         self._sync_positions_with_broker()
-                else:
-                    log.debug(f"Rotation ignorée : {selected} ({selected_score:.2f}) n'est pas assez supérieur à {current_active} ({current_score:.2f})")
+
+            self._active_crypto_symbols = current_active
+            log.info(f"Évaluation Crypto : {len(scores)} actifs scannés | Actifs actifs : {self._active_crypto_symbols}")
 
         except Exception as e:
             log.error(f"Erreur dans _select_and_rotate_crypto: {e}")
             log.debug(traceback.format_exc())
+
+
 
     def _fetch_market_data(self, symbol: str, limit: int = 500) -> Optional[any]:
         """
@@ -1149,6 +1177,11 @@ class SuperBot:
         Returns:
             DataFrame avec les données OHLCV ou None en cas d'erreur
         """
+        # Vérifier d'abord le cache du cycle de trading pour éviter des appels API doubles
+        cache = getattr(self, '_market_data_cache', {})
+        if symbol in cache:
+            return cache[symbol]
+
         try:
             # Utiliser le timeframe configuré
             timeframe = GRANULARITY
@@ -1165,6 +1198,11 @@ class SuperBot:
             if not all(col in df.columns for col in required_columns):
                 log.warning(f"Colonnes manquantes dans les données pour {symbol} : {df.columns.tolist()}")
                 return None
+
+            # Mettre en cache pour ce cycle
+            if not hasattr(self, '_market_data_cache'):
+                self._market_data_cache = {}
+            self._market_data_cache[symbol] = df
 
             return df
 
