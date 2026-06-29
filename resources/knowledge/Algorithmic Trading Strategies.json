@@ -1,0 +1,87 @@
+{
+  "book": "Algorithmic Trading Strategies",
+  "author": "Scotty Ratford",
+  "level": 3,
+  "processed_at": "2026-06-29T01:16:53.066567",
+  "rules_count": 3,
+  "rules": [
+    {
+      "id": "ratford_dow_seasonality",
+      "level": 3,
+      "category": "signal",
+      "book": "Algorithmic Trading Strategies",
+      "author": "Scotty Ratford",
+      "source_chapter": "Chapter - Seasonal Patterns",
+      "rule": "Day-of-week effects are statistically persistent: Monday: typically weakest day (weekend news digestion), slight negative bias. Tuesday-Wednesday: strongest days for continuation of prior week's trend. Friday: profit-taking before weekend, often reversal of Thursday's direction. Use this as a minor modifier: +0.3 on Tuesday/Wednesday, -0.3 on Monday/Friday.",
+      "confidence": 0.7,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.3,
+        "description": "Day-of-week seasonality: minor score modifier based on statistical tendency"
+      },
+      "keywords": [
+        "seasonality",
+        "Monday",
+        "Friday",
+        "day of week",
+        "calendar effect"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ratford_end_of_month_effect",
+      "level": 3,
+      "category": "signal",
+      "book": "Algorithmic Trading Strategies",
+      "author": "Scotty Ratford",
+      "source_chapter": "Chapter - Seasonal Patterns",
+      "rule": "The turn-of-month effect: the last 2 trading days and first 3 trading days of each month have statistically higher average returns due to institutional fund flows and pension rebalancing. Slightly increase long bias during this window for equity assets.",
+      "confidence": 0.7,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.3,
+        "description": "Turn-of-month: minor long bias boost during last 2 / first 3 trading days"
+      },
+      "keywords": [
+        "end of month",
+        "turn of month",
+        "pension",
+        "fund flows",
+        "rebalancing"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ratford_multiple_entry_scale_in",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading Strategies",
+      "author": "Scotty Ratford",
+      "source_chapter": "Chapter - Entry Strategies",
+      "rule": "Scale-in entries reduce average entry price risk: Enter 50% at the initial signal, add 25% if price confirms with a new signal in the same direction, add final 25% only after the position is profitable. Never add to a losing position — averaging down is a destroyer of accounts.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Scale-in strategy: 50/25/25 split on confirmation, never average losers"
+      },
+      "keywords": [
+        "scale in",
+        "average",
+        "confirm",
+        "add to winner",
+        "never average down"
+      ],
+      "actions": []
+    }
+  ]
+}

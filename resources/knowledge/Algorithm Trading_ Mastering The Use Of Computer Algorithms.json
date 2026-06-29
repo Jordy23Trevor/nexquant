@@ -1,0 +1,36 @@
+{
+  "book": "Algorithm Trading: Mastering The Use Of Computer Algorithms",
+  "author": "Koru",
+  "level": 3,
+  "processed_at": "2026-06-29T01:16:53.056912",
+  "rules_count": 1,
+  "rules": [
+    {
+      "id": "koru_execution_algo_twap",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithm Trading: Mastering The Use Of Computer Algorithms",
+      "author": "Koru",
+      "source_chapter": "Chapter - Execution Algorithms",
+      "rule": "For large orders, use Time-Weighted Average Price (TWAP) execution to minimize market impact. Split the order into equal slices across a defined time window. TWAP is preferred when urgency is low and minimizing slippage is prioritized. VWAP execution (volume-weighted) is preferred when market participation rate matters.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Large order execution: TWAP slicing to minimize market impact"
+      },
+      "keywords": [
+        "TWAP",
+        "execution",
+        "large order",
+        "slippage",
+        "VWAP",
+        "split"
+      ],
+      "actions": []
+    }
+  ]
+}

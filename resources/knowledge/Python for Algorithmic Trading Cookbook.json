@@ -1,0 +1,117 @@
+{
+  "book": "Python for Algorithmic Trading Cookbook",
+  "author": "Jason Strimpel",
+  "level": 3,
+  "processed_at": "2026-06-29T01:16:53.063342",
+  "rules_count": 4,
+  "rules": [
+    {
+      "id": "python_bid_ask_spread_filter",
+      "level": 3,
+      "category": "filter",
+      "book": "Python for Algorithmic Trading Cookbook",
+      "author": "Jason Strimpel",
+      "source_chapter": "Chapter 3 - Execution and Order Management",
+      "rule": "The bid-ask spread is an immediate cost that must be factored into expected profit. Reject any trade where the spread exceeds 0.1% of the asset price for liquid assets, or 0.3% for less liquid assets. A wide spread signals low liquidity — your exits will be costly. Spread cost = spread / mid_price * 100 in basis points.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": -1.0,
+        "description": "Liquidity filter: reject if bid-ask spread > 0.1% (liquid) or 0.3% (illiquid)"
+      },
+      "keywords": [
+        "bid-ask",
+        "spread",
+        "liquidity",
+        "0.1%",
+        "cost",
+        "reject",
+        "filter"
+      ],
+      "actions": []
+    },
+    {
+      "id": "python_order_book_depth",
+      "level": 3,
+      "category": "filter",
+      "book": "Python for Algorithmic Trading Cookbook",
+      "author": "Jason Strimpel",
+      "source_chapter": "Chapter 3 - Execution and Order Management",
+      "rule": "Check order book depth before entry: ensure sufficient liquidity at your intended price. If your order size exceeds 10% of the best bid/ask quantity, expect significant slippage. Reduce size or use limit orders. For market orders, never exceed 1% of average daily volume in a single order.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Order book depth check: max 10% of best bid/ask, or use limit orders"
+      },
+      "keywords": [
+        "order book",
+        "depth",
+        "slippage",
+        "limit order",
+        "daily volume"
+      ],
+      "actions": []
+    },
+    {
+      "id": "strimpel_autocorrelation_timing",
+      "level": 3,
+      "category": "signal",
+      "book": "Python for Algorithmic Trading Cookbook",
+      "author": "Jason Strimpel",
+      "source_chapter": "Chapter 7 - Time Series Analysis",
+      "rule": "Positive autocorrelation (AR coefficient > 0) in returns indicates momentum: recent positive returns predict near-future positive returns. Negative autocorrelation (AR < 0) indicates mean reversion: recent positive returns predict near-future negative returns. Test autocorrelation at lag 1 and lag 5 for intraday patterns.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Autocorrelation test: positive AR = momentum strategy, negative AR = mean reversion"
+      },
+      "keywords": [
+        "autocorrelation",
+        "AR",
+        "momentum",
+        "mean reversion",
+        "lag 1",
+        "returns"
+      ],
+      "actions": []
+    },
+    {
+      "id": "strimpel_portfolio_rebalancing",
+      "level": 3,
+      "category": "strategy",
+      "book": "Python for Algorithmic Trading Cookbook",
+      "author": "Jason Strimpel",
+      "source_chapter": "Chapter 10 - Portfolio Construction",
+      "rule": "Systematic portfolio rebalancing captures mean-reversion between assets. Set rebalancing thresholds (5% drift from target) rather than calendar-based rebalancing. Threshold rebalancing reduces transaction costs while maintaining target allocation. Rebalance immediately when any position drifts more than 5% from target weight.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Portfolio rebalancing: 5% drift threshold triggers allocation adjustment"
+      },
+      "keywords": [
+        "rebalancing",
+        "5% drift",
+        "threshold",
+        "allocation",
+        "target",
+        "portfolio"
+      ],
+      "actions": []
+    }
+  ]
+}

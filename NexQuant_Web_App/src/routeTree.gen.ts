@@ -10,10 +10,15 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as DesignSystemRouteImport } from './routes/design-system'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedStrategiesRouteImport } from './routes/_authenticated/strategies'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedBillingRouteImport } from './routes/_authenticated/billing'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as ApiPublicIngestRouteImport } from './routes/api/public/ingest'
 import { Route as ApiPublicConfigRouteImport } from './routes/api/public/config'
@@ -21,6 +26,11 @@ import { Route as ApiPublicConfigRouteImport } from './routes/api/public/config'
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesignSystemRoute = DesignSystemRouteImport.update({
+  id: '/design-system',
+  path: '/design-system',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -37,9 +47,29 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedStrategiesRoute = AuthenticatedStrategiesRouteImport.update({
+  id: '/strategies',
+  path: '/strategies',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedHistoryRoute = AuthenticatedHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedBillingRoute = AuthenticatedBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
@@ -61,18 +91,28 @@ const ApiPublicConfigRoute = ApiPublicConfigRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/design-system': typeof DesignSystemRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/billing': typeof AuthenticatedBillingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/history': typeof AuthenticatedHistoryRoute
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/strategies': typeof AuthenticatedStrategiesRoute
   '/api/public/config': typeof ApiPublicConfigRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/design-system': typeof DesignSystemRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/admin': typeof AuthenticatedAdminRoute
+  '/billing': typeof AuthenticatedBillingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/history': typeof AuthenticatedHistoryRoute
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/strategies': typeof AuthenticatedStrategiesRoute
   '/api/public/config': typeof ApiPublicConfigRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
@@ -81,9 +121,14 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/design-system': typeof DesignSystemRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
+  '/_authenticated/billing': typeof AuthenticatedBillingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/history': typeof AuthenticatedHistoryRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/strategies': typeof AuthenticatedStrategiesRoute
   '/api/public/config': typeof ApiPublicConfigRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
@@ -92,18 +137,28 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/design-system'
     | '/sitemap.xml'
     | '/admin'
+    | '/billing'
     | '/dashboard'
+    | '/history'
+    | '/settings'
+    | '/strategies'
     | '/api/public/config'
     | '/api/public/ingest'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth'
+    | '/design-system'
     | '/sitemap.xml'
     | '/admin'
+    | '/billing'
     | '/dashboard'
+    | '/history'
+    | '/settings'
+    | '/strategies'
     | '/api/public/config'
     | '/api/public/ingest'
   id:
@@ -111,9 +166,14 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/design-system'
     | '/sitemap.xml'
     | '/_authenticated/admin'
+    | '/_authenticated/billing'
     | '/_authenticated/dashboard'
+    | '/_authenticated/history'
+    | '/_authenticated/settings'
+    | '/_authenticated/strategies'
     | '/api/public/config'
     | '/api/public/ingest'
   fileRoutesById: FileRoutesById
@@ -122,6 +182,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  DesignSystemRoute: typeof DesignSystemRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ApiPublicConfigRoute: typeof ApiPublicConfigRoute
   ApiPublicIngestRoute: typeof ApiPublicIngestRoute
@@ -134,6 +195,13 @@ declare module '@tanstack/react-router' {
       path: '/sitemap.xml'
       fullPath: '/sitemap.xml'
       preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/design-system': {
+      id: '/design-system'
+      path: '/design-system'
+      fullPath: '/design-system'
+      preLoaderRoute: typeof DesignSystemRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -157,11 +225,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/strategies': {
+      id: '/_authenticated/strategies'
+      path: '/strategies'
+      fullPath: '/strategies'
+      preLoaderRoute: typeof AuthenticatedStrategiesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/history': {
+      id: '/_authenticated/history'
+      path: '/history'
+      fullPath: '/history'
+      preLoaderRoute: typeof AuthenticatedHistoryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/billing': {
+      id: '/_authenticated/billing'
+      path: '/billing'
+      fullPath: '/billing'
+      preLoaderRoute: typeof AuthenticatedBillingRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/admin': {
@@ -190,12 +286,20 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
+  AuthenticatedBillingRoute: typeof AuthenticatedBillingRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedHistoryRoute: typeof AuthenticatedHistoryRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedStrategiesRoute: typeof AuthenticatedStrategiesRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminRoute: AuthenticatedAdminRoute,
+  AuthenticatedBillingRoute: AuthenticatedBillingRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedHistoryRoute: AuthenticatedHistoryRoute,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedStrategiesRoute: AuthenticatedStrategiesRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
@@ -205,6 +309,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  DesignSystemRoute: DesignSystemRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   ApiPublicConfigRoute: ApiPublicConfigRoute,
   ApiPublicIngestRoute: ApiPublicIngestRoute,

@@ -42,7 +42,7 @@ class TradingStrategy:
         self.config = config
         self.indicators = TechnicalIndicators(config)
 
-        # Historique des scores pouranalyse
+        # Historique des scores pour analyse
         self.score_history: List[Dict[str, Any]] = []
 
         # Seuils configurables
@@ -50,25 +50,38 @@ class TradingStrategy:
         self.risk_per_trade = config.get('RISK_PCT', 1.0)  # % du compte à risquer par trade
         self.kelly_fraction = config.get('KELLY_FRACTION', 0.25)  # Fraction de Kelly à utiliser
 
-        # Charger la base de connaissances dynamique (connaissances extraites des livres)
+        # Charger la base de connaissances dynamique v2 (crescendo : Murphy → Elder → Chan)
         try:
-            from resources.learning_engine import load_knowledge_index
+            from resources.learning_engine import load_knowledge_index, get_rules_by_level, get_filter_rules
             raw_rules = load_knowledge_index()
-            log.info(f"Chargé {len(raw_rules)} règles brutes de la base de connaissances.")
+            self._filter_rules = get_filter_rules()  # Règles qui sont des filtres d'entrée obligatoires
+            self._rules_by_level = {
+                1: get_rules_by_level(1),  # Murphy — Fondations
+                2: get_rules_by_level(2),  # Elder  — Systèmes
+                3: get_rules_by_level(3),  # Chan   — Quantitatif
+            }
+            log.info(
+                f"Base de connaissances chargée : {len(raw_rules)} règles | "
+                f"L1={len(self._rules_by_level[1])} L2={len(self._rules_by_level[2])} L3={len(self._rules_by_level[3])} | "
+                f"{len(self._filter_rules)} filtres obligatoires"
+            )
         except Exception as e:
             raw_rules = []
-            log.warning(f"Impossible de charger la base de connaissances dynamiques : {e}")
+            self._filter_rules = []
+            self._rules_by_level = {1: [], 2: [], 3: []}
+            log.warning(f"Impossible de charger la base de connaissances : {e}")
 
         # Classifier sémantiquement les règles (NLP ou fallback mots-clés)
         if _SEMANTIC_AVAILABLE and raw_rules:
             try:
                 self._classifier = SemanticRuleClassifier()
-                # Charger le cache si disponible, sinon classifier et sauvegarder
+                # Charger le cache si disponible et de la bonne version, sinon reclassifier
                 cached = self._classifier.load_cache()
                 if cached and len(cached) == len(raw_rules):
                     self.knowledge_rules = cached
-                    log.info(f"Règles chargées depuis le cache sémantique ({len(cached)} règles).")
+                    log.info(f"Règles chargées depuis le cache sémantique v2 ({len(cached)} règles).")
                 else:
+                    log.info("Reconstruction du cache sémantique...")
                     self.knowledge_rules = self._classifier.classify_rules(raw_rules)
                     self._classifier.save_cache(self.knowledge_rules)
             except Exception as e:
@@ -77,7 +90,11 @@ class TradingStrategy:
         else:
             self.knowledge_rules = raw_rules
 
-        log.info(f"TradingStrategy initialisée avec score_min={self.score_min}, risk_per_trade={self.risk_per_trade}%")
+        log.info(
+            f"TradingStrategy initialisée — "
+            f"score_min={self.score_min}, risk={self.risk_per_trade}%, "
+            f"kelly={self.kelly_fraction}, règles_actives={len(self.knowledge_rules)}"
+        )
 
     def analyze_market(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -96,9 +113,10 @@ class TradingStrategy:
         # Calculer tous les indicateurs
         df_with_indicators = self.indicators.calculate_all_indicators(df.copy())
 
-        # Obtenir les valeurs les plus récentes
-        latest = df_with_indicators.iloc[-1]
-        prev = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else latest
+        # Obtenir les valeurs les plus récentes (On utilise les bougies clôturées pour éviter le repainting)
+        current_candle = df_with_indicators.iloc[-1]
+        latest = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else current_candle
+        prev = df_with_indicators.iloc[-3] if len(df_with_indicators) >= 3 else latest
 
         # Déterminer le régime de marché
         market_regime = self.indicators.get_market_regime(df_with_indicators)
@@ -119,15 +137,16 @@ class TradingStrategy:
         # Vérifier les triggers (conditions d'entrée)
         trigger_long, trigger_short = self._check_entry_triggers(df_with_indicators, is_trending)
 
-        # Calculer le ratio risque/rendement potentiel (LONG par défaut)
-        rr_ratio, sl_price, tp_price = self._calculate_potential_rr(df_with_indicators, latest)
+        # Calculer le ratio risque/rendement potentiel (basé sur le prix d'entrée actuel)
+        current_price = current_candle['close']
+        rr_ratio, sl_price, tp_price = self._calculate_potential_rr(latest, current_price)
 
         # Ajuster les prix SL/TP si c'est un signal de vente (SHORT) pour qu'ils soient orientés correctement
         if trigger_short and not trigger_long:
             atr = latest.get('atr', 0)
             if atr > 0:
-                sl_price = latest['close'] + (atr * self.config.get('SL_ATR_MULT', 1.5))
-                tp_price = latest['close'] - (atr * self.config.get('TP_ATR_MULT', 3.0))
+                sl_price = current_price + (atr * self.config.get('SL_ATR_MULT', 1.5))
+                tp_price = current_price - (atr * self.config.get('TP_ATR_MULT', 3.0))
 
         # Appliquer les filtres de sentiment et de nouvelles (à venir dans la phase 4)
         sentiment_factor = 1.0  # À implémenter avec le news manager
@@ -177,7 +196,7 @@ class TradingStrategy:
         # Calculer la taille de position si on prend le trade
         position_size = 0.0
         if should_long or should_short:
-            entry_price = latest['close']
+            entry_price = current_price
             # Utiliser le SL calculé pour le potentiel RR, ou un SL par défaut basé sur ATR
             sl_for_size = sl_price if sl_price > 0 else entry_price - (latest['atr'] * self.config.get('SL_ATR_MULT', 1.5))
             tp_for_size = tp_price if tp_price > 0 else entry_price + (latest['atr'] * self.config.get('TP_ATR_MULT', 3.0))
@@ -210,7 +229,7 @@ class TradingStrategy:
             'trigger_short': trigger_short,
             'rr_ratio': rr_ratio,
             'position_size': position_size,
-            'close_price': latest['close']
+            'close_price': current_price
         })
 
         # Limiter la taille de l'historique
@@ -232,7 +251,7 @@ class TradingStrategy:
             'should_short': should_short,
             'trigger_long': trigger_long,
             'trigger_short': trigger_short,
-            'entry_price': latest['close'],
+            'entry_price': current_price,
             'sl_price': sl_price,
             'tp_price': tp_price,
             'rr_ratio': rr_ratio,
@@ -249,67 +268,199 @@ class TradingStrategy:
 
         return signal
 
-    def _apply_knowledge_rules(self, current_score: float, risk_pct: float, kelly_frac: float, context: Dict[str, Any]) -> Tuple[float, float, float]:
+    def _apply_knowledge_rules(
+        self,
+        current_score: float,
+        risk_pct: float,
+        kelly_frac: float,
+        context: Dict[str, Any]
+    ) -> Tuple[float, float, float]:
         """
-        Applique les règles de la base de connaissances en utilisant les actions
-        pré-classifiées par le SemanticRuleClassifier (NLP ou fallback mots-clés).
-        Chaque règle porte un champ 'actions' contenant les catégories matchées.
+        Applique les règles de la base de connaissances crescendo :
+
+        Niveau 1 (Murphy) — Filtres de lecture du marché :
+          Les règles de type filter=True sont des conditions nécessaires.
+          Elles pénalisent le score si les fondations sont absentes.
+
+        Niveau 2 (Elder) — Modificateurs de score :
+          Triple Screen, Impulse System, divergences — ajustent le score.
+
+        Niveau 3 (Chan) — Ajusteurs de sizing :
+          Kelly, volatility scaling, fat tails — ajustent le sizing mathématique.
+
+        Chaque règle porte un champ 'actions' classifié par le SemanticRuleClassifier.
         """
         adjusted_score = current_score
         adjusted_risk_pct = risk_pct
         adjusted_kelly_frac = kelly_frac
+        market_regime = context.get('market_regime', 'UNKNOWN')
+        latest_bar = context.get('latest_bar', {})
 
         for rule_info in self.knowledge_rules:
             rule_id = rule_info.get("id", "?")
+            rule_level = rule_info.get("level", 2)
             actions = rule_info.get("actions", [])
 
             for action_info in actions:
                 action = action_info.get("action", "")
                 modifier = action_info.get("modifier", 0)
 
-                # --- GESTION DE RISQUE ---
+                # ── NIVEAU 1 & 2 — GESTION DU RISQUE ──────────────────────
                 if action == "CAP_KELLY":
                     original = adjusted_kelly_frac
                     adjusted_kelly_frac = min(adjusted_kelly_frac, modifier)
                     if original != adjusted_kelly_frac:
-                        log.info(f"🧠 NLP [{rule_id}] → CAP_KELLY à {adjusted_kelly_frac} (était {original})")
+                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → CAP_KELLY → {adjusted_kelly_frac}")
 
                 elif action == "CAP_RISK_PCT":
                     original = adjusted_risk_pct
                     adjusted_risk_pct = min(adjusted_risk_pct, modifier)
                     if original != adjusted_risk_pct:
-                        log.info(f"🧠 NLP [{rule_id}] → CAP_RISK à {adjusted_risk_pct}% (était {original}%)")
+                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → CAP_RISK_PCT → {adjusted_risk_pct}%")
 
-                # --- AJUSTEMENT DE SCORE PAR REGIME ---
+                # ── NIVEAU 1 & 2 — BONUS DE SCORE PAR RÉGIME ─────────────
                 elif action == "BONUS_SCORE_RANGING":
-                    if context.get('market_regime') == 'RANGING':
+                    if market_regime == 'RANGING':
                         adjusted_score += modifier
-                        log.info(f"🧠 NLP [{rule_id}] → BONUS Ranging +{modifier} (score={adjusted_score:.1f})")
-                    elif context.get('market_regime') == 'TRENDING':
-                        adjusted_score -= modifier
-                        log.info(f"🧠 NLP [{rule_id}] → Pénalité anti-ranging en tendance -{modifier}")
+                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → +{modifier} (RANGING, score={adjusted_score:.1f})")
+                    elif market_regime == 'TRENDING':
+                        # Pénaliser les stratégies de range en tendance
+                        adjusted_score -= modifier * 0.5
 
                 elif action == "BONUS_SCORE_TRENDING":
-                    if context.get('market_regime') == 'TRENDING':
+                    if market_regime == 'TRENDING':
                         adjusted_score += modifier
-                        log.info(f"🧠 NLP [{rule_id}] → BONUS Trending +{modifier} (score={adjusted_score:.1f})")
+                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → +{modifier} (TRENDING, score={adjusted_score:.1f})")
 
-                # --- EMA SQUEEZE ---
+                # ── NIVEAU 1 & 2 — EMA SQUEEZE ───────────────────────────
                 elif action == "BONUS_EMA_SQUEEZE":
-                    latest_bar = context.get('latest_bar', {})
                     close = latest_bar.get('close', 0)
                     ema_fast = latest_bar.get('ema_fast', 0)
                     if close > 0 and ema_fast > 0:
                         diff_pct = abs(close - ema_fast) / close
                         if diff_pct < 0.0015:
                             adjusted_score += modifier
-                            log.info(f"🧠 NLP [{rule_id}] → EMA Squeeze détecté +{modifier}")
+                            log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → EMA Squeeze +{modifier}")
 
-                # --- FLAGS (logged but no parameter change) ---
+                # ── NIVEAU 1 & 2 — PÉNALITÉ CONTRE-TENDANCE ─────────────
+                elif action == "PENALTY_COUNTER_TREND":
+                    is_trending = context.get('is_trending', False)
+                    trigger_long = context.get('trigger_long', False)
+                    trigger_short = context.get('trigger_short', False)
+                    # Détecter si le signal est contre-tendance
+                    trend_up = self.indicators.is_uptrend if hasattr(self.indicators, 'is_uptrend') else lambda x: False
+                    ema_fast_v = latest_bar.get('ema_fast', 0)
+                    ema_slow_v = latest_bar.get('ema_slow', 0)
+                    if is_trending:
+                        bullish_trend = ema_fast_v > ema_slow_v
+                        if (trigger_short and bullish_trend) or (trigger_long and not bullish_trend):
+                            adjusted_score += modifier  # modifier est négatif
+                            log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → PENALTY_COUNTER_TREND {modifier}")
+
+                # ── NIVEAU 2 — CONFIRMATION VOLUME ───────────────────────
+                elif action == "REQUIRE_VOLUME_CONFIRM":
+                    # Si le volume n'est pas au-dessus de la moyenne, pénaliser légèrement
+                    volume = latest_bar.get('volume', 0)
+                    volume_ma = latest_bar.get('volume_ma', volume)  # fallback = volume actuel
+                    if volume_ma > 0 and volume < volume_ma * 1.2:
+                        adjusted_score -= 0.3
+                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → Volume insuffisant -0.3")
+
+                # ── NIVEAU 2 — MULTI-TIMEFRAME ────────────────────────────
+                elif action == "ENFORCE_MULTI_TIMEFRAME":
+                    # Vérifier l'alignement HTF si disponible
+                    ema_htf = latest_bar.get('ema_htf', 0)
+                    ema_d1 = latest_bar.get('ema_d1', 0)
+                    if ema_htf > 0 and ema_d1 > 0:
+                        ema_fast_v = latest_bar.get('ema_fast', 0)
+                        ema_slow_v = latest_bar.get('ema_slow', 0)
+                        htf_bullish = ema_htf > ema_d1
+                        trend_bullish = ema_fast_v > ema_slow_v
+                        if htf_bullish != trend_bullish:  # Misalignement HTF
+                            adjusted_score -= 1.0
+                            log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → HTF misaligned -1.0")
+
+                # ── NIVEAU 3 — REJET SANS EDGE (Kelly < 0) ───────────────
+                elif action == "REJECT_NEGATIVE_KELLY":
+                    # Calculer rapidement si Kelly est négatif
+                    total_score_val = context.get('total_score', 0)
+                    if total_score_val <= 0:
+                        adjusted_score = -99  # Force le rejet du trade
+                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → Pas d'edge → rejet")
+
+                # ── NIVEAU 3 — SCALING PAR VOLATILITÉ ────────────────────
+                elif action == "SCALE_SIZE_BY_VOLATILITY":
+                    atr = latest_bar.get('atr', 0)
+                    close = latest_bar.get('close', 1)
+                    if atr > 0 and close > 0:
+                        atr_pct = atr / close
+                        if atr_pct > 0.03:  # ATR > 3% du prix = haute volatilité
+                            adjusted_kelly_frac *= modifier  # Réduire de 50%
+                            log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → Vol élevée → kelly * {modifier}")
+
+                # ── FLAGS (loggues, pas de changement de parametres) ──────
                 elif action in ("ENFORCE_STRICT_SL", "PSYCHOLOGY_FLAG"):
-                    pass  # Acknowledged — no score/risk change
+                    pass  # Acknowledged -- no direct parameter change
+
+                # ── NOUVELLES ACTIONS (Livres 4-11) ──────────────────────
+
+                # ── CONTRARIAN SIGNAL (Montier, Contrarian Trading) ───────
+                elif action == "CONTRARIAN_SIGNAL":
+                    # Bonus si conditions contrarian : RSI extremes + regime ranging
+                    rsi = latest_bar.get('rsi', 50)
+                    if market_regime == 'RANGING':
+                        is_extreme = rsi < 25 or rsi > 75
+                        if is_extreme:
+                            adjusted_score += modifier
+                            log.debug(f"[Niv.{rule_level}][{rule_id}] CONTRARIAN_SIGNAL RSI={rsi:.0f} +{modifier}")
+
+                # ── VOLATILITY BREAKOUT (Kabbaj, Volman) ─────────────────
+                elif action == "VOLATILITY_BREAKOUT":
+                    # Bonus si BB squeeze detecte (bb_width_pct < percentile bas)
+                    bb_width = latest_bar.get('bb_width', 0)
+                    bb_width_pct = latest_bar.get('bb_width_pct', 0.5)
+                    if bb_width > 0 and bb_width_pct < 0.20:  # dans les 20% les plus etroits
+                        adjusted_score += modifier
+                        log.debug(f"[Niv.{rule_level}][{rule_id}] VOLATILITY_BREAKOUT squeeze +{modifier}")
+
+                # ── CRYPTO FUNDAMENTAL (Burniske) ─────────────────────────
+                elif action == "CRYPTO_FUNDAMENTAL_FILTER":
+                    # Informatif : si l'instrument est crypto, appliquer le filtre
+                    symbol = context.get('symbol', '')
+                    is_crypto = any(c in symbol.upper() for c in ['BTC', 'ETH', 'BNB', 'USDT', 'SOL'])
+                    if is_crypto:
+                        adjusted_score += modifier * 0.5  # influence moderee
+                        log.debug(f"[Niv.{rule_level}][{rule_id}] CRYPTO_FUNDAMENTAL_FILTER applied")
+
+                # ── ML CONFIDENCE BOOST (Jansen, Bissette) ───────────────
+                elif action == "ML_CONFIDENCE_BOOST":
+                    # Bonus si composite score depasse le seuil de confiance
+                    ml_confidence = context.get('ml_confidence', 0)
+                    if ml_confidence > 0.65:
+                        boost = modifier * ml_confidence
+                        adjusted_score += boost
+                        log.debug(f"[Niv.{rule_level}][{rule_id}] ML_CONFIDENCE {ml_confidence:.2f} +{boost:.2f}")
+
+                # ── BEHAVIORAL BIAS PENALTY (Montier, Steenbarger) ────────
+                elif action == "BEHAVIORAL_BIAS_PENALTY":
+                    # Penalite si overconfidence detectee (win streak recente)
+                    recent_wins = context.get('recent_consecutive_wins', 0)
+                    if recent_wins >= 5:
+                        adjusted_kelly_frac *= 0.75  # Reduire de 25% (surconfiance)
+                        log.debug(f"[Niv.{rule_level}][{rule_id}] OVERCONFIDENCE {recent_wins} wins, kelly*0.75")
+                    adjusted_score += modifier  # Penalite generale pour biais detecte
+
+                # ── LOSING STREAK PROTECTION (Steenbarger) ────────────────
+                elif action == "LOSING_STREAK_PROTECTION":
+                    consecutive_losses = context.get('consecutive_losses', 0)
+                    if consecutive_losses >= 3:
+                        # Reduire la taille proportionnellement aux pertes consecutives
+                        reduction = min(modifier * (consecutive_losses / 3), modifier)
+                        adjusted_kelly_frac *= reduction
+                        log.debug(f"[Niv.{rule_level}][{rule_id}] LOSING_STREAK {consecutive_losses}x kelly*{reduction:.2f}")
 
         return adjusted_score, adjusted_risk_pct, adjusted_kelly_frac
+
 
     def _create_neutral_signal(self, reason: str) -> Dict[str, Any]:
         """Génère un signal neutre en cas d'erreur ou d'absence de données."""
@@ -748,11 +899,12 @@ class TradingStrategy:
                             prev.get('macd', 0) <= prev.get('macd_signal', 0))
                 supertrend_up = latest.get('supertrend_trend', 0) > 0 and prev.get('supertrend_trend', 0) <= 0
 
-                # Pullback / trend continuation trigger to avoid missing established trends
-                trend_alignment = (latest.get('ema_fast', 0) > latest.get('ema_slow', 0) and
-                                   latest.get('macd', 0) > latest.get('macd_signal', 0) and
-                                   latest.get('supertrend_trend', 0) > 0 and
-                                   latest.get('rsi', 50) < 65)  # Avoid buying when overextended
+                # Pullback event: price touched EMA_slow and closed above it, while trend is still up
+                pullback_long = (latest.get('ema_fast', 0) > latest.get('ema_slow', 0) and
+                                 prev['low'] <= prev.get('ema_slow', 0) and
+                                 latest['close'] > latest.get('ema_slow', 0) and
+                                 latest.get('supertrend_trend', 0) > 0 and
+                                 latest.get('rsi', 50) < 65)  # Avoid buying when overextended
 
                 # --- RÈGLES ALEXANDER ELDER ---
                 # Ne jamais acheter si le système d'impulsion est rouge (tendance et momentum contraires)
@@ -760,7 +912,7 @@ class TradingStrategy:
                 # Tendance de fond Triple Screen (Screen 1) doit être haussière
                 elder_screen1_ok = latest.get('elder_screen1_up', True)
 
-                trigger_long = (ema_cross or macd_cross or supertrend_up or trend_alignment) and elder_allow_long and elder_screen1_ok
+                trigger_long = (ema_cross or macd_cross or supertrend_up or pullback_long) and elder_allow_long and elder_screen1_ok
 
             elif self.indicators.is_downtrend(df):
                 ema_cross = (latest.get('ema_fast', 0) < latest.get('ema_slow', 0) and
@@ -769,11 +921,12 @@ class TradingStrategy:
                             prev.get('macd', 0) <= prev.get('macd_signal', 0))
                 supertrend_down = latest.get('supertrend_trend', 0) < 0 and prev.get('supertrend_trend', 0) >= 0
 
-                # Pullback / trend continuation trigger to avoid missing established trends
-                trend_alignment = (latest.get('ema_fast', 0) < latest.get('ema_slow', 0) and
-                                   latest.get('macd', 0) < latest.get('macd_signal', 0) and
-                                   latest.get('supertrend_trend', 0) < 0 and
-                                   latest.get('rsi', 50) > 35)  # Avoid selling when oversold
+                # Pullback event: price touched EMA_slow and closed below it, while trend is still down
+                pullback_short = (latest.get('ema_fast', 0) < latest.get('ema_slow', 0) and
+                                  prev['high'] >= prev.get('ema_slow', 0) and
+                                  latest['close'] < latest.get('ema_slow', 0) and
+                                  latest.get('supertrend_trend', 0) < 0 and
+                                  latest.get('rsi', 50) > 35)  # Avoid selling when oversold
 
                 # --- RÈGLES ALEXANDER ELDER ---
                 # Ne jamais vendre si le système d'impulsion est vert (tendance et momentum contraires)
@@ -781,43 +934,43 @@ class TradingStrategy:
                 # Tendance de fond Triple Screen (Screen 1) doit être baissière
                 elder_screen1_ok = latest.get('elder_screen1_down', True)
 
-                trigger_short = (ema_cross or macd_cross or supertrend_down or trend_alignment) and elder_allow_short and elder_screen1_ok
+                trigger_short = (ema_cross or macd_cross or supertrend_down or pullback_short) and elder_allow_short and elder_screen1_ok
         else:
             rsi = latest.get('rsi', 50)
+            rsi_prev = prev.get('rsi', 50)
             rsi_os = self.config.get('RSI_OS', 30)
-            stoch_k = latest.get('stoch_k', 50)
-            stoch_d = latest.get('stoch_d', 50)
-
-            oversold = rsi < rsi_os or (stoch_k < 20 and stoch_d < 20)
-            candle_bullish = self._detect_candlestick_pattern(df) == 1
-
-            support, _ = self.indicators.get_support_resistance_levels(df)
-            near_support = self.indicators.is_price_near_level(latest['close'], support, threshold_pct=0.003)
-
-            # --- RÈGLES THAMI KABBAJ (Squeeze Breakout) ---
-            # Sortie haussière d'une compression de volatilité (Bollinger Bands expansion)
-            kabbaj_squeeze_breakout_long = prev.get('kabbaj_squeeze', False) and latest['close'] > latest.get('bb_upper', 0)
-
-            if (oversold and (candle_bullish or near_support)) or kabbaj_squeeze_breakout_long:
-                trigger_long = True
-
             rsi_ob = self.config.get('RSI_OB', 70)
-            overbought = rsi > rsi_ob or (stoch_k > 80 and stoch_d > 80)
+            
+            stoch_k = latest.get('stoch_k', 50)
+            stoch_k_prev = prev.get('stoch_k', 50)
+
+            # Événements de croisement pour le range (sortie de zone extrême)
+            rsi_cross_up = rsi > rsi_os and rsi_prev <= rsi_os
+            stoch_cross_up = stoch_k > 20 and stoch_k_prev <= 20
+            
+            rsi_cross_down = rsi < rsi_ob and rsi_prev >= rsi_ob
+            stoch_cross_down = stoch_k < 80 and stoch_k_prev >= 80
+
+            candle_bullish = self._detect_candlestick_pattern(df) == 1
             candle_bearish = self._detect_candlestick_pattern(df) == -1
 
-            _, resistance = self.indicators.get_support_resistance_levels(df)
+            support, resistance = self.indicators.get_support_resistance_levels(df)
+            near_support = self.indicators.is_price_near_level(latest['close'], support, threshold_pct=0.003)
             near_resistance = self.indicators.is_price_near_level(latest['close'], resistance, threshold_pct=0.003)
 
             # --- RÈGLES THAMI KABBAJ (Squeeze Breakout) ---
-            # Sortie baissière d'une compression de volatilité
+            kabbaj_squeeze_breakout_long = prev.get('kabbaj_squeeze', False) and latest['close'] > latest.get('bb_upper', 0)
             kabbaj_squeeze_breakout_short = prev.get('kabbaj_squeeze', False) and latest['close'] < latest.get('bb_lower', 0)
 
-            if (overbought and (candle_bearish or near_resistance)) or kabbaj_squeeze_breakout_short:
+            if (rsi_cross_up or stoch_cross_up) and (candle_bullish or near_support) or kabbaj_squeeze_breakout_long:
+                trigger_long = True
+
+            if (rsi_cross_down or stoch_cross_down) and (candle_bearish or near_resistance) or kabbaj_squeeze_breakout_short:
                 trigger_short = True
 
         return trigger_long, trigger_short
 
-    def _calculate_potential_rr(self, df: pd.DataFrame, latest: pd.Series) -> Tuple[float, float, float]:
+    def _calculate_potential_rr(self, latest: pd.Series, current_price: float) -> Tuple[float, float, float]:
         """
         Calcule le ratio risque/rendement potentiel basé sur les niveaux ATR.
         """
@@ -825,15 +978,14 @@ class TradingStrategy:
         if atr == 0:
             return 0.0, 0.0, 0.0
 
-        price = latest['close']
         sl_mult = self.config.get('SL_ATR_MULT', 1.5)
         tp_mult = self.config.get('TP_ATR_MULT', 3.0)
 
-        sl_price = price - (atr * sl_mult)
-        tp_price = price + (atr * tp_mult)
+        sl_price = current_price - (atr * sl_mult)
+        tp_price = current_price + (atr * tp_mult)
 
-        risk = price - sl_price
-        reward = tp_price - price
+        risk = current_price - sl_price
+        reward = tp_price - current_price
 
         if risk <= 0:
             return 0.0, sl_price, tp_price

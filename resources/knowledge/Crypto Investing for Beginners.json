@@ -1,0 +1,65 @@
+{
+  "book": "Crypto Investing for Beginners",
+  "author": "James Bruwer",
+  "level": 2,
+  "processed_at": "2026-06-29T01:16:53.028985",
+  "rules_count": 2,
+  "rules": [
+    {
+      "id": "bruwer_crypto_24h_risk",
+      "level": 2,
+      "category": "risk",
+      "book": "Crypto Investing for Beginners",
+      "author": "James Bruwer",
+      "source_chapter": "Chapter - Risk Management in Crypto",
+      "rule": "Crypto markets run 24/7 — gaps and extreme overnight moves are common. Position sizing must account for the inability to exit during weekends or low-liquidity hours. Reduce crypto position sizes by 20-30% versus equivalent positions in traditional markets. Never hold oversized crypto positions over major macroeconomic events.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Crypto 24/7 risk: reduce sizing by 20-30% for weekend/overnight exposure"
+      },
+      "keywords": [
+        "24/7",
+        "overnight",
+        "weekend",
+        "gap",
+        "crypto",
+        "reduce",
+        "position size"
+      ],
+      "actions": []
+    },
+    {
+      "id": "bruwer_dont_chase_pumps",
+      "level": 2,
+      "category": "filter",
+      "book": "Crypto Investing for Beginners",
+      "author": "James Bruwer",
+      "source_chapter": "Chapter - Common Crypto Mistakes",
+      "rule": "Never chase a pump: when an asset has already moved 20-50%+ in 24 hours, the risk of a sharp reversal ('dump the pump') is very high. Wait for consolidation and a re-test of a key level before entering. FOMO is the biggest destroyer of crypto trading accounts.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": -1.0,
+        "description": "Pump-chasing filter: penalize entries after extreme 24h moves"
+      },
+      "keywords": [
+        "pump",
+        "FOMO",
+        "chase",
+        "50%",
+        "dump",
+        "reversal",
+        "24 hours"
+      ],
+      "actions": []
+    }
+  ]
+}

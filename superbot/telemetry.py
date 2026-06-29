@@ -16,7 +16,7 @@ class TelemetryClient:
 
     def __init__(self, api_url: Optional[str] = None, user_id: Optional[str] = None, ingest_token: Optional[str] = None):
         # Charger les configurations depuis .env si non passées en paramètres
-        self.api_url = api_url or os.getenv("NEXQUANT_API_URL", "http://localhost:3000")
+        self.api_url = api_url or os.getenv("NEXQUANT_API_URL", "http://localhost:8080")
         self.user_id = user_id or os.getenv("NEXQUANT_USER_ID")
         self.ingest_token = ingest_token or os.getenv("NEXQUANT_INGEST_TOKEN")
         self.enabled = bool(self.user_id and self.ingest_token)

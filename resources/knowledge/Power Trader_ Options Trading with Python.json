@@ -1,0 +1,36 @@
+{
+  "book": "Power Trader: Options Trading with Python",
+  "author": "L.J. Van Der Post",
+  "level": 3,
+  "processed_at": "2026-06-29T01:16:53.072409",
+  "rules_count": 1,
+  "rules": [
+    {
+      "id": "vanderpost_vega_vix_relationship",
+      "level": 3,
+      "category": "signal",
+      "book": "Power Trader: Options Trading with Python",
+      "author": "L.J. Van Der Post",
+      "source_chapter": "Chapter - Volatility Trading",
+      "rule": "Vega-positive strategies (long options) profit from volatility expansion. When VIX is historically low (< 15), buying options (long Vega) is cheap. When VIX spikes above 30, selling options (short Vega) captures elevated premium. Map current VIX level to strategy preference: VIX < 15: buy vol. VIX 15-25: neutral. VIX > 25: sell vol.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "VIX-based volatility regime: low VIX favors long-vol, high VIX favors short-vol"
+      },
+      "keywords": [
+        "vega",
+        "VIX",
+        "volatility",
+        "long options",
+        "short options",
+        "premium"
+      ],
+      "actions": []
+    }
+  ]
+}

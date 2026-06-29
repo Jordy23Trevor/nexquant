@@ -87,7 +87,14 @@ export const Route = createFileRoute("/api/public/ingest")({
           .single();
 
         if (profileErr || !profile) {
-          return json({ error: "User profile not found" }, 404);
+          if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+            console.error("[Ingest] Ingestion failed: SUPABASE_SERVICE_ROLE_KEY is missing from environment.");
+            return json({
+              error: "Missing SUPABASE_SERVICE_ROLE_KEY in server environment. Please set this variable in NexQuant_Web_App/.env to enable telemetry ingestion."
+            }, 500);
+          }
+          console.error("[Ingest] Profile lookup failed:", profileErr);
+          return json({ error: `User profile not found: ${profileErr?.message || "unknown error"}` }, 404);
         }
 
         // 1. Vérification de la validité de la licence (Bêta 1 mois / Stripe)

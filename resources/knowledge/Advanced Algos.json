@@ -1,0 +1,61 @@
+{
+  "book": "Advanced Algos",
+  "author": "Bissette, Strauss, Van Der Post",
+  "level": 3,
+  "processed_at": "2026-06-29T01:16:53.050091",
+  "rules_count": 2,
+  "rules": [
+    {
+      "id": "advanced_mean_reversion_zscore",
+      "level": 3,
+      "category": "signal",
+      "book": "Advanced Algos",
+      "author": "Bissette, Strauss, Van Der Post",
+      "source_chapter": "Chapter - Mean Reversion",
+      "rule": "For intraday mean reversion: use VWAP deviation as the trigger. Price > 2 std dev above VWAP → short, target VWAP return. Price > 2 std dev below VWAP → long, target VWAP return. VWAP mean reversion works best in stocks during regular trading hours and in crypto during the first 4-6 hours of the UTC day.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "VWAP ±2 std as intraday mean reversion trigger"
+      },
+      "keywords": [
+        "VWAP",
+        "deviation",
+        "intraday",
+        "mean reversion",
+        "2 std dev"
+      ],
+      "actions": []
+    },
+    {
+      "id": "advanced_momentum_factor",
+      "level": 3,
+      "category": "signal",
+      "book": "Advanced Algos",
+      "author": "Bissette, Strauss, Van Der Post",
+      "source_chapter": "Chapter - Momentum Factors",
+      "rule": "The momentum factor (12-month return, skipping last month) is the most robust quantitative anomaly. Assets with strong 12-month momentum tend to continue outperforming. Skip the last month to avoid short-term reversal (1-month reversal effect). Rebalance monthly to maintain factor exposure.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Momentum factor: 12M return (skip 1M) as signal, monthly rebalance"
+      },
+      "keywords": [
+        "momentum factor",
+        "12 month",
+        "skip last month",
+        "reversal",
+        "rebalance"
+      ],
+      "actions": []
+    }
+  ]
+}

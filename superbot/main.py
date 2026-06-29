@@ -6,6 +6,30 @@ import signal
 import sys
 import os
 
+# --- INJECTION CLI POUR MULTI-SESSION ---
+# On parse les arguments AVANT les imports globaux pour surcharger .env
+if "--broker" in sys.argv:
+    try:
+        idx = sys.argv.index("--broker")
+        os.environ["BROKER_TYPE"] = sys.argv[idx + 1]
+    except IndexError:
+        pass
+
+if "--dashboard-port" in sys.argv:
+    try:
+        idx = sys.argv.index("--dashboard-port")
+        os.environ["DASHBOARD_PORT"] = sys.argv[idx + 1]
+    except IndexError:
+        pass
+
+if "--webhook-port" in sys.argv:
+    try:
+        idx = sys.argv.index("--webhook-port")
+        os.environ["WEBHOOK_PORT"] = sys.argv[idx + 1]
+    except IndexError:
+        pass
+# ----------------------------------------
+
 # S'assurer que le dossier racine du projet est dans le path
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_dir not in sys.path:
@@ -45,7 +69,7 @@ import traceback
 # Importer les modules du SuperBot
 from superbot.config import (
     BROKER_TYPE, INSTRUMENTS, GRANULARITY, ENABLE_PAPER_TRADING,
-    LOG_LEVEL, ENABLE_DASHBOARD, WEBHOOK_ENABLED,
+    LOG_LEVEL, LOG_FILE, ENABLE_DASHBOARD, WEBHOOK_ENABLED,
     WEBHOOK_SECRET, WEBHOOK_HOST, WEBHOOK_PORT,
     
     # Risk Management
@@ -93,7 +117,7 @@ logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("superbot/logs/superbot.log", encoding='utf-8'),
+        logging.FileHandler(LOG_FILE, encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -403,8 +427,9 @@ class SuperBot:
             # 6. Initialiser le dashboard si activé et disponible
             if ENABLE_DASHBOARD and DASHBOARD_AVAILABLE:
                 try:
-                    self.dashboard = Dashboard(port=5000, host="0.0.0.0")
-                    log.info("Dashboard initialisé")
+                    dash_port = int(os.environ.get("DASHBOARD_PORT", 5000))
+                    self.dashboard = Dashboard(port=dash_port, host="0.0.0.0")
+                    log.info(f"Dashboard initialisé sur le port {dash_port}")
                 except Exception as e:
                     log.warning(f"️  Impossible d'initialiser le dashboard : {e}")
                     self.dashboard = None
@@ -430,6 +455,7 @@ class SuperBot:
         """
         try:
             active_positions = {}
+            failed_symbols = set()
             for symbol in self.instruments:
                 try:
                     pos = self.broker.get_position(symbol)
@@ -444,10 +470,17 @@ class SuperBot:
                             'status': 'open'
                         }
                 except Exception as e:
-                    log.debug(f"Erreur lors de la récupération de la position de {symbol} : {e}")
+                    log.warning(f"Erreur API lors de la vérification de la position de {symbol} : {e}")
+                    failed_symbols.add(symbol)
 
             # Détecter les positions fermées
             for symbol, old_pos in self.positions.items():
+                if symbol in failed_symbols:
+                    # En cas d'échec de l'API, on conserve la position en mémoire pour éviter d'ouvrir des doublons
+                    log.warning(f"⚠️ Impossible de vérifier le statut de la position {symbol}. Maintien en mémoire par sécurité.")
+                    active_positions[symbol] = old_pos
+                    continue
+                    
                 if symbol not in active_positions:
                     log.info(f"Position fermée détectée pour {symbol}")
                     entry_price = old_pos.get('entry_price', 0.0)
@@ -729,9 +762,21 @@ class SuperBot:
                     # Envoyer l'état de l'équité
                     try:
                         acc_summary = self.broker.get_account_summary()
-                        equity = float(acc_summary.get("equity") or acc_summary.get("balance") or self.broker.get_balance())
-                        pnl_total = equity - self.initial_balance
-                        self.telemetry.push_equity(equity=equity, pnl_total=pnl_total, drawdown=0.0)
+                        equity = 0.0
+                        if acc_summary:
+                            equity = float(acc_summary.get("equity") or acc_summary.get("balance") or 0.0)
+                        
+                        # Fallback en cas de valeur non disponible ou nulle
+                        if equity <= 0.0:
+                            bal = self.broker.get_balance()
+                            if bal > 0.0:
+                                equity = bal
+                                
+                        if equity > 0.0:
+                            pnl_total = equity - self.initial_balance
+                            self.telemetry.push_equity(equity=equity, pnl_total=pnl_total, drawdown=0.0)
+                        else:
+                            log.warning("⚠️ Impossible de pousser l'équité à la télémétrie : valeur invalide ou nulle.")
                     except Exception as e:
                         log.debug(f"Erreur envoi équité télémétrie : {e}")
 
@@ -1029,8 +1074,8 @@ class SuperBot:
         )
 
         # 4. Vérifier les limites de risque globales avant d'envoyer l'ordre
-        if not self.risk_manager._can_take_new_trade(account_balance):
-            log.info(f"Limites de risque atteintes, pas de nouvel ordre pour {symbol}")
+        if not self.risk_manager._can_take_new_trade(account_balance, symbol):
+            log.info(f"Limites de risque ou limite par symbole atteintes, pas de nouvel ordre pour {symbol}")
             return
 
         # 5. Exécuter le trade chez le courtier

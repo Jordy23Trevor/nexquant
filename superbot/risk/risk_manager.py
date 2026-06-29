@@ -63,6 +63,7 @@ class RiskManager:
         # Positions actuelles et historique
         self.open_positions: Dict[str, Dict[str, Any]] = {}
         self.position_history: List[Dict[str, Any]] = []
+        self.consecutive_losses: Dict[str, int] = {}
 
         log.info(f"RiskManager initialisé avec config: {self.config}")
 
@@ -78,7 +79,8 @@ class RiskManager:
         if today > self.last_daily_reset:
             self.daily_pnl = 0.0
             self.last_daily_reset = today
-            log.debug("Réinitialisation du P&L journalier")
+            self.consecutive_losses = {}  # Reset daily consecutive losses
+            log.debug("Réinitialisation du P&L journalier et des pertes consécutives")
 
         # Réinitialisation mensuelle
         if today.month > self.last_monthly_reset.month or today.year > self.last_monthly_reset.year:
@@ -97,16 +99,27 @@ class RiskManager:
 
         log.debug(f"Solde mis à jour: {balance:.2f} | Daily P&L: {self.daily_pnl:.2f} | Monthly P&L: {self.monthly_pnl:.2f}")
 
-    def _can_take_new_trade(self, account_balance: float) -> bool:
+    def _can_take_new_trade(self, account_balance: float, symbol: str = "") -> bool:
         """
         Vérifie si on peut prendre un nouveau trade basé sur les limites de risque.
 
         Args:
             account_balance: Solde actuel du compte
+            symbol: Symbole de l'instrument
 
         Returns:
             True si on peut prendre un nouveau trade, False sinon
         """
+        # Vérifier si on a déjà une position sur ce symbole
+        if symbol and symbol in self.open_positions:
+            log.info(f"Position déjà ouverte pour {symbol}, rejet du nouveau trade.")
+            return False
+            
+        # Vérifier les pertes consécutives sur ce symbole
+        if symbol and self.consecutive_losses.get(symbol, 0) >= 3:
+            log.info(f"Symbole {symbol} bloqué (3 pertes consécutives atteintes).")
+            return False
+
         # Vérifier le nombre maximum de positions ouvertes
         if len(self.open_positions) >= self.MAX_OPEN_POSITIONS:
             log.info(f"Nombre maximum de positions atteint: {len(self.open_positions)}/{self.MAX_OPEN_POSITIONS}")
@@ -222,20 +235,75 @@ class RiskManager:
                 except Exception as e:
                     log.warning(f"Impossible de récupérer les limites broker pour {symbol}: {e}")
 
+            # 8.5. Restreindre la taille par rapport à la marge disponible chez le broker
+            free_margin = account_balance
+            leverage = 1
+            if broker is not None:
+                try:
+                    summary = broker.get_account_summary()
+                    if summary:
+                        # Chercher la marge disponible
+                        free_margin = summary.get("free_margin")
+                        if free_margin is None:
+                            free_margin = summary.get("buying_power")
+                        if free_margin is None:
+                            free_margin = summary.get("available_balance")
+                        if free_margin is None:
+                            free_margin = summary.get("balance", account_balance)
+                            
+                        # Chercher l'effet de levier
+                        leverage = summary.get("leverage", 1)
+                except Exception as e:
+                    log.warning(f"Impossible de récupérer la marge disponible du broker pour {symbol}: {e}")
+
+            # Calculer la taille maximale autorisée par la marge disponible (avec 5% de buffer)
+            is_buying_power_direct = (broker is not None and broker.get_asset_type() == "stock")
+            if is_buying_power_direct:
+                max_nominal = free_margin * 0.95
+                max_size_by_margin = max_nominal / entry_price if entry_price > 0 else 0.0
+            else:
+                max_nominal = free_margin * leverage * 0.95
+                max_size_by_margin = max_nominal / entry_price if entry_price > 0 else 0.0
+
+            # Si la taille maximale par rapport à la marge est inférieure au minimum du symbole
+            if max_size_by_margin < min_size:
+                log.warning(
+                    f"❌ Marge disponible insuffisante pour la taille minimale sur {symbol}. "
+                    f"Taille min requise: {min_size:.6f}, Max autorisé par marge: {max_size_by_margin:.6f} "
+                    f"(Marge dispo: {free_margin:.2f}, Levier: {leverage}x)"
+                )
+                return 0.0, {
+                    'error': 'Insufficient margin for minimum position size',
+                    'free_margin': free_margin,
+                    'leverage': leverage,
+                    'min_size': min_size,
+                    'max_size_by_margin': max_size_by_margin
+                }
+
+            if position_size > max_size_by_margin:
+                log.info(
+                    f"⚠️ Taille de position restreinte par la marge disponible pour {symbol} : "
+                    f"{position_size:.6f} -> {max_size_by_margin:.6f} "
+                    f"(Marge disponible: {free_margin:.2f}, Levier: {leverage}x, Max nominal: {max_nominal:.2f})"
+                )
+                position_size = max_size_by_margin
+
             # Appliquer les limites de taille de position
             position_size = max(min_size, min(position_size, self.MAX_POSITION_SIZE))
 
             if step_size is not None and step_size > 0:
-                position_size = round(position_size / step_size) * step_size
+                import math
+                position_size = math.floor(position_size / step_size) * step_size
+                position_size = round(position_size, 8)
 
             # 9. Calculer le risque réel en pourcentage
             actual_risk_amount = position_size * risk_per_unit
             actual_risk_pct = (actual_risk_amount / account_balance) * 100 if account_balance > 0 else 0
 
             # Si le risque réel dépasse la limite de sécurité
-            max_allowed_risk_pct = max(3.0, self.RISK_PCT * 2.0)
+            max_allowed_risk_pct = min(self.MAX_DAILY_LOSS_PCT, max(3.0, self.RISK_PCT * 2.0))
             if actual_risk_pct > max_allowed_risk_pct:
-                if position_size == min_size:
+                if position_size <= min_size:
                     log.warning(
                         f"Risque réel de {actual_risk_pct:.2f}% dépasse la limite autorisée de {max_allowed_risk_pct:.2f}% "
                         f"pour {symbol} (taille minimale de contrat trop grande pour la taille du compte). Trade rejeté."
@@ -246,7 +314,8 @@ class RiskManager:
                     log.info(f"Capping de la taille de position de {position_size:.6f} à la limite de risque de {max_allowed_risk_pct:.2f}%")
                     position_size = (max_allowed_risk_pct / 100.0) * account_balance / risk_per_unit
                     if step_size is not None and step_size > 0:
-                        position_size = round(position_size / step_size) * step_size
+                        position_size = math.floor(position_size / step_size) * step_size
+                        position_size = round(position_size, 8)
                     actual_risk_amount = position_size * risk_per_unit
                     actual_risk_pct = (actual_risk_amount / account_balance) * 100 if account_balance > 0 else 0
 
@@ -265,6 +334,9 @@ class RiskManager:
                 'position_size': position_size,
                 'actual_risk_amount': actual_risk_amount,
                 'actual_risk_pct': actual_risk_pct,
+                'free_margin': free_margin,
+                'leverage': leverage,
+                'max_size_by_margin': max_size_by_margin,
                 'timestamp': datetime.now().isoformat()
             }
 
@@ -385,6 +457,16 @@ class RiskManager:
             # Garder seulement les 100 derniers trades pour éviter l'accumulation illimitée
             if len(self.trade_history) > 100:
                 self.trade_history = self.trade_history[-100:]
+
+            # Mise à jour des pertes consécutives
+            symbol = trade_record.get('symbol')
+            if symbol and trade_record.get('status') == 'closed' and trade_record.get('pnl') is not None:
+                if trade_record.get('pnl', 0) < 0:
+                    self.consecutive_losses[symbol] = self.consecutive_losses.get(symbol, 0) + 1
+                    log.info(f"📉 Perte enregistrée pour {symbol}. Série de pertes: {self.consecutive_losses[symbol]}")
+                else:
+                    self.consecutive_losses[symbol] = 0
+                    log.debug(f"📈 Gain enregistré pour {symbol}. Réinitialisation de la série de pertes.")
 
             # Écrire dans le fichier JSON Lines
             log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
@@ -671,6 +753,7 @@ class RiskManager:
         """Réinitialise les statistiques journalières."""
         self.daily_pnl = 0.0
         self.last_daily_reset = datetime.now().date()
+        self.consecutive_losses = {}
         log.info("Statistiques journalières réinitialisées")
 
     def reset_monthly_stats(self):

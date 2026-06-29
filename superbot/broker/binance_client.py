@@ -53,6 +53,106 @@ class BinanceClient(Broker):
             )
         self._init_client(api_key, api_secret, testnet)
         self._symbol_info: Dict[str, Any] = {}
+        
+        # Caching configuration and states
+        self._cache_duration = 10.0  # seconds
+        self._account_cache = None
+        self._account_cache_time = 0.0
+        self._positions_cache = None
+        self._positions_cache_time = 0.0
+        self._price_cache: Dict[str, float] = {}
+        self._price_cache_time = 0.0
+
+    def _clear_cache(self):
+        """Invalide le cache local pour forcer une récupération immédiate."""
+        self._account_cache = None
+        self._account_cache_time = 0.0
+        self._positions_cache = None
+        self._positions_cache_time = 0.0
+        self._price_cache = {}
+        self._price_cache_time = 0.0
+
+    def _refresh_account_cache(self):
+        now = time.time()
+        if self._account_cache is not None and (now - self._account_cache_time) < self._cache_duration:
+            return
+
+        def run():
+            account = self._client.futures_account()
+            positions = self._client.futures_position_information()
+            open_pos  = [p for p in positions if float(p["positionAmt"]) != 0]
+            balances = self._get_usd_balances(account)
+            
+            self._account_cache = {
+                "balance":        balances["wallet_balance"],
+                "equity":         balances["margin_balance"],
+                "unrealized_pnl": balances["unrealized_pnl"],
+                "margin_used":    float(account["totalInitialMargin"]),
+                "free_margin":    float(account.get("availableBalance", 0.0)),
+                "open_positions": len(open_pos),
+                "leverage":       LEVERAGE,
+                "testnet":        BINANCE_TESTNET,
+                "account_type":   "TESTNET" if BINANCE_TESTNET else "REAL",
+            }
+            self._account_cache_time = now
+
+        self._call_api(run, None)
+
+    def _refresh_positions_cache(self):
+        now = time.time()
+        if self._positions_cache is not None and (now - self._positions_cache_time) < self._cache_duration:
+            return
+
+        def run():
+            all_positions = self._client.futures_position_information()
+            all_open_orders = self._client.futures_get_open_orders()
+            
+            orders_by_symbol = {}
+            for order in all_open_orders:
+                sym = order.get("symbol")
+                if sym not in orders_by_symbol:
+                    orders_by_symbol[sym] = []
+                orders_by_symbol[sym].append(order)
+            
+            new_positions_cache = {}
+            for pos in all_positions:
+                qty = float(pos["positionAmt"])
+                raw_symbol = pos["symbol"]
+                
+                if qty != 0:
+                    stop_loss = 0.0
+                    take_profit = 0.0
+                    open_orders = orders_by_symbol.get(raw_symbol, [])
+                    for order in open_orders:
+                        o_type = order.get("type")
+                        o_side = order.get("side")
+                        pos_side = "LONG" if qty > 0 else "SHORT"
+                        is_close_side = (pos_side == "LONG" and o_side == "SELL") or (pos_side == "SHORT" and o_side == "BUY")
+                        if is_close_side:
+                            if o_type in ["STOP_MARKET", "STOP"]:
+                                stop_loss = float(order.get("stopPrice", 0))
+                            elif o_type in ["TAKE_PROFIT_MARKET", "TAKE_PROFIT"]:
+                                take_profit = float(order.get("stopPrice", 0))
+                            elif o_type == "LIMIT":
+                                take_profit = float(order.get("price", 0))
+                    
+                    new_positions_cache[raw_symbol] = {
+                        "side":           "LONG" if qty > 0 else "SHORT",
+                        "size":            abs(qty),
+                        "entry_price":    float(pos["entryPrice"]),
+                        "mark_price":     float(pos["markPrice"]),
+                        "unrealized_pnl": float(pos["unRealizedProfit"]),
+                        "liquidation_price": float(pos.get("liquidationPrice", 0)) if pos.get("liquidationPrice") else None,
+                        "margin_used":    float(pos.get("initialMargin", 0)),
+                        "stop_loss":      stop_loss,
+                        "take_profit":    take_profit,
+                        "timestamp":      datetime.now(timezone.utc)
+                    }
+            
+            self._positions_cache = new_positions_cache
+            self._positions_cache_time = now
+            
+        self._call_api(run, None)
 
     def get_default_instruments(self) -> List[str]:
         return ["BTC/USDT", "ETH/USDT"]
@@ -215,30 +315,17 @@ class BinanceClient(Broker):
 
     def get_balance(self) -> float:
         """Solde total du portefeuille de futures (wallet balance) en USD/USDT."""
-        def run():
-            account = self._client.futures_account()
-            balances = self._get_usd_balances(account)
-            return balances["wallet_balance"]
-        return self._call_api(run, 0.0)
+        self._refresh_account_cache()
+        if self._account_cache is not None:
+            return self._account_cache["balance"]
+        return 0.0
 
     def get_account_summary(self) -> Dict[str, Any]:
         """Résumé complet : balance, PnL, levier, positions."""
-        def run():
-            account = self._client.futures_account()
-            positions = self._client.futures_position_information()
-            open_pos  = [p for p in positions if float(p["positionAmt"]) != 0]
-            balances = self._get_usd_balances(account)
-            return {
-                "balance":        balances["wallet_balance"],
-                "equity":         balances["margin_balance"],
-                "unrealized_pnl": balances["unrealized_pnl"],
-                "margin_used":    float(account["totalInitialMargin"]),
-                "open_positions": len(open_pos),
-                "leverage":       LEVERAGE,
-                "testnet":        BINANCE_TESTNET,
-                "account_type":   "TESTNET" if BINANCE_TESTNET else "REAL",
-            }
-        return self._call_api(run, {})
+        self._refresh_account_cache()
+        if self._account_cache is not None:
+            return self._account_cache
+        return {}
 
     # ─── Données marché ───────────────────────────────────────
 
@@ -282,14 +369,32 @@ class BinanceClient(Broker):
         return df
 
     def get_current_price(self, symbol: str) -> float:
-        """Prix mark courant (Futures mark price)."""
+        """Prix mark courant (Futures mark price), optimisé avec cache global."""
         binance_symbol = symbol.replace("/", "").upper()
-        try:
-            tick = self._client.futures_mark_price(symbol=binance_symbol)
-            return float(tick["markPrice"])
-        except BinanceAPIException as e:
-            log.error(f"get_current_price : {e.message}")
-            return 0.0
+        now = time.time()
+        if not self._price_cache or (now - self._price_cache_time) > self._cache_duration:
+            try:
+                def run():
+                    prices = self._client.futures_mark_price()
+                    new_prices = {}
+                    if isinstance(prices, list):
+                        for p in prices:
+                            s = p.get("symbol")
+                            mp = p.get("markPrice")
+                            if s and mp:
+                                new_prices[s] = float(mp)
+                    elif isinstance(prices, dict):
+                        s = prices.get("symbol")
+                        mp = prices.get("markPrice")
+                        if s and mp:
+                            new_prices[s] = float(mp)
+                    self._price_cache = new_prices
+                    self._price_cache_time = now
+                self._call_api(run, None)
+            except Exception as e:
+                log.warning(f"⚠️ Impossible de rafraîchir le cache des prix mark : {e}")
+
+        return self._price_cache.get(binance_symbol, 0.0)
 
     def get_funding_rate(self, symbol: str) -> float:
         """Taux de financement actuel (signal sentiment)."""
@@ -314,46 +419,10 @@ class BinanceClient(Broker):
     def get_position(self, symbol: str) -> Dict[str, Any]:
         """Retourne la position ouverte sur le symbole."""
         binance_symbol = symbol.replace("/", "").upper()
-        def run():
-            positions = self._client.futures_position_information(symbol=binance_symbol)
-            for pos in positions:
-                qty = float(pos["positionAmt"])
-                if qty != 0:
-                    # Récupérer les prix SL et TP parmi les ordres ouverts
-                    stop_loss = 0.0
-                    take_profit = 0.0
-                    try:
-                        open_orders = self._client.futures_get_open_orders(symbol=binance_symbol)
-                        for order in open_orders:
-                            o_type = order.get("type")
-                            o_side = order.get("side")
-                            pos_side = "LONG" if qty > 0 else "SHORT"
-                            # L'ordre de fermeture doit être dans le sens opposé de la position
-                            is_close_side = (pos_side == "LONG" and o_side == "SELL") or (pos_side == "SHORT" and o_side == "BUY")
-                            if is_close_side:
-                                if o_type in ["STOP_MARKET", "STOP"]:
-                                    stop_loss = float(order.get("stopPrice", 0))
-                                elif o_type in ["TAKE_PROFIT_MARKET", "TAKE_PROFIT"]:
-                                    take_profit = float(order.get("stopPrice", 0))
-                                elif o_type == "LIMIT":
-                                    take_profit = float(order.get("price", 0))
-                    except Exception as e:
-                        log.debug(f"Impossible de récupérer les ordres ouverts pour SL/TP de {symbol}: {e}")
-
-                    return {
-                        "side":           "LONG" if qty > 0 else "SHORT",
-                        "size":            abs(qty),  # Utiliser 'size' comme dans l'interface abstraite
-                        "entry_price":    float(pos["entryPrice"]),
-                        "mark_price":     float(pos["markPrice"]),
-                        "unrealized_pnl": float(pos["unRealizedProfit"]),
-                        "liquidation_price": float(pos.get("liquidationPrice", 0)) if pos.get("liquidationPrice") else None,
-                        "margin_used":    float(pos.get("initialMargin", 0)),
-                        "stop_loss":      stop_loss,
-                        "take_profit":    take_profit,
-                        "timestamp":      datetime.now(timezone.utc)
-                    }
-            return {}  # Aucune position
-        return self._call_api(run, {})
+        self._refresh_positions_cache()
+        if self._positions_cache is not None and binance_symbol in self._positions_cache:
+            return self._positions_cache[binance_symbol]
+        return {}
 
     def close_position(self, symbol: str, reason: str = "") -> bool:
         """Ferme la position ouverte au prix du marché."""
@@ -377,6 +446,7 @@ class BinanceClient(Broker):
             )
             # Annuler aussi tous les ordres conditionnels
             self.cancel_all_orders(symbol)
+            self._clear_cache()
             log.info(f"Position {side} fermée sur {symbol} | {reason}")
             return True
         return self._call_api(run, False)
@@ -432,6 +502,20 @@ class BinanceClient(Broker):
         sl = self._round_price(symbol, sl) if sl > 0 else 0
         tp = self._round_price(symbol, tp) if tp > 0 else 0
 
+        # Diagnostic de marge pré-exécution
+        try:
+            self._refresh_account_cache()
+            free_m = self._account_cache.get("free_margin", 0.0) if self._account_cache else 0.0
+            est_price = self.get_current_price(symbol)
+            req_m = (amount * est_price) / LEVERAGE if est_price > 0 else 0.0
+            log.info(
+                f"⚙️ Diagnostic marge pré-exécution pour {symbol} : "
+                f"Quantité={amount} | Prix estimé={est_price:.2f} | "
+                f"Marge requise={req_m:.2f} USDT | Marge disponible={free_m:.2f} USDT | Levier={LEVERAGE}x"
+            )
+        except Exception as e:
+            log.debug(f"Erreur diagnostic marge pré-exécution: {e}")
+
         def run():
             # 1. Ordre principal (MARKET)
             order_params = {
@@ -483,6 +567,7 @@ class BinanceClient(Broker):
                 except BinanceAPIException as e:
                     log.warning(f"️  TP non placé : {e.message}")
 
+            self._clear_cache()
             arrow = "▲" if side == "buy" else "▼"
             log.info(
                 f"{arrow} {side} {amount} {symbol} @ {entry_price:,.2f} | "
@@ -555,6 +640,7 @@ class BinanceClient(Broker):
                     log.error(f"Impossible de placer le nouveau TP : {e.message}")
                     return False
 
+            self._clear_cache()
             log.info(f"️  SL/TP mis à jour {symbol} | SL: {sl if sl > 0 else 'inchangé'} | TP: {tp if tp > 0 else 'inchangé'}")
             return True
 
@@ -606,6 +692,7 @@ class BinanceClient(Broker):
                     algo_id = o.get("algoId")
                     if algo_id:
                         self._client.futures_cancel_algo_order(symbol=binance_symbol, algoId=algo_id)
+                self._clear_cache()
                 log.info(f"Tous les ordres (standard & algo) annulés sur {symbol}")
                 return True
             except BinanceAPIException as e:

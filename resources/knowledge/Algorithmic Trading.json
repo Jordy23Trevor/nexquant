@@ -1,0 +1,490 @@
+{
+  "book": "Algorithmic Trading",
+  "author": "Ernest P. Chan",
+  "level": 3,
+  "processed_at": "2026-06-29T01:16:53.052934",
+  "rules_count": 18,
+  "rules": [
+    {
+      "id": "chan_adf_test_stationarity",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - Cointegration and Stationarity",
+      "rule": "Before deploying a mean-reversion strategy on a spread, verify stationarity using the Augmented Dickey-Fuller (ADF) test. If ADF test p-value > 0.05, the spread is non-stationary — do NOT use mean-reversion. Only trade mean-reversion when the spread is proven stationary (p < 0.05).",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Statistical filter: mean-reversion strategies require confirmed stationarity"
+      },
+      "keywords": [
+        "ADF",
+        "stationarity",
+        "mean reversion",
+        "spread",
+        "p-value",
+        "cointegration"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_backtest_overfitting",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "Overfitting in backtesting is the #1 danger of algorithmic trading. A strategy with too many parameters 'curve-fits' to historical noise, producing excellent backtest results but poor live performance. Rule: minimum 252 trades (1 year of daily trades) per backtest with < 5 parameters.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Backtest validation: minimum 252 trades required, max 5 free parameters"
+      },
+      "keywords": [
+        "overfitting",
+        "curve fitting",
+        "backtest",
+        "parameters",
+        "noise",
+        "live performance"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_cointegration_pairs",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 4 - Cointegration",
+      "rule": "Cointegrated pairs are assets whose prices move together over the long term but diverge in the short term — the divergence is tradeable. Test cointegration with the Engle-Granger or Johansen test. Trade when the spread deviates by more than 2 standard deviations from its mean.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Pairs trading: 2-sigma deviation from spread mean triggers entry"
+      },
+      "keywords": [
+        "cointegration",
+        "pairs trading",
+        "spread",
+        "2 standard deviations",
+        "Engle-Granger"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_cross_sectional_momentum",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 3 - Momentum Strategies",
+      "rule": "Cross-sectional momentum: buy the top-performing assets and short the bottom performers from a universe of assets over the lookback period. This relative approach is more robust than time-series momentum alone. Rebalance monthly or quarterly to capture momentum factor.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Relative strength ranking for asset selection in multi-symbol portfolios"
+      },
+      "keywords": [
+        "cross-sectional",
+        "momentum",
+        "relative strength",
+        "top performers",
+        "ranking"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_fat_tail_risk",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Risk Management",
+      "rule": "Financial returns have fat tails — extreme losses happen far more often than a normal distribution predicts. Never assume returns are normally distributed when sizing positions. Use conditional Value-at-Risk (CVaR) rather than standard deviation for risk measurement. A 5-sigma event in finance happens every few years, not once every 3.5 million years.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Fat tails awareness: conservative sizing to withstand 5-sigma events"
+      },
+      "keywords": [
+        "fat tails",
+        "extreme losses",
+        "normal distribution",
+        "CVaR",
+        "5-sigma"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_half_kelly_conservative",
+      "level": 3,
+      "category": "sizing",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - The Basics of Mean-Reverting Strategies",
+      "rule": "In practice, use half-Kelly (f*/2) rather than full Kelly. Full Kelly is optimal only with perfect parameter estimates, which never occur. Parameter estimation errors cause full Kelly to over-bet by 50-100%. Half-Kelly reduces bet size significantly while losing only 25% of growth rate.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "CAP_KELLY: kelly_fraction capped at 0.5 of full Kelly — Chan's recommendation"
+      },
+      "keywords": [
+        "half kelly",
+        "conservative",
+        "parameter estimation",
+        "overbetting",
+        "growth rate"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_hurst_exponent",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - Mean-Reverting Strategies",
+      "rule": "The Hurst Exponent indicates the type of price process: H < 0.5 → mean-reverting process (use range strategies), H = 0.5 → random walk (no predictability), H > 0.5 → trending process (use momentum strategies). Calculate H on at least 100 data points for statistical validity.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Hurst exponent determines regime: H<0.5 → RANGING, H>0.5 → TRENDING"
+      },
+      "keywords": [
+        "Hurst",
+        "exponent",
+        "mean reverting",
+        "trending",
+        "random walk",
+        "regime"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_information_ratio",
+      "level": 3,
+      "category": "performance",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Performance Metrics",
+      "rule": "The Information Ratio (IR) measures a strategy's excess return vs benchmark per unit of tracking error. IR = (Strategy Return - Benchmark Return) / Tracking Error Std Dev. IR > 0.5 is good for daily rebalanced strategies. IR is more meaningful than Sharpe ratio for strategies benchmarked against the market.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Performance metric: Information Ratio > 0.5 validates strategy vs benchmark"
+      },
+      "keywords": [
+        "information ratio",
+        "IR",
+        "tracking error",
+        "benchmark",
+        "excess return"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_kelly_criterion_formula",
+      "level": 3,
+      "category": "sizing",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - The Basics of Mean-Reverting Strategies",
+      "rule": "The Kelly formula for optimal position size: f = (m - r) / s² where m = expected return, r = risk-free rate, s² = variance of returns. For a binary win/loss system: f = (p*b - q) / b where p = win rate, b = profit/loss ratio, q = 1-p. This fraction maximizes long-term geometric growth rate.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Mathematical foundation for position sizing — use Kelly formula for f*"
+      },
+      "keywords": [
+        "kelly",
+        "formula",
+        "optimal",
+        "win rate",
+        "profit ratio",
+        "geometric growth"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_kelly_negative_skip",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - Position Sizing",
+      "rule": "If the Kelly fraction is negative, the expected value of the trade is negative. Do not take the trade — a negative Kelly means the strategy has no edge in the current market conditions. A 0% Kelly (do not bet) is preferable to a negative-expectancy position.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "If computed Kelly fraction < 0, refuse the trade entirely (no edge)"
+      },
+      "keywords": [
+        "negative kelly",
+        "no edge",
+        "expected value",
+        "skip trade",
+        "0%"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_leverage_control",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - Leverage",
+      "rule": "Leverage amplifies both gains and losses. Using full Kelly already implies leverage in many strategies. Maximum leverage should be computed from the Kelly fraction and available margin. In volatile markets (crisis periods), reduce leverage by 50% as a precautionary measure.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Leverage cap: reduce by 50% in high-volatility regimes; Kelly-derived max leverage"
+      },
+      "keywords": [
+        "leverage",
+        "Kelly",
+        "margin",
+        "volatile",
+        "amplifies",
+        "reduce"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_market_impact",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "Large orders move the market against you (market impact). Position size must be limited to avoid moving the price more than 10 basis points. A rule of thumb: trade maximum 1% of the average daily volume of the asset. Exceeding this limit significantly degrades execution quality.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Market impact cap: max position = 1% of average daily volume"
+      },
+      "keywords": [
+        "market impact",
+        "volume",
+        "daily volume",
+        "1%",
+        "slippage",
+        "large order"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_momentum_crashes",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 3 - Momentum Strategies",
+      "rule": "Momentum strategies are subject to sudden, severe 'momentum crashes' — typically when market volatility spikes (VIX > 30) after a prolonged trend. Reduce position sizes significantly during high-volatility regimes. A volatility-scaled position sizing approach (÷ realized vol) mitigates this risk.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Volatility scaling: reduce size during VIX spikes to prevent momentum crash losses"
+      },
+      "keywords": [
+        "momentum crash",
+        "volatility",
+        "VIX",
+        "spike",
+        "reduce position",
+        "vol scaling"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_momentum_lookback_optimal",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 3 - Momentum Strategies",
+      "rule": "Time-series momentum strategies perform best with lookback periods of 3 to 12 months. Shorter lookback (< 1 month) captures noise; longer lookback (> 12 months) mean-reverts. The optimal lookback varies by asset class: Equities: 6-12 months, Commodities: 3-12 months, Crypto: 1-6 months.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Momentum lookback calibration: 3-12 months optimal for trend following"
+      },
+      "keywords": [
+        "momentum",
+        "lookback",
+        "3 months",
+        "12 months",
+        "time series",
+        "optimal"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_out_of_sample_test",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "Always reserve an out-of-sample dataset for final validation. Use 80% of data for in-sample development, 20% held out for OOS testing. A strategy is valid only if the OOS Sharpe ratio is within 50% of in-sample Sharpe. If OOS significantly underperforms in-sample, the strategy is overfit.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "OOS validation: in-sample/out-of-sample split for strategy robustness"
+      },
+      "keywords": [
+        "out of sample",
+        "OOS",
+        "validation",
+        "80/20",
+        "Sharpe ratio",
+        "overfit"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_regime_detection",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 6 - Interday Momentum and Mean Reversion",
+      "rule": "No single strategy works in all market regimes. Momentum strategies outperform in trending regimes. Mean-reversion strategies outperform in ranging regimes. Use a regime-detection mechanism (HMM, Hurst exponent, or ADX) to switch between strategies dynamically.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Regime detection is critical: TRENDING → momentum, RANGING → mean-reversion"
+      },
+      "keywords": [
+        "regime",
+        "momentum",
+        "mean reversion",
+        "switch",
+        "HMM",
+        "ADX",
+        "dynamic"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_sharpe_ratio_minimum",
+      "level": 3,
+      "category": "performance",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "A minimum annualized Sharpe Ratio of 1.0 is required before live deployment. Sharpe > 2.0 is excellent for an algorithmic strategy. The Sharpe should be calculated on out-of-sample data, not in-sample. A Sharpe of 0.5-1.0 is marginal and requires additional confirmation.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Sharpe ratio minimum standard for strategy approval"
+      },
+      "keywords": [
+        "Sharpe",
+        "ratio",
+        "1.0",
+        "minimum",
+        "annualized",
+        "deployment"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_transaction_costs_realistic",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "Always include realistic transaction costs in backtests: commissions, bid-ask spread, and slippage (market impact). For high-frequency strategies, slippage can eliminate all profits. Rule of thumb: if removing transaction costs doubles your Sharpe, the strategy is marginal — costs are destroying the edge.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Transaction cost realism: commissions + spread + slippage must all be modeled"
+      },
+      "keywords": [
+        "transaction costs",
+        "commissions",
+        "slippage",
+        "bid-ask",
+        "realistic",
+        "backtest"
+      ],
+      "actions": []
+    }
+  ]
+}

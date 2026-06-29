@@ -67,13 +67,14 @@
 - Gestionnaires de fonds
 
 **Scope Phase 2 (Révisé) :**
-1. **P1** — Monetisation Stripe (subscriptions + gating)
+1. **P1** — Monétisation Lemon Squeezy (subscriptions + gating + conformité TVA UE)
 2. **P2** — Métriques avancées (Sharpe, PF, WinRate, Drawdown)
 3. **P3** — Pilotage bidirectionnel (start/stop distant via polling + Realtime)
 4. **P4** — Gestion stratégies web (CRUD + types de stratégies)
 5. **P5** — Auto-update bot (updater.py + UI banner)
 6. **P6** — Notifications (email Resend + in-app)
-7. **P7** — PWA (bonus, priorité basse)
+7. **P7** — Conformité RGPD (Privacy Policy, droit effacement, export, cookies)
+*Note : Le support PWA est repoussé en v1.1/v2 pour des raisons de focus MVP.*
 
 ### 1.2 Etude de Faisabilité (Révisée)
 
@@ -82,26 +83,27 @@
 - Frontend React (TanStack Start) : **existant** (dashboard, admin, auth)
 - Schema DB Supabase : **existant** (migration commerciale déjà déployée)
 - API Ingest/Config : **existant** (HMAC, licence check, chiffrement)
-- Serveur Stripe : **à implémenter**
+- Serveur Lemon Squeezy : **à implémenter**
 - Métriques avancées : **à implémenter** (calculs Sharpe, PF, etc.)
 - Notifications email : **à implémenter** (intégration Resend)
 
 **Technologies :**
 - Frontend : TanStack Start + React 19 + Supabase
-- Bot : Python 3.11+ avec brokers Binance/Alpaca/MT5
+- Bot : Python 3.11+ avec brokers ccxt (Binance Futures), Alpaca (officiels), et MetaTrader 5 (supporté mais expérimental/non-officiel)
 - DB : PostgreSQL 15 (Supabase)
-- Paiement : Stripe (+ Stripe Tax si UE)
+- Paiement : Lemon Squeezy (Merchant of Record pour la gestion automatique de la TVA EU)
 - Email : Resend
 - Realtime : Supabase Realtime (optionnel — polling comme mécanisme principal)
 
 **Risques identifiés (Révisés) :**
-1. Stripe webhooks non reçus (mitigation : logging + retry queue + alerte admin)
+1. Lemon Squeezy webhooks non reçus (mitigation : logging + retry queue + alerte admin)
 2. Latence Realtime (mitigation : **polling 30s comme mécanisme principal**, Realtime en bonus)
 3. Calcul Sharpe erroné (mitigation : **tests avec fixtures CSV validées Excel**)
-4. Compatibilité navigateur PWA (mitigation : **repousser PWA en P7**, priorité basse)
-5. **Goulot d'étranglement développeur unique** (mitigation : réduire scope Semaine 2)
-6. **TVA européenne non gérée par Stripe de base** (mitigation : évaluer Stripe Tax ou Lemon Squeezy)
+4. **Timeline trop optimiste de 4 semaines** (mitigation : étendre le plan de développement sur 6 semaines et exclure la PWA de la v1)
+5. **Goulot d'étranglement développeur unique** (mitigation : répartition plus granulaire sur 6 semaines au lieu de 4)
+6. **TVA européenne et facturation complexe** (mitigation : résolu par le choix de Lemon Squeezy comme MoR)
 7. **Migration utilisateurs existants** (mitigation : fenêtre de grâce 7 jours post-trial)
+8. **Conformité RGPD** (mitigation : politique de confidentialité via iubenda.com, suppression/export de compte, politique de rétention des logs)
 
 ---
 
@@ -121,16 +123,14 @@
 
 **US6 — Auto-update :** En tant qu'utilisateur, je veux que mon bot se mette à jour automatiquement pour toujours avoir la dernière version.
 
-### 2.2 Exigences Fonctionnelles (Révisées)
-
-**[RÉVISION]** Les RF marquées ★ s'appuient sur du code existant.
-
-**RF1 — Paiement Stripe :** ★
-- `POST /api/payment/create-checkout` : crée une session Stripe Checkout
-- `POST /api/payment/webhook` : reçoit les événements Stripe
-- Table `subscriptions` : lie `user_id` au `stripe_subscription_id`
-- **Gating :** modifier [`ingest.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/ingest.ts:93) et [`config.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/config.ts:79) — remplacer la simple vérification `trial_end` par : `trial_end || subscription.status == active`
-- Migration utilisateurs : tous les profils existants avec `trial_end` valide conservent l'accès jusqu'à expiration
+**RF1 — Paiement Lemon Squeezy :** ★
+- Choix de Lemon Squeezy comme **Merchant of Record (MoR)** pour la gestion automatique de la facturation et de la TVA européenne.
+- `POST /api/payment/create-checkout` : crée une session de paiement Lemon Squeezy Checkout.
+- `POST /api/payment/webhook` : reçoit les webhooks Lemon Squeezy (abonnement créé, mis à jour, annulé).
+- Table `subscriptions` : lie `user_id` à `lemon_squeezy_subscription_id`.
+- **Gating :** modifier [`ingest.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/ingest.ts:93) et [`config.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/config.ts:79) — remplacer la simple vérification `trial_end` par : `trial_end || subscription.status == active` (conditionné à l'activation du feature flag `lemon_squeezy_enabled`).
+- **Feature Flags :** La table `feature_flags` détermine l'activation de Lemon Squeezy (`lemon_squeezy_enabled = true`).
+- Migration utilisateurs : tous les profils existants avec `trial_end` valide conservent l'accès jusqu'à expiration.
 
 **RF2 — Métriques :**
 - Fonction SQL `calculate_daily_metrics(user_id)`
@@ -141,7 +141,7 @@
 
 **RF3 — Pilotage bidirectionnel :** ★
 - **[Mécanisme primaire]** Bot pull config via `/api/public/config` toutes les 30s (déjà existant dans `sync_config()`)
-- **[Mécanisme secondaire]** Bot souscrit aux changements Realtime de `bot_config` (optionnel, si la lib Python le supporte)
+- **[Mécanisme secondaire]** Bot souscrit aux changements Realtime de `bot_config` si la lib Python le supporte. Cette fonctionnalité est pilotée par le flag `realtime_enabled` (Feature Flags).
 - `is_running = false` → bot arrête sa boucle de trading
 - `risk_pct` / `score_min` modifiés → appliqués au prochain cycle
 - **Le toggle `toggleBot()` existe déjà côté web** — voir [`dashboard.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx:156) et [`nexquant.functions.ts`](nexquant/NexQuant_Web_App/src/lib/nexquant.functions.ts:156)
@@ -160,15 +160,29 @@
 
 **RF6 — Auto-update bot :** ★
 - Module `updater.py` : vérifie version au démarrage
-- Download binaire depuis `app_versions.download_url`
-- Remplacement + redémarrage automatique
+- **Distribution du binaire :** Le binaire compilé est distribué via les GitHub Releases (le champ `download_url` dans `app_versions` pointe vers le release asset correspondant).
+- **Signature du binaire :**
+  - *Phase 1 (MVP) :* Sans signature. L'avertissement de sécurité de l'OS (ex: Windows SmartScreen ou warning de notarization macOS) est considéré comme acceptable. Des instructions d'ouverture manuelle (clic droit -> ouvrir) sont fournies dans le guide utilisateur.
+  - *Phase 2 (Échelle) :* Signature automatisée via GitHub Actions + certificat de signature (Authenticode pour Windows, Apple Developer Certificate pour macOS).
+- **Vérification d'intégrité :** checksum SHA-256 du binaire téléchargé vérifié avant remplacement.
+- Remplacement + redémarrage automatique.
 - **Bannière web :** le champ `update.available` est déjà retourné par [`config.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/config.ts:143)
-- **Vérification d'intégrité :** checksum SHA-256 du binaire
 
-**RF7 — PWA (Bonus — Priorité Basse) :**
+**RF7 — PWA (Bonus — Repoussé en v1.1/v2) :**
 - `manifest.json` avec icônes
 - Service worker pour cache offline
 - Installation sur écran d'accueil mobile
+
+**RF8 — Conformité RGPD / GDPR (Nouveau) :**
+- **Privacy Policy :** Création d'une page de politique de confidentialité détaillée (générée via iubenda.com pour un modèle basique conforme et gratuit).
+- **Bandeau de consentement :** Intégration d'un bandeau de cookies/consentement RGPD sur le frontend.
+- **Droit à l'effacement :** Implémentation de la route `DELETE /api/user/account` permettant à l'utilisateur de supprimer définitivement son compte et toutes ses clés API associées (`user_brokers`).
+- **Droit à la portabilité (Export de données) :** Implémentation de la route `GET /api/user/export-data` (GDPR Art. 20) permettant d'exporter les données du profil et l'historique des transactions sous format JSON.
+- **Politique de rétention :** Définition d'une durée de rétention des logs de trades système (ex: purge automatique des logs techniques au repos après 90 jours, archivage sécurisé des transactions réelles pendant 5 ans pour obligations fiscales).
+
+**RF9 — Onboarding Broker Flexible (Nouveau) :**
+- Le support pour connecter dynamiquement n'importe quel broker arbitraire via clé API est **exclu de la version v2** pour limiter la complexité et garantir la stabilité.
+- La v2 se concentre exclusivement sur les brokers officiels : ccxt (Binance Futures) et Alpaca. Le support MetaTrader 5 est conservé en mode expérimental / non-officiel uniquement. L'onboarding flexible multi-broker générique est reporté en phase **v3**.
 
 ### 2.3 Exigences Non-Fonctionnelles
 
@@ -216,12 +230,12 @@
 - Server : TanStack Start (SSR + API routes)
 - ORM : Supabase SDK (PostgreSQL)
 - Validation : Zod
-- Paiement : Stripe SDK
+- Paiement : Lemon Squeezy (SDK ou API REST)
 - Email : Resend SDK
 
 **Bot Python :**
 - Langage : Python 3.11+
-- Brokers : ccxt (Binance), alpaca-py, MetaTrader5
+- Brokers : ccxt (Binance Futures), alpaca-py (officiels) ; MetaTrader 5 (support expérimental / non-officiel)
 - Data : pandas, numpy
 - Télémétrie : requests + hmac (existant via `TelemetryClient`)
 - Scheduler : threading + schedule
@@ -229,7 +243,7 @@
 **Database :**
 - Supabase (PostgreSQL 15)
 - Tables existantes : `profiles`, `bot_status`, `bot_config`, `user_brokers`, `equity_snapshots`, `positions`, `market_regime`, `bot_logs`, `app_versions`
-- Tables à créer : `subscriptions`, `daily_metrics`, `strategies`, `notifications`, `notification_preferences`
+- Tables à créer : `subscriptions`, `daily_metrics`, `strategies`, `notifications`, `notification_preferences`, `feature_flags`
 
 ### 3.2 Architecture Applicative (Révisée)
 
@@ -238,7 +252,7 @@
 Architecture :
 ```
 [Utilisateur Web] → [TanStack Start SSR] → [Supabase DB]
-                    → [Stripe API] (paiements)
+                    → [Lemon Squeezy API] (paiements)
                     → [Resend API] (emails)
                     
 [Bot Python] → /api/public/ingest (push données) ★ EXISTANT
@@ -250,13 +264,13 @@ Architecture :
 1. Bot pousse heartbeat/equity/positions/logs → `/api/public/ingest` ★ EXISTANT
 2. Bot tire config → `/api/public/config` (clés déchiffrées) ★ EXISTANT
 3. Webapp lit Supabase directement (via RLS policies) ★ EXISTANT
-4. Stripe webhook → `/api/payment/webhook` → update subscriptions **NOUVEAU**
+4. Lemon Squeezy webhook → `/api/payment/webhook` → update subscriptions **NOUVEAU**
 5. Bot pull `is_running` via config polling 30s ★ EXISTANT (mécanisme primaire)
-6. Bot écoute Realtime sur `bot_config` **NOUVEAU** (mécanisme secondaire)
+6. Bot écoute Realtime sur `bot_config` **NOUVEAU** (mécanisme secondaire sous feature flag `realtime_enabled`)
 
 **Routes API :**
-- `POST /api/payment/create-checkout` (crée session Stripe)
-- `POST /api/payment/webhook` (reçoit événements Stripe)
+- `POST /api/payment/create-checkout` (crée session Lemon Squeezy Checkout)
+- `POST /api/payment/webhook` (reçoit événements Lemon Squeezy)
 - `GET /api/analytics/metrics` (retourne KPIs)
 - `GET /api/analytics/trades` (historique paginé)
 - `GET/POST /api/strategies` (CRUD strategies)
@@ -295,237 +309,198 @@ Architecture :
 - `MetricsGrid` : Sharpe, Win Rate, PF, Drawdown **NOUVEAU**
 - `TradeHistoryTable` : liste paginée des trades clos (amélioration de l'existant)
 - `EquityCurveAdvanced` : avec zone de drawdown (amélioration de l'existant)
-- `BotStatusBadge` : running/stopped/error (amélioration de l'existant)
-- Bannière mise à jour disponible (le champ `update.available` existe déjà)
+- `BotStatusBadge` : running/stopped/error (amélioration de l'exista### 5.2 Roadmap Prioritaire (Révisée — 6 Semaines)
+
+**[RÉVISION] Semaine 1** — Paiement & Abonnements (P1 - Lemon Squeezy)
+Mise en place de Lemon Squeezy (MoR) et configuration du gating. C'est le bloc commercial fondateur.
+
+**[RÉVISION] Semaine 2** — Métriques & Analytics (P2)
+Moteur de calcul des métriques avancées et intégration de la courbe d'équité complexe sur le dashboard.
+
+**[RÉVISION] Semaine 3** — Pilotage bidirectionnel (P3)
+Contrôle à distance du bot depuis le dashboard web via polling 30s + Supabase Realtime sous feature flag.
+
+**Semaine 4** — Stratégies web & Webhook (P4)
+Interface CRUD de gestion des stratégies et intégration de la réception de signaux webhook (TradingView).
+
+**Semaine 5** — Auto-update bot (P5)
+Développement de `updater.py` sur les GitHub Releases, vérification d'intégrité SHA-256 et bannière web.
+
+**Semaine 6** — Notifications, RGPD, QA & Lancement (P6 + RGPD + QA)
+Envoi de courriels (Resend), bandeau cookies, routes d'exportation/effacement RGPD, tests unitaires/intégration, et mise en production.
 
 ---
 
-## 5. Planification & Gestion de Projet
-
-### 5.1 Méthodologie
-
-**Approche :** Agile / Kanban avec sprints hebdomadaires.
-
-**Outils :**
-- Suivi : GitHub Issues / Projects
-- Communication : Discord
-- Documentation : GitHub Wiki + ce plan
-- CI/CD : GitHub Actions (build + deploy automatique)
-
-### 5.2 Roadmap Prioritaire (Révisée)
-
-**[RÉVISION] Semaine 1** — Paiement & Abonnements (P1)
-Sans cela, pas de revenus. C'est le bloc fondateur.
-
-**[RÉVISION] Semaine 2a** — Métriques & Analytics (P2)
-Les utilisateurs ont besoin de voir les performances pour justifier l'abonnement.
-
-**[RÉVISION] Semaine 2b** — Pilotage bidirectionnel (P3)
-Contrôler le bot depuis le web = valeur SaaS fondamentale. **S'appuie sur l'existant.**
-
-**Semaine 3** — Stratégies web + Auto-update (P4+P5)
-Configurer le bot depuis le web + mise à jour automatique.
-
-**Semaine 4** — Notifications + QA + Documentation (P6+P7)
-Qualité de vie, rétention, et préparation au lancement.
-
----
-
-## 6. Découpage Phase 2 — Semaine par Semaine (Révisé)
+## 6. Découpage Phase 2 — Semaine par Semaine (Révisé — 6 Semaines)
 
 ### Semaine 1 : Monétisation & Paiement (P1)
 
-**Objectif :** Permettre les souscriptions payantes via Stripe.
+**Objectif :** Permettre les souscriptions payantes via Lemon Squeezy (MoR pour gestion TVA EU).
 
 **Ce qui CHANGE dans l'existant :**
 
 | Existant | Modification |
 |---|---|
-| [`ingest.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/ingest.ts:93) — vérif `trial_end` | Ajouter aussi vérif `subscription.status` |
-| [`config.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/config.ts:79) — vérif `trial_end` | Ajouter aussi vérif `subscription.status` |
-| [`dashboard.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx:132) — placeholder abonnement | Remplacer par vrai lien Stripe |
+| [`ingest.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/ingest.ts:93) — vérif `trial_end` | Ajouter aussi vérif `subscription.status` (si flag `lemon_squeezy_enabled` actif) |
+| [`config.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/config.ts:79) — vérif `trial_end` | Ajouter aussi vérif `subscription.status` (si flag `lemon_squeezy_enabled` actif) |
+| [`dashboard.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx:132) — placeholder abonnement | Remplacer par vrai lien Lemon Squeezy Checkout |
 | [`nexquant.functions.ts`](nexquant/NexQuant_Web_App/src/lib/nexquant.functions.ts) | Ajouter `getSubscriptionStatus`, `createCheckoutSession` |
 
 **Fichiers à créer :**
-- [`nexquant/NexQuant_Web_App/src/routes/api/payment/create-checkout.ts`](nexquant/NexQuant_Web_App/src/routes/api/payment/create-checkout.ts) (POST endpoint Stripe)
-- [`nexquant/NexQuant_Web_App/src/routes/api/payment/webhook.ts`](nexquant/NexQuant_Web_App/src/routes/api/payment/webhook.ts) (POST endpoint webhook Stripe)
+- [`nexquant/NexQuant_Web_App/src/routes/api/payment/create-checkout.ts`](nexquant/NexQuant_Web_App/src/routes/api/payment/create-checkout.ts) (POST endpoint Lemon Squeezy Checkout)
+- [`nexquant/NexQuant_Web_App/src/routes/api/payment/webhook.ts`](nexquant/NexQuant_Web_App/src/routes/api/payment/webhook.ts) (POST endpoint webhook Lemon Squeezy)
 - [`nexquant/NexQuant_Web_App/src/routes/_authenticated/billing.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/billing.tsx) (page abonnement)
-- [`nexquant/NexQuant_Web_App/src/lib/stripe.ts`](nexquant/NexQuant_Web_App/src/lib/stripe.ts) (client Stripe serveur)
-- [`nexquant/NexQuant_Web_App/src/components/BillingCard.tsx`](nexquant/NexQuant_Web_App/src/components/ui/BillingCard.tsx) (carte plan — dans `components/ui/`)
-- [`nexquant/NexQuant_Web_App/src/components/SubscriptionStatus.tsx`](nexquant/NexQuant_Web_App/src/components/ui/SubscriptionStatus.tsx) (badge statut)
-- [`nexquant/NexQuant_Web_App/supabase/migrations/20260701_subscriptions.sql`](nexquant/NexQuant_Web_App/supabase/migrations/20260701_subscriptions.sql)
+- [`nexquant/NexQuant_Web_App/src/lib/lemonsqueezy.ts`](nexquant/NexQuant_Web_App/src/lib/lemonsqueezy.ts) (client d'intégration Lemon Squeezy)
+- [`nexquant/NexQuant_Web_App/src/components/ui/BillingCard.tsx`](nexquant/NexQuant_Web_App/src/components/ui/BillingCard.tsx) (carte plan)
+- [`nexquant/NexQuant_Web_App/src/components/ui/SubscriptionStatus.tsx`](nexquant/NexQuant_Web_App/src/components/ui/SubscriptionStatus.tsx) (badge statut)
+- [`nexquant/NexQuant_Web_App/supabase/migrations/20260701_subscriptions.sql`](nexquant/NexQuant_Web_App/supabase/migrations/20260701_subscriptions.sql) (schema subscription + feature flags)
 
 **Tâches :**
-1. Définir les tiers (Starter 29$, Pro 79$, Pro 199$)
-2. Créer table `subscriptions` dans Supabase
-3. Implémenter Stripe Checkout Session
-4. Gérer webhook Stripe (completed, deleted, updated)
-5. Modifier gating dans [`ingest.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/ingest.ts:93) + [`config.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/config.ts:79)
-6. **Migration utilisateurs :** tous les profils avec `trial_end` futur gardent l'accès
-7. UI page billing avec statut
+1. Créer le compte Lemon Squeezy, configurer le magasin et définir les plans (Starter 29$, Pro 79$, Pro 199$)
+2. Créer la table `subscriptions` et la table `feature_flags` (avec flag `lemon_squeezy_enabled` à `false` par défaut) dans Supabase
+3. Implémenter l'API de Checkout Lemon Squeezy (génère l'URL de paiement pré-remplie)
+4. Configurer et implémenter le traitement du Webhook (events `subscription_created`, `subscription_updated`, `subscription_cancelled`)
+5. Modifier le gating d'accès dans [`ingest.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/ingest.ts:93) + [`config.ts`](nexquant/NexQuant_Web_App/src/routes/api/public/config.ts:79) (vérifier l'abonnement si le flag `lemon_squeezy_enabled` est `true`)
+6. **Migration utilisateurs :** tous les profils avec `trial_end` futur gardent l'accès sans abonnement requis
+7. UI de la page billing avec cartes de prix et statut d'abonnement actif
 
 **Acceptance :**
-- User peut s'abonner via Stripe → statut `active` dans Supabase
-- Bot reçoit 403 si abonnement expiré → s'arrête proprement (déjà existant via le check `is_expired` dans [`telemetry.py`](nexquant/superbot/telemetry.py:60))
-- Admin voit statut subscription de chaque user
+- L'utilisateur peut s'abonner via Lemon Squeezy → statut `active` mis à jour dans Supabase
+- La TVA européenne est collectée automatiquement par Lemon Squeezy
+- Le bot reçoit 403 si l'abonnement est expiré et s'arrête proprement
+- Le flag `lemon_squeezy_enabled` permet d'activer/désactiver la vérification d'abonnement à chaud
 
 ---
 
-### Semaine 2a : Métriques & Analytics (P2)
+### Semaine 2 : Métriques & Analytics (P2)
 
-**Objectif :** Afficher les KPIs de performance.
+**Objectif :** Calculer et afficher les KPIs de performance quantitative (Sharpe, Profit Factor, Drawdown).
 
 **Fichiers à créer :**
 - [`nexquant/NexQuant_Web_App/src/lib/metrics.ts`](nexquant/NexQuant_Web_App/src/lib/metrics.ts) (moteur de calcul Sharpe, PF, WinRate)
-- [`nexquant/NexQuant_Web_App/src/components/ui/MetricsGrid.tsx`](nexquant/NexQuant_Web_App/src/components/ui/MetricsGrid.tsx)
-- [`nexquant/NexQuant_Web_App/src/components/ui/SharpeRatioCard.tsx`](nexquant/NexQuant_Web_App/src/components/ui/SharpeRatioCard.tsx)
-- [`nexquant/NexQuant_Web_App/src/components/ui/EquityCurveAdvanced.tsx`](nexquant/NexQuant_Web_App/src/components/ui/EquityCurveAdvanced.tsx) (remplace l'équity curve simple)
-- [`nexquant/NexQuant_Web_App/src/components/ui/TradeHistoryTable.tsx`](nexquant/NexQuant_Web_App/src/components/ui/TradeHistoryTable.tsx) (remplace la table historique)
-- [`nexquant/NexQuant_Web_App/src/components/ui/BotStatusBadge.tsx`](nexquant/NexQuant_Web_App/src/components/ui/BotStatusBadge.tsx)
-- [`nexquant/NexQuant_Web_App/tests/metrics.test.ts`](nexquant/NexQuant_Web_App/tests/metrics.test.ts)
-- [`nexquant/NexQuant_Web_App/tests/fixtures/sharpe_test_data.csv`](nexquant/NexQuant_Web_App/tests/fixtures/sharpe_test_data.csv) (fixtures de test)
-- [`nexquant/NexQuant_Web_App/supabase/migrations/20260702_daily_metrics.sql`](nexquant/NexQuant_Web_App/supabase/migrations/20260702_daily_metrics.sql)
+- [`nexquant/NexQuant_Web_App/src/components/ui/MetricsGrid.tsx`](nexquant/NexQuant_Web_App/src/components/ui/MetricsGrid.tsx) (affichage grille KPIs)
+- [`nexquant/NexQuant_Web_App/src/components/ui/SharpeRatioCard.tsx`](nexquant/NexQuant_Web_App/src/components/ui/SharpeRatioCard.tsx) (Sharpe annuel glissant)
+- [`nexquant/NexQuant_Web_App/src/components/ui/EquityCurveAdvanced.tsx`](nexquant/NexQuant_Web_App/src/components/ui/EquityCurveAdvanced.tsx) (courbe avec zones de drawdown)
+- [`nexquant/NexQuant_Web_App/src/components/ui/TradeHistoryTable.tsx`](nexquant/NexQuant_Web_App/src/components/ui/TradeHistoryTable.tsx) (historique paginé/filtrable)
+- [`nexquant/NexQuant_Web_App/tests/metrics.test.ts`](nexquant/NexQuant_Web_App/tests/metrics.test.ts) (tests de validation)
+- [`nexquant/NexQuant_Web_App/tests/fixtures/sharpe_test_data.csv`](nexquant/NexQuant_Web_App/tests/fixtures/sharpe_test_data.csv) (fixtures CSV)
+- [`nexquant/NexQuant_Web_App/supabase/migrations/20260702_daily_metrics.sql`](nexquant/NexQuant_Web_App/supabase/migrations/20260702_daily_metrics.sql) (historique quotidien de l'équité)
 
 **Fichiers à modifier :**
 - [`nexquant/NexQuant_Web_App/src/lib/nexquant.functions.ts`](nexquant/NexQuant_Web_App/src/lib/nexquant.functions.ts) — ajouter `getMetrics()`, `getTradeHistory()`
-- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx) — remplacer KPIs simples par MetricsGrid
+- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx) — remplacer les KPIs simples par `MetricsGrid` et `EquityCurveAdvanced`
 
 **Tâches :**
-1. Fonction SQL `calculate_daily_metrics(user_id)`
-2. Fonction serveur `getMetrics()` : Sharpe 30/60/90d, PF, WinRate
-3. Fonction serveur `getTradeHistory()` : pagination + filtres
-4. Remplacer les KPIs du dashboard par MetricsGrid
-5. **Tests unitaires avec fixtures CSV** (comparer résultats vs numpy/excel)
-6. Remplacer `EquityCurveAdvanced` avec zone de drawdown
+1. Créer la fonction SQL `calculate_daily_metrics(user_id)` pour enregistrer l'équité historique quotidiennement
+2. Implémenter le calcul TypeScript du Sharpe Ratio annualisé glissant (30/60/90 jours), Profit Factor et Win Rate
+3. Créer des routes d'API pour paginer l'historique des trades clos
+4. **Validation par Tests Unitaires :** Comparer les résultats du Sharpe Ratio TS avec les résultats Python/numpy grâce à la fixture CSV
+5. Intégrer les zones de drawdown sur la courbe d'équité
 
 **Acceptance :**
-- Dashboard affiche Sharpe, WinRate, PF, Drawdown mis à jour en temps réel
-- Les calculs sont validés par tests unitaires avec données de référence
+- Le dashboard affiche le Sharpe Ratio, Win Rate, Profit Factor et Drawdown validés
+- Les tests unitaires passent et valident la précision des calculs par rapport au référentiel Python
 
 ---
 
-### Semaine 2b : Pilotage Bidirectionnel (P3)
+### Semaine 3 : Pilotage Bidirectionnel (P3)
 
-**Objectif :** Contrôler le bot à distance (start/stop, paramètres).
-
-**[RÉVISION]** Le toggle start/stop existe déjà côté web. L'effort ici est :
-1. Côté bot Python : consommer `is_running` du polling config pour démarrer/arrêter la boucle
-2. Côté bot Python : optionnellement, souscrire au Realtime Supabase
-3. Côté web : améliorer l'UX existant (feedback, état)
-
-**Fichiers à créer :**
-- [`nexquant/NexQuant_Web_App/src/components/ui/StartStopButton.tsx`](nexquant/NexQuant_Web_App/src/components/ui/StartStopButton.tsx) (extraction du composant depuis dashboard.tsx)
-- [`nexquant/NexQuant_Web_App/src/hooks/useBotRealtime.ts`](nexquant/NexQuant_Web_App/src/hooks/useBotRealtime.ts) (Supabase Realtime hook — optionnel)
+**Objectif :** Contrôler le bot en temps réel à distance (start/stop distant et modification de risque).
 
 **Fichiers à modifier (Bot Python) :**
-- [`superbot/telemetry.py`](superbot/telemetry.py) — ajouter Realtime subscription (optionnel) + améliorer `sync_config()`
-- [`superbot/main.py`](superbot/main.py) — utiliser `is_running` du config pull pour la boucle de trading
+- [`superbot/telemetry.py`](superbot/telemetry.py) — améliorer `sync_config()` pour lire l'état `is_running` et les paramètres à chaud
+- [`superbot/main.py`](superbot/main.py) — utiliser `is_running` du polling config pour suspendre/reprendre la boucle de trading principal
 
 **Fichiers à modifier (Web) :**
-- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx) — extraire le bouton start/stop et améliorer le feedback utilisateur
+- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx) — bouton start/stop distant avec gestion d'état de chargement (feedback UX)
+- [`nexquant/NexQuant_Web_App/src/hooks/useBotRealtime.ts`](nexquant/NexQuant_Web_App/src/hooks/useBotRealtime.ts) — souscription optionnelle Supabase Realtime sous le flag `realtime_enabled`
 
 **Tâches :**
-1. Bot Python : utiliser `config.is_running` du polling pour contrôler la boucle
-2. Bot Python : (optionnel) souscrire aux changements Realtime sur `bot_config`
-3. Bot Python : appliquer `risk_pct`, `score_min` au prochain cycle
-4. Web : extraire et améliorer le composant start/stop
-5. **Mécanisme primaire : polling 30s garantit que le bot réagit en < 30s**
-6. **Mécanisme secondaire : Realtime réduit la latence à < 1s si fonctionnel**
+1. Configurer la boucle du bot Python pour interroger toutes les 30s (polling) l'API `/api/public/config`
+2. Si `is_running` passe à `false`, suspendre l'envoi de nouveaux ordres et vider les files de traitement en cours
+3. Mettre en place la table `feature_flags` et le flag `realtime_enabled` pour activer Supabase Realtime côté client si désiré
+4. Appliquer immédiatement les modifications de `risk_pct` et `score_min` lors du prochain cycle d'évaluation du bot
 
 **Acceptance :**
-- Bouton Start/Stop sur le web arrête/repart le bot en moins de 30s (polling) ou 5s (Realtime)
-- Modification `risk_pct` prise en compte au cycle suivant
-- L'état du bot est correctement réflété dans le dashboard
+- Le bouton Web toggle met à jour Supabase et le bot s'arrête/reprend sous 30 secondes (polling) ou < 5 secondes (si Realtime activé)
+- L'état de marche/arrêt du bot local est affiché sur le Dashboard Web
 
 ---
 
-### Semaine 3 : Stratégies Web, Webhook & Auto-Update (P4+P5)
+### Semaine 4 : Stratégies Web & Webhook (P4)
 
-**Objectif :** Gérer les stratégies depuis le web et mettre à jour le bot.
-
-**Fichiers à créer (Web) :**
-- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/strategies.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/strategies.tsx)
-- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/risk.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/risk.tsx)
-- [`nexquant/NexQuant_Web_App/src/components/ui/StrategyCard.tsx`](nexquant/NexQuant_Web_App/src/components/ui/StrategyCard.tsx)
-- [`nexquant/NexQuant_Web_App/src/components/ui/StrategyConfigForm.tsx`](nexquant/NexQuant_Web_App/src/components/ui/StrategyConfigForm.tsx)
-- [`nexquant/NexQuant_Web_App/src/components/ui/RiskConfigForm.tsx`](nexquant/NexQuant_Web_App/src/components/ui/RiskConfigForm.tsx)
-- [`nexquant/NexQuant_Web_App/src/components/ui/WebhookSetup.tsx`](nexquant/NexQuant_Web_App/src/components/ui/WebhookSetup.tsx)
-- [`nexquant/NexQuant_Web_App/src/components/ui/UpdateBanner.tsx`](nexquant/NexQuant_Web_App/src/components/ui/UpdateBanner.tsx)
-
-**Fichiers à modifier (Web) :**
-- [`nexquant/NexQuant_Web_App/src/lib/nexquant.functions.ts`](nexquant/NexQuant_Web_App/src/lib/nexquant.functions.ts) — ajouter CRUD strategies
-- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx) — intégrer UpdateBanner
-
-**Fichiers à créer (Bot Python) :**
-- [`superbot/updater.py`](superbot/updater.py) (module de mise à jour automatique)
-
-**Fichiers à modifier (Bot Python) :**
-- [`superbot/main.py`](superbot/main.py) — appeler updater au démarrage
-- [`superbot/telemetry.py`](superbot/telemetry.py) — vérif version + download (le champ `update` existe déjà dans la réponse config)
-
-**Tâches Stratégies :**
-1. Table `strategies` + RLS policies
-2. Page `/strategies` avec liste et création
-3. Formulaire paramètres par type stratégie
-4. API serveur CRUD strategies
-5. Page `/webhook` avec URL et test
-
-**Tâches Auto-Update :**
-1. Module `updater.py` : vérifier version au démarrage
-2. Download binaire depuis `app_versions.download_url`
-3. **Vérification d'intégrité** (checksum SHA-256)
-4. Remplacer executable + redémarrer
-5. UI : UpdateBanner (le champ `update.available` existe déjà dans `config.ts`)
-
-**Tâches Risk Config :**
-1. Page `/risk` avec config complète
-2. RiskConfigForm lié à `bot_config` (table existante)
-3. Validation côté serveur des limites
-
----
-
-### Semaine 4 : Notifications, PWA, QA & Documentation (P6+P7)
-
-**Objectif :** Finaliser les features et préparer le lancement.
+**Objectif :** Permettre le CRUD des stratégies depuis le web et la réception de signaux externes (TradingView).
 
 **Fichiers à créer :**
-- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/notifications.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/notifications.tsx)
-- [`nexquant/NexQuant_Web_App/src/lib/notifications.ts`](nexquant/NexQuant_Web_App/src/lib/notifications.ts) (service email Resend)
-- [`nexquant/NexQuant_Web_App/tests/metrics.test.ts`](nexquant/NexQuant_Web_App/tests/metrics.test.ts) (si pas fait en S2a)
-- [`nexquant/NexQuant_Web_App/tests/fixtures/sharpe_test_data.csv`](nexquant/NexQuant_Web_App/tests/fixtures/sharpe_test_data.csv)
-- [`nexquant/NexQuant_Web_App/tests/stripe.test.ts`](nexquant/NexQuant_Web_App/tests/stripe.test.ts)
-- [`nexquant/NexQuant_Web_App/tests/ingest-security.test.ts`](nexquant/NexQuant_Web_App/tests/ingest-security.test.ts)
-- [`nexquant/NexQuant_Web_App/supabase/migrations/20260704_notifications.sql`](nexquant/NexQuant_Web_App/supabase/migrations/20260704_notifications.sql)
-- [`nexquant/NexQuant_Web_App/src/routes/legal/privacy.tsx`](nexquant/NexQuant_Web_App/src/routes/legal/privacy.tsx)
-- [`nexquant/NexQuant_Web_App/src/routes/legal/terms.tsx`](nexquant/NexQuant_Web_App/src/routes/legal/terms.tsx)
+- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/strategies.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/strategies.tsx) (page de gestion)
+- [`nexquant/NexQuant_Web_App/src/components/ui/StrategyCard.tsx`](nexquant/NexQuant_Web_App/src/components/ui/StrategyCard.tsx) (composant carte stratégie)
+- [`nexquant/NexQuant_Web_App/src/components/ui/StrategyConfigForm.tsx`](nexquant/NexQuant_Web_App/src/components/ui/StrategyConfigForm.tsx) (formulaire dynamique de configuration)
+- [`nexquant/NexQuant_Web_App/src/components/ui/WebhookSetup.tsx`](nexquant/NexQuant_Web_App/src/components/ui/WebhookSetup.tsx) (instructions et clé webhook TradingView)
+- [`nexquant/NexQuant_Web_App/supabase/migrations/20260703_strategies.sql`](nexquant/NexQuant_Web_App/supabase/migrations/20260703_strategies.sql)
 
-**Fichiers à créer (PWA — Bonus) :**
-- [`nexquant/NexQuant_Web_App/public/manifest.json`](nexquant/NexQuant_Web_App/public/manifest.json)
-- [`nexquant/NexQuant_Web_App/public/sw.js`](nexquant/NexQuant_Web_App/public/sw.js) (service worker simple)
+**Tâches :**
+1. Créer la table `strategies` (user_id, name, type, params JSONB, is_active)
+2. Développer l'interface d'administration des stratégies (CRUD avec formulaire de paramètres dynamiques selon le type d'indicateur)
+3. Implémenter l'endpoint `/api/public/webhook` pour recevoir les alertes JSON formatées par TradingView (vérification par clé secrète générée)
+4. Lier les stratégies actives aux configurations envoyées au bot Python via `/api/public/config`
+
+**Acceptance :**
+- L'utilisateur peut ajouter, activer et paramétrer une stratégie EMA/RSI sur le dashboard
+- Le bot Python charge les paramètres de la stratégie active lors de sa synchronisation
+
+---
+
+### Semaine 5 : Auto-Update Bot (P5)
+
+**Objectif :** Déployer et automatiser la mise à jour du bot client Python.
+
+**Fichiers à créer :**
+- [`superbot/updater.py`](superbot/updater.py) (module autonome de mise à jour)
+- [`nexquant/NexQuant_Web_App/src/components/ui/UpdateBanner.tsx`](nexquant/NexQuant_Web_App/src/components/ui/UpdateBanner.tsx) (bannière de mise à jour web)
 
 **Fichiers à modifier :**
-- [`nexquant/NexQuant_Web_App/src/routes/__root.tsx`](nexquant/NexQuant_Web_App/src/routes/__root.tsx) (PWA link tags + meta)
-- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/dashboard.tsx) (polissage final)
+- [`superbot/main.py`](superbot/main.py) — exécuter la vérification `updater.py` au démarrage du programme
+- [`superbot/telemetry.py`](superbot/telemetry.py) — télécharger le binaire et valider son intégrité
 
-**Tâches Notifications :**
-1. Intégration Resend pour envoi emails
-2. Notifications : trade TP/SL, daily loss, license expiry
-3. Daily digest email (P&L, positions, métriques)
-4. Table `notifications` + `notification_preferences`
-5. Page `/notifications` avec configuration
+**Tâches :**
+1. **Distribution :** Publier les binaires compilés sur les GitHub Releases du projet.
+2. **Intégrité :** Implémenter la vérification du hash SHA-256 du binaire téléchargé par rapport au hash fourni par l'API config.
+3. **Signature (Stratégie progressive) :**
+   - *Phase 1 (MVP) :* Distribution sans signature commerciale (les warnings de l'OS type Windows SmartScreen sont acceptés ; notice d'installation fournie).
+   - *Phase 2 :* Intégration de la signature Authenticode/Apple via GitHub Actions.
+4. Développer le remplacement à chaud du fichier exécutable et le redémarrage automatique du processus principal.
 
-**Tâches PWA (Bonus) :**
-1. `manifest.json` avec icônes et theme color
-2. Service worker pour cache offline basique
-3. Installation sur écran accueil mobile
+**Acceptance :**
+- Le bot détecte une version supérieure, télécharge le binaire depuis les GitHub Releases, vérifie son SHA-256, l'applique et redémarre de manière autonome.
 
-**Tâches QA :**
-1. Tests unitaires métriques (valider Sharpe vs Excel avec fixtures CSV)
-2. Tests intégration Stripe webhook (signature, idempotency)
-3. Tests sécurité ingest (HMAC, rate limiting)
-4. Pages légales (privacy, terms)
-5. Documentation API
-6. UI polissage final
+---
+
+### Semaine 6 : Notifications, RGPD, QA & Lancement (P6 + RGPD + QA)
+
+**Objectif :** Mettre l'application en conformité RGPD, ajouter les notifications de rétention et finaliser la QA.
+
+**Fichiers à créer :**
+- [`nexquant/NexQuant_Web_App/src/routes/_authenticated/notifications.tsx`](nexquant/NexQuant_Web_App/src/routes/_authenticated/notifications.tsx) (préférences et historique)
+- [`nexquant/NexQuant_Web_App/src/lib/notifications.ts`](nexquant/NexQuant_Web_App/src/lib/notifications.ts) (intégration service email Resend)
+- [`nexquant/NexQuant_Web_App/src/routes/legal/privacy.tsx`](nexquant/NexQuant_Web_App/src/routes/legal/privacy.tsx) (Politique de Confidentialité)
+- [`nexquant/NexQuant_Web_App/src/routes/legal/terms.tsx`](nexquant/NexQuant_Web_App/src/routes/legal/terms.tsx) (ToS)
+- [`nexquant/NexQuant_Web_App/tests/gdpr.test.ts`](nexquant/NexQuant_Web_App/tests/gdpr.test.ts)
+- [`nexquant/NexQuant_Web_App/supabase/migrations/20260706_notifications_gdpr.sql`](nexquant/NexQuant_Web_App/supabase/migrations/20260706_notifications_gdpr.sql)
+
+**Tâches :**
+1. **Conformité RGPD :**
+   - Rédiger la page Privacy Policy (via iubenda.com).
+   - Ajouter une bannière de consentement cookies sur le site.
+   - Créer l'API `DELETE /api/user/account` (droit à l'effacement complet des données et clés API brokers).
+   - Créer l'API `GET /api/user/export-data` pour exporter les données utilisateur au format JSON (GDPR Art. 20).
+   - Mettre en place un cron de purge automatique des logs système datant de plus de 90 jours (durée de rétention).
+2. **Notifications :** Intégrer Resend pour notifier par courriel l'utilisateur lors de déclenchements de TP/SL, drawdown critique ou fin de validité de licence.
+3. **QA & Sécurité :** Tests d'intégration sur les webhooks Lemon Squeezy, vérification de la robustesse des signatures HMAC d'ingest, et audits finaux.
+
+**Acceptance :**
+- L'utilisateur peut supprimer son compte et exporter ses données conformément au RGPD
+- Les courriels de notification sont envoyés correctement via Resend
+- Les tests de sécurité et de conformité passent avec succès
 
 ---
 
@@ -534,14 +509,33 @@ Qualité de vie, rétention, et préparation au lancement.
 ### 7.1 Points de Validation
 
 **Avant implémentation (semaine 0) :**
-- [ ] Valider ce plan révisé avec l'équipe
+- [ ] Valider ce plan révisé avec l'équipe (6 semaines de timeline)
 - [ ] Confirmer les tiers de prix (Starter 29$/Pro 79$/Pro 199$)
-- [ ] **Décider Stripe Tax (addon) vs Lemon Squeezy (TVA incluse)**
+- [x] **Décider Stripe Tax (addon) vs Lemon Squeezy (TVA incluse)** $\rightarrow$ *Décision : Lemon Squeezy choisi pour simplifier la TVA et la comptabilité.*
 - [ ] Valider le modèle de distribution (client distribué vs cloud)
-- [ ] Vérifier la conformité légale (ToS, Privacy)
-- [ ] **Valider la stratégie de migration des utilisateurs existants**
+- [ ] Vérifier la conformité légale (ToS, Privacy Policy, cookies)
+- [ ] Valider la stratégie de migration des utilisateurs existants
 
-**Après semaine 1 :**
+**Après semaine 1 (Lemon Squeezy) :**
+- [ ] Demo Lemon Squeezy Checkout + webhook fonctionnel
+- [ ] Vérifier que le gating bloque bien un bot sans abonnement (avec feature flag `lemon_squeezy_enabled`)
+
+**Après semaine 2 (Métriques) :**
+- [ ] Demo des métriques (Sharpe, PF, WinRate) avec données réelles et passage des tests CSV
+
+**Après semaine 3 (Pilotage) :**
+- [ ] Demo du contrôle start/stop à distance via polling et Supabase Realtime
+
+**Après semaine 4 (Stratégies) :**
+- [ ] Demo des stratégies configurables et test du webhook TradingView
+
+**Après semaine 5 (Auto-Update) :**
+- [ ] Demo de l'auto-update avec validation SHA-256 (binaire non-signé Phase 1)
+
+**Après semaine 6 (Notifications, RGPD & QA) :**
+- [ ] Demo de la suppression de compte, de l'export des données et du bandeau cookies (RGPD)
+- [ ] Demo complète de toutes les features
+- [ ] Revue de code, audit de sécurité et approbation finale pour déploiement**Après semaine 1 :**
 - [ ] Demo Stripe Checkout + webhook fonctionnel
 - [ ] Vérifier que le gating bloque bien un bot sans abonnement (déjà testable avec `trial_end` expiré)
 
@@ -606,9 +600,9 @@ Qualité de vie, rétention, et préparation au lancement.
 ### 8.3 Variables d'Environnement
 
 **Nouvelles variables nécessaires :**
-- `STRIPE_SECRET_KEY` (clé Stripe serveur)
-- `STRIPE_WEBHOOK_SECRET` (signature webhook)
-- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (frontend)
+- `LEMON_SQUEEZY_API_KEY` (clé d'API Lemon Squeezy serveur)
+- `LEMON_SQUEEZY_WEBHOOK_SECRET` (signature de validation du webhook)
+- `LEMON_SQUEEZY_STORE_ID` (identifiant unique de la boutique)
 - `NEXT_PUBLIC_APP_URL` (URL de l'application)
 - `RESEND_API_KEY` (envoi emails)
 
@@ -628,12 +622,14 @@ Qualité de vie, rétention, et préparation au lancement.
 - Flux d'authentification
 
 **API :**
-- `POST /api/payment/create-checkout` : crée une session Stripe
-- `POST /api/payment/webhook` : reçoit événements Stripe
+- `POST /api/payment/create-checkout` : crée une session de checkout Lemon Squeezy
+- `POST /api/payment/webhook` : reçoit les événements de webhook Lemon Squeezy
 - `GET /api/analytics/metrics` : retourne les KPIs calculés
 - `GET /api/analytics/trades` : historique paginé
 - `GET/POST /api/strategies` : CRUD strategies
 - `POST /api/notifications/preferences` : maj préférences
+- `DELETE /api/user/account` : suppression de compte et des clés brokers (RGPD)
+- `GET /api/user/export-data` : export des données de profil et de trades en JSON (RGPD)
 
 ### 9.2 Guides
 
@@ -752,14 +748,14 @@ export interface RiskSettings {
 **[RÉVISION]** Les migrations suivantes sont **nouvelles** — ne pas dupliquer les tables déjà créées par `20260627105700_commercial_features.sql`.
 
 ```sql
--- Migration 4: Subscriptions (Stripe)
+-- Migration 4: Subscriptions (Lemon Squeezy) & Feature Flags
 CREATE TABLE public.subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  stripe_customer_id TEXT,
-  stripe_subscription_id TEXT,
+  lemon_squeezy_customer_id TEXT,
+  lemon_squeezy_subscription_id TEXT,
   tier TEXT NOT NULL DEFAULT 'starter',
-  status TEXT NOT NULL DEFAULT 'incomplete',
+  status TEXT NOT NULL DEFAULT 'unpaid',
   current_period_start TIMESTAMPTZ,
   current_period_end TIMESTAMPTZ,
   cancel_at_period_end BOOLEAN DEFAULT false,
@@ -767,6 +763,20 @@ CREATE TABLE public.subscriptions (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE UNIQUE INDEX idx_subscriptions_user ON public.subscriptions(user_id);
+
+CREATE TABLE public.feature_flags (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT UNIQUE NOT NULL,
+  description TEXT,
+  is_enabled BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Seed feature flags par défaut
+INSERT INTO public.feature_flags (name, description, is_enabled) VALUES
+  ('lemon_squeezy_enabled', 'Activer la vérification des abonnements Lemon Squeezy pour le gating', false),
+  ('realtime_enabled', 'Activer la synchronisation Realtime du bot via Supabase Realtime', false);
 
 -- Migration 5: Daily Metrics & Strategies
 CREATE TABLE public.daily_metrics (
@@ -815,12 +825,12 @@ CREATE TABLE public.notification_preferences (
 
 ### 10.3 GitHub Issues (Révisés — Reflétant l'Existant)
 
-**Issue 1: Intégration Stripe**
+**Issue 1: Intégration Lemon Squeezy**
 - Labels: `Phase-2`, `payment`, `P1`
 - **Prérequis :** La table `profiles` a déjà `trial_end` et `ingest_token`. Les endpoints ingest/config existent déjà.
-- Tâches: Checkout session, webhook, subscription gating (modifier ingest.ts + config.ts), UI billing
+- Tâches: Checkout session Lemon Squeezy, traitement du webhook (created, updated, cancelled), subscription gating (modifier ingest.ts + config.ts), UI billing.
 - **Fichiers impactés :** voir Semaine 1
-- Definition of Done: User peut s'abonner, bot bloqué si expiré
+- Definition of Done: L'utilisateur peut s'abonner, la TVA est gérée de manière transparente, et le bot est bloqué si l'abonnement expire (sous condition du flag `lemon_squeezy_enabled`).
 
 **Issue 2: Métriques avancées**
 - Labels: `Phase-2`, `analytics`, `P2`
@@ -842,23 +852,23 @@ CREATE TABLE public.notification_preferences (
 **Issue 5: Auto-update bot**
 - Labels: `Phase-2`, `updater`, `P5`
 - **Prérequis :** Table `app_versions` existe déjà. Le champ `update` est déjà retourné par config.ts.
-- Tâches: `updater.py`, téléchargement, remplacement, restart
-- Definition of Done: Bot se met à jour automatiquement
+- Tâches: `updater.py` autonome, téléchargement via GitHub Releases, validation SHA-256, Phase 1 (binaire non-signé) et Phase 2 (signature Authenticode/Apple via Actions).
+- Definition of Done: Le bot télécharge le binaire intègre depuis GitHub Releases et redémarre avec succès.
 
-**Issue 6: Notifications**
-- Labels: `Phase-2`, `notifications`, `P6`
-- Tâches: Emails Resend, table notifications, page /notifications
-- Definition of Done: User reçoit notifications email + in-app
+**Issue 6: Notifications & RGPD**
+- Labels: `Phase-2`, `notifications`, `P6`, `GDPR`
+- Tâches: Emails Resend, tables notifications/preferences, page de politique de confidentialité (iubenda), bandeau de cookies, route `DELETE /api/user/account` (effacement), route `GET /api/user/export-data` (export), purge des logs techniques > 90 jours.
+- Definition of Done: L'utilisateur est notifié et dispose d'un contrôle total de ses données personnelles (exportation et effacement) conformément au RGPD.
 
 **Issue 7: PWA (Bonus)**
 - Labels: `Phase-2`, `PWA`, `P7`
-- Tâches: manifest.json, service worker simple
-- Definition of Done: User peut installer l'app sur mobile
+- Tâches: manifest.json, service worker simple (repoussé en v1.1/v2).
+- Definition of Done: Livré comme bonus hors scope v1.
 
 **Issue 8: QA et pré-lancement**
-- Labels: `Phase-2`, `QA`, `P5`
-- Tâches: Tests (métriques, Stripe, sécurité), documentation, pages légales, polissage UI
-- Definition of Done: Tout est prêt pour le déploiement
+- Labels: `Phase-2`, `QA`
+- Tâches: Tests (métriques Sharpe vs Excel, Lemon Squeezy webhook signature, sécurité ingest), documentation, pages ToS/Privacy, polissage UI.
+- Definition of Done: Tous les tests unitaires et de sécurité passent, et les pages légales sont en ligne.
 
 ### 10.4 Arborescence des Fichiers (Révisée — Chemins Corrects)
 
@@ -909,16 +919,16 @@ superbot/
   updater.py                  [NOUVEAU]
 ```
 
-### 10.5 Priorité des Fonctionnalités (Révisée)
+### 10.5 Priorité des Fonctionnalités (Révisée — 6 Semaines)
 
 ```
-P1 — Semaine 1   : Paiement Stripe (indispensable au business)
-P2 — Semaine 2a  : Métriques (les users doivent voir les perfs)
-P3 — Semaine 2b  : Pilotage bidirectionnel (valeur SaaS)
-P4 — Semaine 3   : Stratégies web (valeur SaaS)
-P5 — Semaine 3   : Auto-update + Notifs (qualité de vie)
-P6 — Semaine 4   : Notifications email + in-app (rétention)
-P7 — Semaine 4   : PWA (bonus)
+P1 — Semaine 1 : Paiement Lemon Squeezy (gestion TVA européenne)
+P2 — Semaine 2 : Métriques & Analytics (performance quantitative)
+P3 — Semaine 3 : Pilotage bidirectionnel (start/stop via config polling)
+P4 — Semaine 4 : Stratégies web & Webhooks TradingView
+P5 — Semaine 5 : Auto-update bot (distribution GitHub Releases)
+P6 — Semaine 6 : Notifications, Conformité RGPD, QA & Lancement
+P7 — Post-v1   : PWA (PWA repoussée en v1.1/v2)
 ```
 
 ---
@@ -946,10 +956,15 @@ Pour éviter de bloquer des utilisateurs entre le déploiement Stripe et l'expir
 ### Logique de gating modifiée (ingest.ts + config.ts)
 
 ```typescript
+// Si le flag feature_flags.lemon_squeezy_enabled est actif, appliquer la vérification d'abonnement
 const isExpired = !isAdmin && (
-  (profile.trial_end && new Date() > new Date(profile.trial_end)
-    && (!subscription || subscription.status !== 'active'))
-  || (subscription && subscription.status === 'expired')
+  lemonSqueezyEnabled ? (
+    (profile.trial_end && new Date() > new Date(profile.trial_end)
+      && (!subscription || subscription.status !== 'active'))
+    || (subscription && subscription.status === 'expired')
+  ) : (
+    profile.trial_end && new Date() > new Date(profile.trial_end)
+  )
 );
 ```
 
@@ -1002,30 +1017,30 @@ describe('Sharpe Ratio', () => {
 
 | Risque | Impact | Mitigation |
 |--------|--------|------------|
-| **TVA européenne** | Stripe ne gère pas la TVA automatiquement | Évaluer Stripe Tax (addon) ou Lemon Squeezy avant la Semaine 1 |
-| **Un seul développeur** | Semaine 2 originale trop chargée | Scinder en 2a + 2b comme proposé |
-| **Pas de feature flags** | Migration Stripe binaire risquée | Ajouter `feature_flags` table + flag `stripe_enabled` pour activation progressive |
-| **Monitoring Stripe** | Webhooks silencieux pendant des heures | Ajouter alerte admin si pas de webhook reçu en 24h |
-| **Corruption binaire auto-update** | Bot cassé après mise à jour | Checksum SHA-256 + rollback automatique si échec |
-| **Conflit PWA + SSR** | Service worker instable avec TanStack Start | PWA en bonus, service worker minimal (cache des assets statiques uniquement) |
+| **TVA européenne** | Stripe Tax trop complexe comptablement | Choix définitif de Lemon Squeezy comme Merchant of Record (MoR) |
+| **Un seul développeur** | Surcharge de travail et retards de livraison | Passage du plan de 4 à 6 semaines, simplification du scope v1 (PWA post-v1) |
+| **Pas de feature flags** | Lancement de fonctionnalités critiques risqué | Table `feature_flags` intégrée pour activer/désactiver Lemon Squeezy ou Realtime à chaud |
+| **Monitoring Webhook** | Webhooks de paiement silencieux pendant des heures | Alertes admin configurées si aucun webhook reçu en 24h |
+| **Corruption binaire auto-update** | Bot hors service suite à une mauvaise mise à jour | Checksum SHA-256 vérifié et conservation de la version précédente pour rollback |
+| **Signature de binaire updater** | Blocage par Defender ou Gatekeeper | Phase 1 (MVP) : non-signé avec guide d'aide ; Phase 2 : signature automatique avec GitHub Actions |
+| **Conformité légale / RGPD** | Non-conformité avec réglementation européenne | Bandeau de consentement, Privacy Policy (iubenda), routes d'effacement complet et d'exportation |
 
 ---
 
 ## Conclusion
 
-Ce plan révisé corrige les incohérences identifiées dans la v1 :
+Ce plan révisé intègre l'ensemble des recommandations d'amélioration identifiées :
 
-1. ✅ **Reconnaissance de l'existant** — migrations, endpoints, dashboard, bot télémetry
-2. ✅ **Chemins de fichiers réels** — `nexquant/NexQuant_Web_App/src/` et `superbot/`
-3. ✅ **Semaine 2 scindée** — métriques (2a) + pilotage (2b)
-4. ✅ **Architecture réaliste** — polling comme mécanisme primaire, Realtime optionnel
-5. ✅ **Stratégie de migration** — fenêtre de grâce de 7 jours
-6. ✅ **Stratégie de test** — fixtures CSV pour validation des métriques
-7. ✅ **PWA en bonus** — priorité basse, pas de blocage
-8. ✅ **Risques identifiés** — TVA, goulot développeur unique, feature flags
+1. ✅ **Décision Bloquante Monétisation** — Choix de Lemon Squeezy (MoR) pour s'affranchir de la gestion comptable de la TVA européenne.
+2. ✅ **Conformité RGPD** — Inclusion de la politique de confidentialité, du consentement des cookies, du droit à l'effacement et de la portabilité des données.
+3. ✅ **Clarification MT5** — MetaTrader 5 est officiellement qualifié de broker expérimental / non-officiel dans la stack.
+4. ✅ **Distribution de l'Auto-update** — Distribution documentée via GitHub Releases (avertissement de signature Phase 1, signature automatisée Phase 2).
+5. ✅ **Timeline Réaliste** — Extension à 6 semaines pour garantir la faisabilité par un développeur unique.
+6. ✅ **Feature Flags Formalisés** — Modèle SQL et API configurés avec des flags pour un déploiement sécurisé.
+7. ✅ **Broker Flexible Clarifié** — La connexion à un broker flexible arbitraire est officiellement reportée en phase v3.
 
-**Prochaine étape :** Valider ce plan révisé avec les stakeholders, confirmer Stripe vs Lemon Squeezy, puis commencer l'implémentation Semaine 1 (Stripe).
+**Prochaine étape :** Valider ce plan révisé avec les stakeholders et commencer l'implémentation Semaine 1 (Lemon Squeezy).
 
 ---
 
-*Document révisé le 27 juin 2026 — NexQuant Phase 2 Development Plan (Révision v2)*
+*Document révisé le 28 juin 2026 — NexQuant Phase 2 Development Plan (Révision v2)*

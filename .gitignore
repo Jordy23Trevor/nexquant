@@ -44,3 +44,8 @@ dist-ssr/
 .dev.vars
 .lovable/
 
+# Livres et documents volumineux
+*.pdf
+*.epub
+
+

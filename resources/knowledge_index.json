@@ -1,348 +1,3606 @@
 {
-  "version": 1,
-  "updated_at": "2026-06-21T22:21:21.886102",
-  "books": {
-    "Bob Volman - Forex Price Action Scalping.pdf": {
-      "hash": "6b12db01c9333a62806e05e0ae387e8c",
-      "processed_at": "2026-06-21T22:19:02.627869",
-      "rules_extracted": 18,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Bob Volman - Forex Price Action Scalping.pdf"
-    },
-    "Brett N. Steenbarger - Trading Psychology 2.0.pdf": {
-      "hash": "4aa196afc41d371697330ec0ebcee120",
-      "processed_at": "2026-06-21T22:19:24.573542",
-      "rules_extracted": 29,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Brett N. Steenbarger - Trading Psychology 2.0.pdf"
-    },
-    "Chris Burniske - Cryptoassets.pdf": {
-      "hash": "5068257866adc4fd3be993192ee3618d",
-      "processed_at": "2026-06-21T22:20:04.577738",
-      "rules_extracted": 29,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Chris Burniske - Cryptoassets.pdf"
-    },
-    "Elder - Vivre du Trading.pdf": {
-      "hash": "b77232725684c72ff8cbb6664aa34197",
-      "processed_at": "2026-06-21T22:20:22.719818",
-      "rules_extracted": 28,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Elder - Vivre du Trading.pdf"
-    },
-    "Ernest Chan - Algorithmic Trading.pdf": {
-      "hash": "e4d660df1c1a75e8676a28ff4f852fa7",
-      "processed_at": "2026-06-21T22:20:29.999071",
-      "rules_extracted": 25,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Ernest Chan - Algorithmic Trading.pdf"
-    },
-    "John J. Murphy - Technical Analysis of the Financial Markets.pdf": {
-      "hash": "6d7d13fe95368476a2b00230b03ff796",
-      "processed_at": "2026-06-21T22:21:04.624615",
-      "rules_extracted": 22,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\John J. Murphy - Technical Analysis of the Financial Markets.pdf"
-    },
-    "Kabbaj - L'Art du Trading.pdf": {
-      "hash": "b77232725684c72ff8cbb6664aa34197",
-      "processed_at": "2026-06-21T22:21:21.812659",
-      "rules_extracted": 28,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Kabbaj - L'Art du Trading.pdf"
-    },
-    "James Montier - The Little Book of Behavioral Investing.txt": {
-      "hash": "92b2536a64826f0538bfaab24c80a724",
-      "processed_at": "2026-06-21T22:21:21.834295",
-      "rules_extracted": 25,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\James Montier - The Little Book of Behavioral Investing.txt"
-    },
-    "ressources_recommandees.txt": {
-      "hash": "80f9967dcfa240d6dcb508f7d0d04ef2",
-      "processed_at": "2026-06-21T22:21:21.841417",
-      "rules_extracted": 18,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\ressources_recommandees.txt"
-    },
-    "Robert Lustig - The Hacking of the American Mind.txt": {
-      "hash": "1c2343d5dee59946f7b9b2bd795247e3",
-      "processed_at": "2026-06-21T22:21:21.885710",
-      "rules_extracted": 25,
-      "path": "C:\\Users\\Pavillon\\Desktop\\nexquant_v2\\nexquant\\resources\\books\\Robert Lustig - The Hacking of the American Mind.txt"
-    }
-  },
+  "version": 2,
+  "updated_at": "2026-06-29T01:16:53.073771",
+  "modules_hash": "67b005d7213344325fa5da69fce4cef4",
+  "books": {},
   "rules": [
     {
-      "id": "elder_triple_screen",
-      "category": "strategy",
-      "rule": "Triple Screen: weekly trend + daily oscillator + intraday entry.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading",
-      "origin": "builtin"
-    },
-    {
-      "id": "elder_2pct_rule",
-      "category": "risk",
-      "rule": "Never risk more than 2% of account equity on a single trade.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading",
-      "origin": "builtin"
-    },
-    {
-      "id": "elder_6pct_rule",
-      "category": "risk",
-      "rule": "Stop trading the month if monthly drawdown exceeds 6%.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading",
-      "origin": "builtin"
-    },
-    {
-      "id": "elder_macd_divergence",
+      "id": "kabbaj_engulfing_confirmation",
+      "level": 1,
       "category": "signal",
-      "rule": "MACD divergence from price is a high-probability reversal signal.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading",
-      "origin": "builtin"
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Price Action",
+      "rule": "An engulfing pattern carries more weight when it occurs at a key structure level AND is accompanied by above-average volume. A bullish engulfing at support on high volume confirms institutional buying. Always require volume confirmation for candlestick patterns.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Volume-confirmed engulfing at structure = institutional confirmation"
+      },
+      "keywords": [
+        "engulfing",
+        "volume",
+        "institutional",
+        "confirmation",
+        "structure"
+      ],
+      "actions": []
     },
     {
-      "id": "elder_force_index",
+      "id": "kabbaj_pin_bar_reversal",
+      "level": 1,
       "category": "signal",
-      "rule": "Force Index (price * volume) confirms trend strength or weakness.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading",
-      "origin": "builtin"
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Price Action",
+      "rule": "A Pin Bar (long shadow, small body) at a key level is a powerful reversal signal. Bullish Pin Bar: long lower shadow at support — price rejected lower prices. Bearish Pin Bar: long upper shadow at resistance — price rejected higher prices. The longer the shadow relative to the body, the stronger the rejection.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.5,
+        "description": "Pin Bar at key level = strong rejection signal, high probability"
+      },
+      "keywords": [
+        "pin bar",
+        "shadow",
+        "body",
+        "rejection",
+        "reversal",
+        "support",
+        "resistance"
+      ],
+      "actions": []
     },
     {
-      "id": "elder_ema_envelope",
+      "id": "kabbaj_rr_minimum_2to1",
+      "level": 1,
+      "category": "risk",
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Gestion des Risques",
+      "rule": "Minimum reward-to-risk ratio of 2:1 on every trade entry. If the nearest logical stop is so far that the target cannot be at least 2x the stop distance, skip the trade. Kabbaj's minimum is 2:1 vs Murphy's 3:1 — use 2:1 as floor, target 3:1.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Minimum R:R filter: 2:1 absolute floor before entry"
+      },
+      "keywords": [
+        "reward",
+        "risk",
+        "2:1",
+        "ratio",
+        "minimum",
+        "target"
+      ],
+      "actions": []
+    },
+    {
+      "id": "kabbaj_squeeze_breakout",
+      "level": 1,
       "category": "signal",
-      "rule": "Price outside EMA envelope signals overbought/oversold conditions.",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading",
-      "origin": "builtin"
-    },
-    {
-      "id": "elder_iron_triangle",
-      "category": "risk",
-      "rule": "Iron Triangle: money management → entries → psychology (in that order).",
-      "author": "Dr. Alexander Elder",
-      "source": "Vivre du Trading",
-      "origin": "builtin"
-    },
-    {
-      "id": "kabbaj_kelly",
-      "category": "sizing",
-      "rule": "Kelly Fraction: size = edge / odds. Use 25% of Kelly (fractional Kelly) to reduce ruin risk.",
+      "book": "L'Art du Trading",
       "author": "Thami Kabbaj",
-      "source": "L'Art du Trading",
-      "origin": "builtin"
+      "source_chapter": "Chapitre - Stratégies de Breakout",
+      "rule": "The Squeeze Breakout: Bollinger Bands narrow to their minimum width (squeeze), price compresses. The directional breakout occurs when price closes clearly outside the Bollinger Bands after the squeeze. Confirm with increasing volume on the breakout bar. Enter on the close of the first bar breaking the band.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 2.0,
+        "description": "Squeeze breakout from BB narrow = Kabbaj signature setup; VOLATILITY_BREAKOUT"
+      },
+      "keywords": [
+        "squeeze",
+        "bollinger",
+        "breakout",
+        "narrow",
+        "width",
+        "close outside"
+      ],
+      "actions": []
     },
     {
-      "id": "kabbaj_rr_minimum",
-      "category": "risk",
-      "rule": "Minimum 2:1 reward-to-risk ratio on every trade entry.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading",
-      "origin": "builtin"
-    },
-    {
-      "id": "kabbaj_partial_tp",
-      "category": "exit",
-      "rule": "Take 50% profit at TP1, let the rest run with a trailing stop.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading",
-      "origin": "builtin"
-    },
-    {
-      "id": "kabbaj_price_action",
+      "id": "murphy_bollinger_band_walks",
+      "level": 1,
       "category": "signal",
-      "rule": "Pure price action patterns (pin bars, engulfing) outperform indicators alone.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading",
-      "origin": "builtin"
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 9 - Bollinger Bands",
+      "rule": "Price can 'walk the band' during strong trends, staying near the upper band in an uptrend or near the lower band in a downtrend. Do not short just because price is at the upper band in a strong trend.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Prevent short signals when price walks upper BB in uptrend"
+      },
+      "keywords": [
+        "bollinger",
+        "walk",
+        "trend",
+        "upper band",
+        "lower band",
+        "strong"
+      ],
+      "actions": []
     },
     {
-      "id": "kabbaj_sector_rotation",
-      "category": "strategy",
-      "rule": "Follow capital rotation between sectors to anticipate trend changes.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading",
-      "origin": "builtin"
-    },
-    {
-      "id": "kabbaj_psychology",
-      "category": "psychology",
-      "rule": "Trading is 90% psychology. Discipline and routine create consistent results.",
-      "author": "Thami Kabbaj",
-      "source": "L'Art du Trading",
-      "origin": "builtin"
-    },
-    {
-      "id": "douglas_probability",
-      "category": "psychology",
-      "rule": "Think in probabilities. Each trade is a unique event within a series.",
-      "author": "Mark Douglas",
-      "source": "Trading in the Zone",
-      "origin": "builtin"
-    },
-    {
-      "id": "douglas_edge",
-      "category": "strategy",
-      "rule": "Define your edge clearly. Execute it mechanically without hesitation.",
-      "author": "Mark Douglas",
-      "source": "Trading in the Zone",
-      "origin": "builtin"
-    },
-    {
-      "id": "douglas_accept_risk",
-      "category": "psychology",
-      "rule": "Accept the risk BEFORE placing the trade. Eliminate hope and fear.",
-      "author": "Mark Douglas",
-      "source": "Trading in the Zone",
-      "origin": "builtin"
-    },
-    {
-      "id": "douglas_consistency",
-      "category": "psychology",
-      "rule": "Consistency comes from executing your edge, not from being right.",
-      "author": "Mark Douglas",
-      "source": "Trading in the Zone",
-      "origin": "builtin"
-    },
-    {
-      "id": "tharp_sqn",
-      "category": "performance",
-      "rule": "System Quality Number (SQN) > 2.5 is good, > 5 is excellent.",
-      "author": "Van Tharp",
-      "source": "Trade Your Way to Financial Freedom",
-      "origin": "builtin"
-    },
-    {
-      "id": "tharp_r_multiple",
-      "category": "risk",
-      "rule": "Express every trade as R-multiples. Expectancy > 0 over a large sample is the goal.",
-      "author": "Van Tharp",
-      "source": "Trade Your Way to Financial Freedom",
-      "origin": "builtin"
-    },
-    {
-      "id": "tharp_position_sizing",
-      "category": "sizing",
-      "rule": "Position sizing is the most critical factor in overall performance.",
-      "author": "Van Tharp",
-      "source": "Trade Your Way to Financial Freedom",
-      "origin": "builtin"
-    },
-    {
-      "id": "tharp_objectives",
-      "category": "strategy",
-      "rule": "Define your objectives before designing your system.",
-      "author": "Van Tharp",
-      "source": "Trade Your Way to Financial Freedom",
-      "origin": "builtin"
-    },
-    {
-      "id": "livermore_trend",
-      "category": "strategy",
-      "rule": "The trend is your friend. Never trade against the primary trend.",
-      "author": "Jesse Livermore",
-      "source": "Reminiscences of a Stock Operator",
-      "origin": "builtin"
-    },
-    {
-      "id": "livermore_pyramiding",
-      "category": "sizing",
-      "rule": "Add to winning positions (pyramid) only when each unit is profitable.",
-      "author": "Jesse Livermore",
-      "source": "Reminiscences of a Stock Operator",
-      "origin": "builtin"
-    },
-    {
-      "id": "livermore_patience",
-      "category": "psychology",
-      "rule": "Sitting tight in a winning trade is harder than entering — do it anyway.",
-      "author": "Jesse Livermore",
-      "source": "Reminiscences of a Stock Operator",
-      "origin": "builtin"
-    },
-    {
-      "id": "livermore_pivot_points",
+      "id": "murphy_bollinger_squeeze",
+      "level": 1,
       "category": "signal",
-      "rule": "Buy at pivotal points where resistance turns support (breakout).",
-      "author": "Jesse Livermore",
-      "source": "Reminiscences of a Stock Operator",
-      "origin": "builtin"
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 9 - Moving Averages & Bollinger Bands",
+      "rule": "Bollinger Band squeeze (narrow bands) indicates low volatility and predicts an upcoming explosive move. The direction of the breakout determines the trade. A squeeze followed by a close outside the band is a high-probability signal.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "BB squeeze detection adds to entry score"
+      },
+      "keywords": [
+        "bollinger",
+        "squeeze",
+        "narrow",
+        "volatility",
+        "breakout",
+        "bands"
+      ],
+      "actions": []
     },
     {
-      "id": "schwager_risk_first",
+      "id": "murphy_candle_doji_indecision",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 12 - Candlestick Charting",
+      "rule": "A doji candle (open ≈ close) indicates indecision and potential trend reversal. At market extremes or after a long trend, doji signals exhaustion. Requires confirmation from the following candle before acting.",
+      "confidence": 0.75,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Doji near extremes adds minor signal; needs next candle confirmation"
+      },
+      "keywords": [
+        "doji",
+        "indecision",
+        "reversal",
+        "exhaustion",
+        "open",
+        "close"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_candle_engulfing",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 12 - Candlestick Charting",
+      "rule": "A bullish engulfing pattern at a support level is a strong reversal signal. A bearish engulfing at resistance confirms selling pressure. The larger the engulfing candle relative to the prior candle, the stronger the signal.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Engulfing pattern near key levels adds to entry score"
+      },
+      "keywords": [
+        "engulfing",
+        "bullish",
+        "bearish",
+        "reversal",
+        "support",
+        "resistance"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_candle_hammer_star",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 12 - Candlestick Charting",
+      "rule": "A hammer at the bottom of a downtrend signals potential reversal. A shooting star at the top of an uptrend signals potential reversal. Long shadow shows rejection of the extreme price level.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Hammer/Shooting star pattern detection"
+      },
+      "keywords": [
+        "hammer",
+        "shooting star",
+        "shadow",
+        "rejection",
+        "reversal",
+        "wick"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_diversification",
+      "level": 1,
       "category": "risk",
-      "rule": "All great traders focus on risk management, not returns.",
-      "author": "Jack Schwager",
-      "source": "Market Wizards",
-      "origin": "builtin"
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 15 - Money Management",
+      "rule": "Do not concentrate all capital in a single market or a single trade. Diversify across uncorrelated markets to reduce portfolio risk. Position sizing should reflect the correlation between open positions.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Portfolio-level diversification rule — reduces per-trade sizing when correlated positions exist"
+      },
+      "keywords": [
+        "diversification",
+        "concentration",
+        "uncorrelated",
+        "portfolio",
+        "position sizing"
+      ],
+      "actions": []
     },
     {
-      "id": "schwager_methodology",
-      "category": "strategy",
-      "rule": "Have a clearly defined methodology. Follow it with discipline.",
-      "author": "Jack Schwager",
-      "source": "Market Wizards",
-      "origin": "builtin"
+      "id": "murphy_higher_highs_lows",
+      "level": 1,
+      "category": "trend",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 4 - Trend Basics",
+      "rule": "An uptrend is defined by a series of higher highs and higher lows. A downtrend is defined by lower highs and lower lows. Breaking this structure signals a potential reversal.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 1.0,
+        "description": "Validate structural trend via HH/HL for long, LH/LL for short"
+      },
+      "keywords": [
+        "higher highs",
+        "lower lows",
+        "structure",
+        "reversal"
+      ],
+      "actions": []
     },
     {
-      "id": "schwager_cut_losses",
-      "category": "exit",
-      "rule": "Cut losses short, let profits run. The asymmetry is essential.",
-      "author": "Jack Schwager",
-      "source": "Market Wizards",
-      "origin": "builtin"
+      "id": "murphy_ma_as_dynamic_support",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 9 - Moving Averages",
+      "rule": "Moving averages act as dynamic support and resistance. In a strong uptrend, pullbacks to the 20 or 50 MA offer low-risk entry points. In a downtrend, rallies to the MA offer short entry points.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Pullback to MA in trend = high probability entry bonus"
+      },
+      "keywords": [
+        "moving average",
+        "dynamic support",
+        "pullback",
+        "entry point"
+      ],
+      "actions": []
     },
     {
-      "id": "schwager_market_type",
-      "category": "strategy",
-      "rule": "Adapt your approach to current market type (trending vs ranging).",
-      "author": "Jack Schwager",
-      "source": "Market Wizards",
-      "origin": "builtin"
+      "id": "murphy_ma_crossover",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 9 - Moving Averages",
+      "rule": "A bullish signal is generated when the shorter-period moving average crosses above the longer-period moving average (golden cross). A bearish signal is the opposite (death cross). The 50-day and 200-day MAs are the most widely watched.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "MA crossover adds to trending score"
+      },
+      "keywords": [
+        "moving average",
+        "crossover",
+        "golden cross",
+        "death cross",
+        "50",
+        "200"
+      ],
+      "actions": []
     },
     {
-      "id": "chan_half_kelly",
-      "category": "sizing",
-      "rule": "Use half-Kelly position sizing to prevent overbetting and parameters estimation errors.",
-      "author": "Ernest Chan",
-      "source": "Algorithmic Trading",
-      "origin": "builtin"
+      "id": "murphy_macd_signal_cross",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+      "rule": "The MACD line crossing above the signal line is a buy signal. Crossing below is a sell signal. Histogram crossing zero line is an earlier but less reliable signal.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "MACD crossover is a core trend entry signal"
+      },
+      "keywords": [
+        "MACD",
+        "signal",
+        "cross",
+        "histogram",
+        "zero line"
+      ],
+      "actions": []
     },
     {
-      "id": "chan_stationarity",
-      "category": "strategy",
-      "rule": "Verify stationarity of the spread (e.g. using the ADF test) before running mean-reversion strategies.",
-      "author": "Ernest Chan",
-      "source": "Algorithmic Trading",
-      "origin": "builtin"
+      "id": "murphy_multi_timeframe_alignment",
+      "level": 1,
+      "category": "filter",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 13 - The Link Between Stocks and Bonds",
+      "rule": "Analysis should always begin with the longer timeframe to establish the primary trend, then move to shorter timeframes for entry timing. Never trade against the higher timeframe trend.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 1.0,
+        "description": "Higher timeframe alignment is a mandatory entry filter (ENFORCE_MULTI_TIMEFRAME)"
+      },
+      "keywords": [
+        "timeframe",
+        "higher timeframe",
+        "alignment",
+        "trend",
+        "entry timing"
+      ],
+      "actions": []
     },
     {
-      "id": "chan_momentum",
-      "category": "strategy",
-      "rule": "Time-series momentum models perform best with lookback periods between 3 to 12 months.",
-      "author": "Ernest Chan",
-      "source": "Algorithmic Trading",
-      "origin": "builtin"
+      "id": "murphy_oscillator_trend_caveat",
+      "level": 1,
+      "category": "filter",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+      "rule": "Oscillators are most useful in non-trending (ranging) markets. In strongly trending markets, overbought and oversold signals can be misleading. Always determine the market regime before relying on oscillator readings.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Suppress oscillator-only signals in TRENDING regime; weight by regime"
+      },
+      "keywords": [
+        "oscillator",
+        "trend",
+        "ranging",
+        "misleading",
+        "regime"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_price_above_ma200",
+      "level": 1,
+      "category": "filter",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 9 - Moving Averages",
+      "rule": "Price above the 200-day moving average indicates a long-term bullish bias. Price below the 200-day MA indicates a bearish bias. Only take longs above the 200 MA, only take shorts below it.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 1.0,
+        "description": "Price vs EMA200 is a mandatory directional filter"
+      },
+      "keywords": [
+        "200 MA",
+        "200-day",
+        "long-term bias",
+        "above",
+        "below"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_reward_risk_ratio",
+      "level": 1,
+      "category": "risk",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 15 - Money Management",
+      "rule": "A minimum reward-to-risk ratio of 3:1 should be targeted. If the potential reward is less than 3 times the risk, the trade should be avoided. This ensures profitable trading even with a 50% win rate.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Minimum R:R filter before entry — Murphy suggests 3:1"
+      },
+      "keywords": [
+        "reward",
+        "risk",
+        "ratio",
+        "3:1",
+        "minimum",
+        "win rate"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_round_numbers",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 6 - Support and Resistance",
+      "rule": "Round numbers tend to act as significant support and resistance levels. Psychologically significant price levels (1000, 50000 etc.) attract concentration.",
+      "confidence": 0.75,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Minor bonus when price near round number levels"
+      },
+      "keywords": [
+        "round numbers",
+        "psychological level",
+        "support",
+        "resistance"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_rsi_divergence",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+      "rule": "Bearish divergence: price makes a new high but RSI makes a lower high — indicates weakening momentum and potential reversal. Bullish divergence: price makes a new low but RSI makes a higher low — indicates momentum recovery.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.5,
+        "description": "Divergence between price and RSI is the strongest reversal warning"
+      },
+      "keywords": [
+        "divergence",
+        "RSI",
+        "momentum",
+        "reversal",
+        "higher low",
+        "lower high"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_rsi_overbought_oversold",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+      "rule": "RSI above 70 signals overbought conditions (potential reversal or pause). RSI below 30 signals oversold conditions (potential bounce). In strong trends, overbought/oversold can persist — use divergence for better timing.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "RSI extreme zones add to ranging score"
+      },
+      "keywords": [
+        "RSI",
+        "overbought",
+        "oversold",
+        "70",
+        "30"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_stochastic_cross",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+      "rule": "A buy signal is generated when the Stochastic %K crosses above %D below 20 (oversold). A sell signal when %K crosses below %D above 80 (overbought). Best used in ranging markets; less reliable in strong trends.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Stochastic cross in extreme zone adds to ranging entry score"
+      },
+      "keywords": [
+        "stochastic",
+        "K",
+        "D",
+        "oversold",
+        "overbought",
+        "cross",
+        "ranging"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_stop_loss_mandatory",
+      "level": 1,
+      "category": "risk",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 15 - Money Management",
+      "rule": "Every trade must have a pre-determined stop-loss before entry. The stop should be placed at a logical technical level (below support, above resistance). A trade without a stop is a gamble, not a trade.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Mandatory stop-loss enforcement; ENFORCE_STRICT_SL"
+      },
+      "keywords": [
+        "stop loss",
+        "mandatory",
+        "pre-determined",
+        "technical level"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_support_resistance_role_reversal",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 6 - Support and Resistance",
+      "rule": "Once a support level is broken, it becomes a new resistance level. Once a resistance level is broken, it becomes new support. The more times a level is tested, the more significant it becomes.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Near key S/R levels adds to entry score; role reversal confirms breakout"
+      },
+      "keywords": [
+        "support",
+        "resistance",
+        "role reversal",
+        "breakout",
+        "tested"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_trend_primary",
+      "level": 1,
+      "category": "trend",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 4 - Trend Basics",
+      "rule": "A trend in motion tends to continue until a clear reversal signal appears. Always trade in the direction of the primary trend.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 1.5,
+        "description": "Refuse signals against the primary trend direction"
+      },
+      "keywords": [
+        "trend",
+        "primary trend",
+        "dow theory",
+        "direction"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_trendline_break",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 4 - Trendlines",
+      "rule": "A decisive break of a major trendline is one of the best early warning signals of a change in trend. The longer and more times the trendline was tested, the more significant the break.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Trendline break adds +1 to score as reversal signal"
+      },
+      "keywords": [
+        "trendline",
+        "break",
+        "reversal",
+        "warning"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_volume_breakout",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 7 - Volume and Open Interest",
+      "rule": "A price breakout from a consolidation pattern is only valid if accompanied by a significant increase in volume (at least 1.5x average). A breakout on low volume is suspect and often fails.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 1.0,
+        "description": "Breakout signals require volume spike filter"
+      },
+      "keywords": [
+        "volume",
+        "breakout",
+        "consolidation",
+        "average volume",
+        "spike"
+      ],
+      "actions": []
+    },
+    {
+      "id": "murphy_volume_confirms_trend",
+      "level": 1,
+      "category": "signal",
+      "book": "Technical Analysis of the Financial Markets",
+      "author": "John J. Murphy",
+      "source_chapter": "Chapter 7 - Volume and Open Interest",
+      "rule": "Volume should increase in the direction of the trend. In an uptrend, volume should be heavier on up days than on down days. Declining volume in the trend direction is a warning of weakening.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Volume confirmation required for trend entry; REQUIRE_VOLUME_CONFIRM"
+      },
+      "keywords": [
+        "volume",
+        "confirm",
+        "trend",
+        "direction",
+        "heavier"
+      ],
+      "actions": []
+    },
+    {
+      "id": "volman_bb_break_setup",
+      "level": 1,
+      "category": "signal",
+      "book": "Forex Price Action Scalping",
+      "author": "Bob Volman",
+      "source_chapter": "Chapter 6 - Setups",
+      "rule": "The Break-Build-Break (BB Break) setup: (1) Price breaks a significant level with momentum, (2) Consolidates tightly near the broken level (building), (3) Breaks out again in the same direction. The consolidation phase 'builds' orders before the second push. Enter on the second break close, not the first.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.5,
+        "description": "BB Break setup: breakout + consolidation + re-break = high probability"
+      },
+      "keywords": [
+        "break build break",
+        "BB break",
+        "consolidation",
+        "second break",
+        "momentum"
+      ],
+      "actions": []
     },
     {
       "id": "volman_double_bends",
+      "level": 1,
       "category": "signal",
-      "rule": "Double bends and triple taps on a 25 EMA suggest high probability breakout setups.",
+      "book": "Forex Price Action Scalping",
       "author": "Bob Volman",
-      "source": "Forex Price Action Scalping",
-      "origin": "builtin"
+      "source_chapter": "Chapter 5 - Pattern Recognition",
+      "rule": "A 'double bend' or 'triple tap' on the 25 EMA — price touches, bounces, touches again and bounces — creates a compressed spring effect. After 2-3 touches of the EMA without breaking it, a breakout setup forms. Enter on the first bar that closes clearly beyond the recent high/low after the taps.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING",
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.5,
+        "description": "Double bends on EMA25 = high probability setup; BONUS_EMA_SQUEEZE"
+      },
+      "keywords": [
+        "double bends",
+        "triple taps",
+        "25 EMA",
+        "bounce",
+        "compressed",
+        "spring"
+      ],
+      "actions": []
     },
     {
-      "id": "volman_scalp_risk",
+      "id": "volman_ema25_axis",
+      "level": 1,
+      "category": "filter",
+      "book": "Forex Price Action Scalping",
+      "author": "Bob Volman",
+      "source_chapter": "Chapter 3 - The 25 EMA",
+      "rule": "The 25-period EMA is the central axis of the chart. Price above the 25 EMA favors long setups; price below favors short setups. Never initiate a long trade when price is significantly below the 25 EMA, and never go short when price is well above it.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 1.0,
+        "description": "EMA25 axis determines bias; signals against EMA direction penalized"
+      },
+      "keywords": [
+        "25 EMA",
+        "axis",
+        "central",
+        "bias",
+        "above",
+        "below"
+      ],
+      "actions": []
+    },
+    {
+      "id": "volman_fewer_better_trades",
+      "level": 1,
+      "category": "psychology",
+      "book": "Forex Price Action Scalping",
+      "author": "Bob Volman",
+      "source_chapter": "Chapter 2 - Trading Principles",
+      "rule": "Quality over quantity. Fewer, better-selected trades outperform high-frequency mediocre trades. A professional scalper may take only 1-3 setups per session. If no clear setup presents itself, the correct action is to wait — do nothing.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: selectivity — raise score_min if overtrading detected"
+      },
+      "keywords": [
+        "fewer trades",
+        "quality",
+        "selectivity",
+        "patience",
+        "do nothing"
+      ],
+      "actions": []
+    },
+    {
+      "id": "volman_no_trade_zone",
+      "level": 1,
+      "category": "filter",
+      "book": "Forex Price Action Scalping",
+      "author": "Bob Volman",
+      "source_chapter": "Chapter 4 - The No-Trade Zone",
+      "rule": "If price is in 'no man's land' — too far from both the EMA 25 and any significant level — there is no valid setup. Do not force trades. Wait for price to either return to the EMA or compress against a key level. The best trades come from clear, well-defined setups, not from chasing.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": -1.0,
+        "description": "No-trade zone: reject entries when price is isolated from structure"
+      },
+      "keywords": [
+        "no-trade zone",
+        "no man's land",
+        "wait",
+        "force",
+        "isolated",
+        "structure"
+      ],
+      "actions": []
+    },
+    {
+      "id": "volman_partial_exit_buildup",
+      "level": 1,
+      "category": "exit",
+      "book": "Forex Price Action Scalping",
+      "author": "Bob Volman",
+      "source_chapter": "Chapter 8 - Targets and Stops",
+      "rule": "For scalp trades, target the next significant level as the first take-profit. Exit 50-75% of the position at the first target, move stop to breakeven on the remainder. This approach locks in profit while leaving room for extended moves.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Partial exit: 50-75% at first target, move stop to breakeven"
+      },
+      "keywords": [
+        "partial exit",
+        "first target",
+        "breakeven",
+        "remainder",
+        "scalp"
+      ],
+      "actions": []
+    },
+    {
+      "id": "volman_reversal_block",
+      "level": 1,
+      "category": "signal",
+      "book": "Forex Price Action Scalping",
+      "author": "Bob Volman",
+      "source_chapter": "Chapter 7 - Reversal Patterns",
+      "rule": "The Reversal Block: price spikes beyond a key level (false break / stop hunt), then immediately reverses and closes back inside the range. The spike liquidates weak hands and traps breakout traders on the wrong side. Enter in the reverse direction as price recaptures the level.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING",
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "False break / reversal block = trap detection, contrarian entry"
+      },
+      "keywords": [
+        "reversal block",
+        "false break",
+        "stop hunt",
+        "spike",
+        "trap",
+        "recapture"
+      ],
+      "actions": []
+    },
+    {
+      "id": "volman_session_awareness",
+      "level": 1,
+      "category": "filter",
+      "book": "Forex Price Action Scalping",
+      "author": "Bob Volman",
+      "source_chapter": "Chapter 2 - Trading Principles",
+      "rule": "Avoid trading during low-liquidity periods: Asian session for forex, or outside primary market hours for crypto/stocks. Setups during low-volume sessions are prone to false breaks and erratic behavior. Best setups occur during high-volume overlapping sessions.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Session filter: penalize entries during low-liquidity periods"
+      },
+      "keywords": [
+        "session",
+        "liquidity",
+        "Asian session",
+        "low volume",
+        "overlap",
+        "hours"
+      ],
+      "actions": []
+    },
+    {
+      "id": "volman_squeeze_buildup",
+      "level": 1,
+      "category": "signal",
+      "book": "Forex Price Action Scalping",
+      "author": "Bob Volman",
+      "source_chapter": "Chapter 6 - Setups",
+      "rule": "A 'squeeze' or 'build-up' forms when price compresses into a tight range against a significant horizontal support or resistance level. The longer the compression and the more bars involved, the more explosive the breakout. A build-up of 5+ bars against a level is a very high probability breakout signal.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "RANGING",
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.5,
+        "description": "Price squeeze against S/R with 5+ bars = explosive breakout potential; BONUS_EMA_SQUEEZE"
+      },
+      "keywords": [
+        "squeeze",
+        "build-up",
+        "compression",
+        "horizontal level",
+        "5 bars",
+        "breakout"
+      ],
+      "actions": []
+    },
+    {
+      "id": "volman_tight_stop",
+      "level": 1,
       "category": "risk",
-      "rule": "Scalping setups require fixed stop-loss targets based on recent micro-supports (often 10 pips or less).",
+      "book": "Forex Price Action Scalping",
       "author": "Bob Volman",
-      "source": "Forex Price Action Scalping",
-      "origin": "builtin"
+      "source_chapter": "Chapter 8 - Targets and Stops",
+      "rule": "Scalping setups require tight, precise stop-losses placed just beyond the setup's defining structure (last swing, build-up boundary). A stop wider than 10-15 pips for a scalp negates the risk-reward. If the structure-based stop is too wide, skip the trade.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "ENFORCE_STRICT_SL: stop must be at structural level, reject if too wide"
+      },
+      "keywords": [
+        "tight stop",
+        "scalping",
+        "pips",
+        "structure",
+        "stop loss",
+        "boundary"
+      ],
+      "actions": []
     },
     {
-      "id": "volman_bb_breakout",
+      "id": "bruwer_crypto_24h_risk",
+      "level": 2,
+      "category": "risk",
+      "book": "Crypto Investing for Beginners",
+      "author": "James Bruwer",
+      "source_chapter": "Chapter - Risk Management in Crypto",
+      "rule": "Crypto markets run 24/7 — gaps and extreme overnight moves are common. Position sizing must account for the inability to exit during weekends or low-liquidity hours. Reduce crypto position sizes by 20-30% versus equivalent positions in traditional markets. Never hold oversized crypto positions over major macroeconomic events.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Crypto 24/7 risk: reduce sizing by 20-30% for weekend/overnight exposure"
+      },
+      "keywords": [
+        "24/7",
+        "overnight",
+        "weekend",
+        "gap",
+        "crypto",
+        "reduce",
+        "position size"
+      ],
+      "actions": []
+    },
+    {
+      "id": "bruwer_dont_chase_pumps",
+      "level": 2,
+      "category": "filter",
+      "book": "Crypto Investing for Beginners",
+      "author": "James Bruwer",
+      "source_chapter": "Chapter - Common Crypto Mistakes",
+      "rule": "Never chase a pump: when an asset has already moved 20-50%+ in 24 hours, the risk of a sharp reversal ('dump the pump') is very high. Wait for consolidation and a re-test of a key level before entering. FOMO is the biggest destroyer of crypto trading accounts.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": -1.0,
+        "description": "Pump-chasing filter: penalize entries after extreme 24h moves"
+      },
+      "keywords": [
+        "pump",
+        "FOMO",
+        "chase",
+        "50%",
+        "dump",
+        "reversal",
+        "24 hours"
+      ],
+      "actions": []
+    },
+    {
+      "id": "burniske_bitcoin_dominance",
+      "level": 2,
+      "category": "strategy",
+      "book": "Cryptoassets",
+      "author": "Chris Burniske",
+      "source_chapter": "Chapter 11 - Portfolio Construction",
+      "rule": "Bitcoin Dominance (BTC.D) is the ratio of Bitcoin market cap to total crypto market cap. Rising BTC.D = flight to safety, altcoins underperform. Falling BTC.D = risk-on altcoin season, altcoins outperform BTC. Use BTC.D trend as a sector rotation signal within crypto markets.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Bitcoin dominance trend = altcoin vs BTC allocation signal"
+      },
+      "keywords": [
+        "bitcoin dominance",
+        "BTC.D",
+        "altcoin season",
+        "flight to safety",
+        "rotation"
+      ],
+      "actions": []
+    },
+    {
+      "id": "burniske_bitcoin_halving_cycle",
+      "level": 2,
+      "category": "strategy",
+      "book": "Cryptoassets",
+      "author": "Chris Burniske",
+      "source_chapter": "Chapter 6 - Bitcoin's Historical Performance",
+      "rule": "Bitcoin's 4-year halving cycle historically creates predictable bull/bear phases: Year 1 after halving: accumulation and early bull run. Year 2: acceleration of bull market. Year 3: peak and beginning of bear market. Year 4: deep bear and accumulation before next halving. Use this macro context to bias long vs short directional exposure.",
+      "confidence": 0.75,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Bitcoin halving cycle provides macro directional bias for crypto assets"
+      },
+      "keywords": [
+        "halving",
+        "cycle",
+        "4 year",
+        "bull market",
+        "bear market",
+        "accumulation"
+      ],
+      "actions": []
+    },
+    {
+      "id": "burniske_crypto_correlation",
+      "level": 2,
+      "category": "risk",
+      "book": "Cryptoassets",
+      "author": "Chris Burniske",
+      "source_chapter": "Chapter 11 - Portfolio Construction",
+      "rule": "Crypto assets are highly correlated during market stress. In a crypto bear market, altcoins fall faster than Bitcoin (beta > 1). Do not treat different crypto positions as uncorrelated. Reduce all crypto exposure simultaneously when BTC shows macro weakness (below 200W MA).",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Crypto correlation risk: high-beta altcoins need reduced sizing in bear markets"
+      },
+      "keywords": [
+        "correlation",
+        "altcoins",
+        "beta",
+        "bear market",
+        "bitcoin",
+        "reduce"
+      ],
+      "actions": []
+    },
+    {
+      "id": "burniske_metcalfe_law",
+      "level": 2,
       "category": "signal",
-      "rule": "Look for price squeeze/build-up right against a major horizontal level before a breakout.",
-      "author": "Bob Volman",
-      "source": "Forex Price Action Scalping",
-      "origin": "builtin"
+      "book": "Cryptoassets",
+      "author": "Chris Burniske",
+      "source_chapter": "Chapter 9 - Cryptoasset Valuation",
+      "rule": "Metcalfe's Law: network value grows proportionally to the square of active users. If active addresses grow 10%, fair value grows ~20%. Price diverging significantly above Metcalfe-implied value (>3x) signals speculation. Price significantly below Metcalfe value signals opportunity.",
+      "confidence": 0.75,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Metcalfe Law: active user growth vs price divergence as fundamental signal"
+      },
+      "keywords": [
+        "Metcalfe",
+        "network",
+        "active users",
+        "addresses",
+        "speculation"
+      ],
+      "actions": []
+    },
+    {
+      "id": "burniske_nvt_ratio",
+      "level": 2,
+      "category": "signal",
+      "book": "Cryptoassets",
+      "author": "Chris Burniske",
+      "source_chapter": "Chapter 9 - Cryptoasset Valuation",
+      "rule": "The NVT Ratio (Network Value to Transactions) is the crypto equivalent of P/E ratio. NVT = Market Cap / Daily Transaction Volume on-chain. NVT > 95 (90th percentile) signals overvaluation — avoid longs, consider shorts. NVT < 25 (10th percentile) signals undervaluation — favorable for longs.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "CRYPTO_FUNDAMENTAL_FILTER: NVT extreme signals over/undervaluation"
+      },
+      "keywords": [
+        "NVT",
+        "network value",
+        "transactions",
+        "valuation",
+        "on-chain",
+        "P/E"
+      ],
+      "actions": []
+    },
+    {
+      "id": "burniske_on_chain_activity",
+      "level": 2,
+      "category": "signal",
+      "book": "Cryptoassets",
+      "author": "Chris Burniske",
+      "source_chapter": "Chapter 9 - Cryptoasset Valuation",
+      "rule": "On-chain activity (active addresses, transactions per day, hash rate) provides a leading indicator of price direction. Rising on-chain activity with flat price = accumulation (bullish). Falling on-chain activity with rising price = distribution (bearish divergence). Price should confirm on-chain fundamental trends.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "CRYPTO_FUNDAMENTAL_FILTER: on-chain activity divergence as leading indicator"
+      },
+      "keywords": [
+        "on-chain",
+        "active addresses",
+        "transactions",
+        "hash rate",
+        "accumulation",
+        "distribution"
+      ],
+      "actions": []
+    },
+    {
+      "id": "contrarian_extreme_rsi",
+      "level": 2,
+      "category": "signal",
+      "book": "Contrarian Trading",
+      "author": "T.D.C. Jamie",
+      "source_chapter": "Chapter 3 - Identifying Extremes",
+      "rule": "A contrarian long entry requires ALL of: (1) RSI below 20 (extreme oversold), (2) Bullish divergence (price lower low, RSI higher low), (3) Volume spike on the last down bar (capitulation), (4) Bullish reversal candlestick (hammer, engulfing). One signal alone is NOT contrarian — it's gamble. All four confirm capitulation.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 2.0,
+        "description": "CONTRARIAN_SIGNAL: RSI<20 + divergence + volume spike + candle = capitulation long"
+      },
+      "keywords": [
+        "contrarian",
+        "RSI 20",
+        "oversold",
+        "divergence",
+        "capitulation",
+        "volume spike"
+      ],
+      "actions": []
+    },
+    {
+      "id": "contrarian_extreme_rsi_short",
+      "level": 2,
+      "category": "signal",
+      "book": "Contrarian Trading",
+      "author": "T.D.C. Jamie",
+      "source_chapter": "Chapter 3 - Identifying Extremes",
+      "rule": "A contrarian short entry requires ALL of: (1) RSI above 80 (extreme overbought), (2) Bearish divergence (price higher high, RSI lower high), (3) Volume spike on the last up bar (exhaustion), (4) Bearish reversal candlestick (shooting star, bearish engulfing). These four conditions together confirm euphoria and exhaustion.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 2.0,
+        "description": "CONTRARIAN_SIGNAL: RSI>80 + divergence + volume spike + candle = euphoria short"
+      },
+      "keywords": [
+        "contrarian",
+        "RSI 80",
+        "overbought",
+        "divergence",
+        "exhaustion",
+        "euphoria"
+      ],
+      "actions": []
+    },
+    {
+      "id": "contrarian_multiple_timeframe_confirm",
+      "level": 2,
+      "category": "filter",
+      "book": "Contrarian Trading",
+      "author": "T.D.C. Jamie",
+      "source_chapter": "Chapter 4 - Multi-Timeframe Contrarian",
+      "rule": "A contrarian setup needs confirmation on at least TWO timeframes: extreme conditions must be present on both the entry timeframe AND the next higher timeframe. A single-timeframe extreme is often noise; a two-timeframe extreme is a genuine sentiment extreme.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "ENFORCE_MULTI_TIMEFRAME: contrarian signals require 2-timeframe extreme"
+      },
+      "keywords": [
+        "contrarian",
+        "two timeframes",
+        "extreme",
+        "sentiment",
+        "confirmation"
+      ],
+      "actions": []
+    },
+    {
+      "id": "contrarian_never_in_trend",
+      "level": 2,
+      "category": "filter",
+      "book": "Contrarian Trading",
+      "author": "T.D.C. Jamie",
+      "source_chapter": "Chapter 2 - When NOT to be Contrarian",
+      "rule": "Never use contrarian signals in strongly trending markets (ADX > 35). Strong trends can sustain 'overbought' conditions for weeks or months. Contrarian strategies only work in RANGING (low ADX < 22) markets. A contrarian trade in a strong trend is the fastest way to blow an account.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": -2.0,
+        "description": "PENALTY_COUNTER_TREND: contrarian signals in trending market = severe penalty"
+      },
+      "keywords": [
+        "contrarian",
+        "trending market",
+        "ADX 35",
+        "ranging",
+        "overbought trend"
+      ],
+      "actions": []
+    },
+    {
+      "id": "contrarian_position_sizing",
+      "level": 2,
+      "category": "sizing",
+      "book": "Contrarian Trading",
+      "author": "T.D.C. Jamie",
+      "source_chapter": "Chapter 5 - Risk Management",
+      "rule": "Contrarian trades have lower win rates but higher R:R when they work. Size contrarian positions at 50% of normal size to account for lower win rate. Target minimum 4:1 R:R for contrarian setups (vs 2:1 for trend setups). The math: 30% win rate * 4R reward > breakeven.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Contrarian sizing: 50% of normal size, target 4:1 R:R minimum"
+      },
+      "keywords": [
+        "contrarian",
+        "sizing",
+        "50%",
+        "4:1",
+        "R:R",
+        "lower win rate"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_2_percent_rule",
+      "level": 2,
+      "category": "risk",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Money Management: The Iron Triangle",
+      "rule": "Never risk more than 2% of your trading account on any single trade. The stop-loss distance in dollars must not exceed 2% of total account equity. This is the absolute maximum — professional traders often use 0.5% to 1%.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "CAP_RISK_PCT: hard cap at 2% risk per trade — Elder's Iron Triangle rule #1"
+      },
+      "keywords": [
+        "2%",
+        "2 percent",
+        "single trade",
+        "account equity",
+        "risk",
+        "stop loss"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_3m_plan_before_trade",
+      "level": 2,
+      "category": "strategy",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Come Into My Trading Room",
+      "rule": "Before placing any trade, define three key parameters: (1) Entry price — where and why, (2) Stop loss — maximum acceptable loss, (3) Target — where to take profit. If you cannot define all three, do not trade.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Mandatory: entry, stop, target must all be defined before position opening"
+      },
+      "keywords": [
+        "plan",
+        "entry",
+        "stop",
+        "target",
+        "three parameters",
+        "before trade"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_6_percent_monthly_rule",
+      "level": 2,
+      "category": "risk",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Money Management: The Iron Triangle",
+      "rule": "Stop trading for the remainder of the month if account drawdown reaches 6%. This 6% monthly limit prevents catastrophic loss cascades. When the 6% is hit, close all positions and observe only — do not trade.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Monthly drawdown circuit breaker: halt all trading at 6% monthly loss"
+      },
+      "keywords": [
+        "6%",
+        "monthly",
+        "drawdown",
+        "stop trading",
+        "circuit breaker"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_ema_channel_overbought",
+      "level": 2,
+      "category": "signal",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Moving Averages",
+      "rule": "Price above the upper EMA envelope (EMA + X%) signals overbought conditions. Price below the lower EMA envelope (EMA - X%) signals oversold. Markets tend to revert to the EMA after touching the envelope — use for exits.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "EMA envelope extreme position = exit or reversal signal"
+      },
+      "keywords": [
+        "EMA",
+        "envelope",
+        "overbought",
+        "oversold",
+        "revert",
+        "channel"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_emotions_enemy",
+      "level": 2,
+      "category": "psychology",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Psychology of Trading",
+      "rule": "Fear and greed are the two great destroyers of trading accounts. Fear causes premature exits and missed opportunities. Greed causes overtrading, over-leveraging, and holding losers too long. A mechanical system removes emotion from execution.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: mechanical execution eliminates fear and greed"
+      },
+      "keywords": [
+        "fear",
+        "greed",
+        "emotion",
+        "mechanical",
+        "system",
+        "discipline"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_force_index_long_term",
+      "level": 2,
+      "category": "signal",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Force Index",
+      "rule": "The 13-period Force Index measures the power of bulls and bears over time. A rising 13-period FI confirms uptrend momentum. A falling FI confirms downtrend. Divergence between 13-period FI and price signals an impending reversal.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Long-term Force Index divergence signals reversal"
+      },
+      "keywords": [
+        "force index",
+        "13-period",
+        "bulls",
+        "bears",
+        "divergence",
+        "reversal"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_force_index_two_period",
+      "level": 2,
+      "category": "signal",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Force Index",
+      "rule": "The 2-period Force Index = (Close - Previous Close) × Volume. When in an uptrend, a negative 2-period Force Index (pullback on reduced force) is a low-risk buy signal. When in a downtrend, a positive 2-period FI is a short signal. Confirm with trend direction from 13-period EMA.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Force Index pullback in trend = low-risk entry, adds to score"
+      },
+      "keywords": [
+        "force index",
+        "2-period",
+        "volume",
+        "pullback",
+        "low-risk",
+        "buy"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_impulse_green_only_long",
+      "level": 2,
+      "category": "filter",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - The Impulse System",
+      "rule": "The Impulse System combines a 13-period EMA (trend) and MACD histogram (momentum). A GREEN bar = EMA rising AND histogram rising → permission to BUY (long only). A RED bar = EMA falling AND histogram falling → permission to SELL (short only). A BLUE bar = mixed → no new positions allowed.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Impulse System: refuse longs on RED bar, refuse shorts on GREEN bar"
+      },
+      "keywords": [
+        "impulse",
+        "green",
+        "red",
+        "blue",
+        "EMA 13",
+        "histogram",
+        "permission"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_impulse_no_entry_mixed",
+      "level": 2,
+      "category": "filter",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - The Impulse System",
+      "rule": "When EMA and MACD histogram give conflicting signals (one up, one down), the Impulse bar is BLUE — no new positions should be initiated. Wait for alignment before entering. This prevents entering in choppy markets.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": -1.0,
+        "description": "Penalty for entering when Impulse is BLUE (mixed signal)"
+      },
+      "keywords": [
+        "impulse",
+        "blue",
+        "mixed",
+        "no entry",
+        "choppy"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_iron_triangle_priority",
+      "level": 2,
+      "category": "strategy",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Money Management: The Iron Triangle",
+      "rule": "The Iron Triangle of trading success: (1) Money Management is most important — without it you cannot survive. (2) Entry and Exit methods come second. (3) Psychology comes third — but is the hardest to master. A trader with mediocre entries but strict money management will outlast a brilliant analyst with no money management.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Conceptual priority rule — money management always takes precedence over signal quality"
+      },
+      "keywords": [
+        "iron triangle",
+        "money management",
+        "entry",
+        "psychology",
+        "priority"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_macd_histogram_divergence",
+      "level": 2,
+      "category": "signal",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - MACD and MACD-Histogram",
+      "rule": "When price makes a new high but the MACD histogram makes a lower peak, this bearish divergence is the strongest sell signal in technical analysis. When price makes a new low but histogram makes a higher trough, this bullish divergence is the strongest buy signal.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING",
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 2.0,
+        "description": "MACD histogram divergence = Elder's highest confidence signal, major score boost"
+      },
+      "keywords": [
+        "MACD",
+        "histogram",
+        "divergence",
+        "bearish",
+        "bullish",
+        "strongest signal"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_macd_histogram_slope",
+      "level": 2,
+      "category": "signal",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - MACD and MACD-Histogram",
+      "rule": "When the MACD histogram rises for two consecutive bars, it is a buy signal. When it falls for two consecutive bars, it is a sell signal. The slope of the histogram is more important than its position relative to zero.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "MACD histogram slope change (2 bars) is an early momentum signal"
+      },
+      "keywords": [
+        "MACD",
+        "histogram",
+        "slope",
+        "two bars",
+        "rising",
+        "falling"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_revenge_trading_forbidden",
+      "level": 2,
+      "category": "psychology",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Psychology of Trading",
+      "rule": "After a loss, do not immediately try to 'win it back'. Revenge trading leads to larger losses and destroys risk management. Take a break, review what went wrong, and only re-enter with a clean analysis.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: no revenge trading; post-loss cooldown"
+      },
+      "keywords": [
+        "revenge trading",
+        "loss",
+        "win back",
+        "break",
+        "psychological"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_screen1_weekly_trend",
+      "level": 2,
+      "category": "filter",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - The Triple Screen Trading System",
+      "rule": "Screen 1 (Weekly): A rising weekly MACD histogram indicates a bullish tide. A falling weekly histogram indicates a bearish tide. Only take longs when the weekly tide is bullish, only take shorts when bearish.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Weekly trend filter: refuse signals against the weekly MACD tide"
+      },
+      "keywords": [
+        "screen 1",
+        "weekly",
+        "MACD histogram",
+        "tide",
+        "bullish",
+        "bearish"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_screen2_daily_oscillator",
+      "level": 2,
+      "category": "signal",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - The Triple Screen Trading System",
+      "rule": "Screen 2 (Daily): When weekly trend is up, buy when daily oscillator (Stochastic/Force Index) declines into oversold territory and turns up. When weekly trend is down, sell when daily oscillator rises into overbought and turns down. This gives counter-cyclical entry in the direction of the primary trend.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.5,
+        "description": "Daily oscillator pullback in trend direction adds significantly to entry score"
+      },
+      "keywords": [
+        "screen 2",
+        "daily",
+        "oscillator",
+        "pullback",
+        "oversold",
+        "entry timing"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_screen3_intraday_entry",
+      "level": 2,
+      "category": "signal",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - The Triple Screen Trading System",
+      "rule": "Screen 3 (Intraday): After Screens 1 and 2 are aligned, use a trailing buy stop one tick above the previous bar's high (for longs) or a trailing sell stop one tick below the previous bar's low (for shorts). This ensures entry only when price moves in the anticipated direction.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Intraday entry timing — prefer entries on pullback high break"
+      },
+      "keywords": [
+        "screen 3",
+        "intraday",
+        "trailing stop",
+        "entry",
+        "pullback"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_stop_below_last_minor_low",
+      "level": 2,
+      "category": "risk",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Setting Stops",
+      "rule": "For long positions, place the stop just below the last minor low (swing low). For short positions, place the stop just above the last minor high. This provides a logical technical level — if the stop is hit, the premise is wrong.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Stop placement logic: swing low/high relative to entry"
+      },
+      "keywords": [
+        "stop",
+        "minor low",
+        "minor high",
+        "swing",
+        "technical level",
+        "long",
+        "short"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_trading_journal_mandatory",
+      "level": 2,
+      "category": "psychology",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Trader's Diary",
+      "rule": "Every trade must be logged: entry reason, exit reason, emotional state at entry, what the market did versus what was expected. Without a trading journal, you cannot learn from your mistakes or identify your edge.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: mandate trade logging for performance improvement"
+      },
+      "keywords": [
+        "journal",
+        "log",
+        "entry reason",
+        "discipline",
+        "learn",
+        "mistakes"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_trailing_stop_lock_profit",
+      "level": 2,
+      "category": "exit",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - Exits and Trailing Stops",
+      "rule": "Once a position is profitable, use a trailing stop to lock in gains. Move the stop up (for longs) or down (for shorts) to just below the most recent minor low (longs) or above the most recent minor high (shorts). Never move a stop in the wrong direction — only trail it.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Trailing stop management for profitable positions"
+      },
+      "keywords": [
+        "trailing stop",
+        "lock in",
+        "profit",
+        "move stop",
+        "winning position"
+      ],
+      "actions": []
+    },
+    {
+      "id": "elder_triple_screen_system",
+      "level": 2,
+      "category": "strategy",
+      "book": "Vivre du Trading",
+      "author": "Dr. Alexander Elder",
+      "source_chapter": "Chapter - The Triple Screen Trading System",
+      "rule": "The Triple Screen System uses three timeframes: (1) Weekly chart for trend direction (using MACD or EMA slope), (2) Daily chart for oscillator timing (Stochastic, Force Index), (3) Intraday chart for entry execution. Only trade in the direction of the weekly trend, confirmed by daily oscillator.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 2.0,
+        "description": "ENFORCE_MULTI_TIMEFRAME: weekly trend mandatory filter before any entry"
+      },
+      "keywords": [
+        "triple screen",
+        "weekly",
+        "daily",
+        "timeframe",
+        "oscillator",
+        "trend"
+      ],
+      "actions": []
+    },
+    {
+      "id": "kabbaj_ichimoku_cloud_filter",
+      "level": 2,
+      "category": "filter",
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Ichimoku",
+      "rule": "Use the Ichimoku cloud as a trend filter on higher timeframes: Price above the cloud → bullish bias, only take longs. Price below the cloud → bearish bias, only take shorts. Price inside the cloud → uncertain, reduce position size or avoid. The cloud provides dynamic support/resistance with a 26-period lookahead.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 1.0,
+        "description": "Ichimoku cloud HTF filter: price below cloud penalizes long signals"
+      },
+      "keywords": [
+        "ichimoku",
+        "cloud",
+        "above",
+        "below",
+        "bias",
+        "filter",
+        "higher timeframe"
+      ],
+      "actions": []
+    },
+    {
+      "id": "kabbaj_ichimoku_tk_cross",
+      "level": 2,
+      "category": "signal",
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Ichimoku",
+      "rule": "The Tenkan/Kijun cross (TK Cross) above the cloud is a strong bullish signal. Tenkan crossing above Kijun above the cloud = strong buy. Tenkan crossing below Kijun below the cloud = strong sell. Crosses inside the cloud are weak and should be avoided.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Ichimoku TK Cross above/below cloud = directional confirmation"
+      },
+      "keywords": [
+        "tenkan",
+        "kijun",
+        "TK cross",
+        "ichimoku",
+        "above cloud",
+        "below cloud"
+      ],
+      "actions": []
+    },
+    {
+      "id": "kabbaj_kelly_25pct",
+      "level": 2,
+      "category": "sizing",
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Gestion du Capital",
+      "rule": "Use only 25% of the full Kelly fraction (quarter-Kelly). While half-Kelly (Chan) is theoretically optimal, the quarter-Kelly provides even more protection against parameter estimation errors and behavioral biases in live trading. f_applied = 0.25 * f_full_kelly.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "CAP_KELLY: Kabbaj recommends quarter-Kelly (0.25) as applied fraction"
+      },
+      "keywords": [
+        "kelly",
+        "25%",
+        "quarter kelly",
+        "capital management",
+        "fraction"
+      ],
+      "actions": []
+    },
+    {
+      "id": "kabbaj_partial_tp1",
+      "level": 2,
+      "category": "exit",
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Gestion des Positions",
+      "rule": "At the first target (TP1): exit 50% of the position. Move the stop-loss to the entry price (breakeven) on the remaining 50%. Let the rest run toward TP2 with a trailing stop. This two-stage exit eliminates risk while maximizing upside on winners.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "50% exit at TP1, breakeven stop on remainder, trailing for TP2"
+      },
+      "keywords": [
+        "partial",
+        "TP1",
+        "50%",
+        "breakeven",
+        "trailing",
+        "two-stage"
+      ],
+      "actions": []
+    },
+    {
+      "id": "kabbaj_pre_trade_checklist",
+      "level": 2,
+      "category": "strategy",
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Plan de Trading",
+      "rule": "Before every trade, run a pre-trade checklist: (1) Is the trend direction confirmed on higher timeframe? (2) Is there a valid price action setup at a key level? (3) Is the R:R at least 2:1? (4) Is position size within Kelly quarter-fraction? If any answer is NO, do not trade.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "4-point pre-trade checklist: HTF trend + setup + R:R + sizing"
+      },
+      "keywords": [
+        "checklist",
+        "pre-trade",
+        "4 points",
+        "trend",
+        "setup",
+        "R:R",
+        "sizing"
+      ],
+      "actions": []
+    },
+    {
+      "id": "kabbaj_sector_rotation",
+      "level": 2,
+      "category": "strategy",
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Analyse Inter-Marchés",
+      "rule": "Follow capital rotation between sectors to anticipate trend changes. When money flows from defensive sectors (utilities, healthcare) to cyclicals (tech, financials), the market is in a risk-on regime. Align individual trades with the prevailing sector rotation direction. Risk-on favors breakouts; risk-off favors mean-reversion.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Sector rotation as macro bias: risk-on boosts trending score"
+      },
+      "keywords": [
+        "sector rotation",
+        "capital flows",
+        "risk-on",
+        "risk-off",
+        "cyclicals"
+      ],
+      "actions": []
+    },
+    {
+      "id": "kabbaj_trading_is_psychology",
+      "level": 2,
+      "category": "psychology",
+      "book": "L'Art du Trading",
+      "author": "Thami Kabbaj",
+      "source_chapter": "Chapitre - Psychologie du Trader",
+      "rule": "Trading is 90% psychology, 10% technique. A trader with average strategies but excellent discipline and emotional control will outperform a brilliant analyst who cannot control their emotions. Consistency in execution is more important than finding the perfect system.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: consistency in execution trumps system quality"
+      },
+      "keywords": [
+        "psychology",
+        "90%",
+        "discipline",
+        "consistency",
+        "execution"
+      ],
+      "actions": []
+    },
+    {
+      "id": "lustig_dopamine_fomo",
+      "level": 2,
+      "category": "psychology",
+      "book": "The Hacking of the American Mind",
+      "author": "Robert Lustig",
+      "source_chapter": "Chapter 4 - Reward and Pleasure",
+      "rule": "FOMO (Fear Of Missing Out) is a dopaminergic response — the same brain circuit as addiction. Like an addict chasing a high, traders in FOMO mode increase risk at exactly the wrong time. When you feel compelled to enter a trade immediately because of 'missing out', the correct action is to WAIT — dopamine is making the decision, not analysis.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: FOMO = dopamine trap, mandatory waiting period"
+      },
+      "keywords": [
+        "FOMO",
+        "dopamine",
+        "addiction",
+        "compelling",
+        "compelled",
+        "missing out"
+      ],
+      "actions": []
+    },
+    {
+      "id": "lustig_notification_detox",
+      "level": 2,
+      "category": "psychology",
+      "book": "The Hacking of the American Mind",
+      "author": "Robert Lustig",
+      "source_chapter": "Chapter 9 - Digital Dopamine",
+      "rule": "Constant market notifications and price alerts create a dopamine feedback loop. Checking prices every 5 minutes reinforces anxiety and impulsive trading. Set specific trading review times and disable all non-critical alerts. A bot that makes decisions based on data, not notifications, is inherently superior.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: systematic review schedule, not notification-driven decisions"
+      },
+      "keywords": [
+        "notifications",
+        "alerts",
+        "dopamine",
+        "feedback loop",
+        "anxiety",
+        "schedule"
+      ],
+      "actions": []
+    },
+    {
+      "id": "lustig_serotonin_patience",
+      "level": 2,
+      "category": "psychology",
+      "book": "The Hacking of the American Mind",
+      "author": "Robert Lustig",
+      "source_chapter": "Chapter 5 - Contentment vs Happiness",
+      "rule": "Serotonin (contentment/wellbeing) opposes dopamine (reward-seeking). The patient, disciplined trader who follows a plan operates from a serotonin state. The addicted, impulsive trader operates from a dopamine state. Develop routine, meditation, and systematic process to strengthen serotonin pathways and reduce impulsive trading decisions.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: serotonin discipline vs dopamine impulsivity in execution"
+      },
+      "keywords": [
+        "serotonin",
+        "dopamine",
+        "patience",
+        "discipline",
+        "routine",
+        "impulsive"
+      ],
+      "actions": []
+    },
+    {
+      "id": "montier_confirmation_bias",
+      "level": 2,
+      "category": "psychology",
+      "book": "The Little Book of Behavioral Investing",
+      "author": "James Montier",
+      "source_chapter": "Chapter 1 - I'm Right, You're Wrong",
+      "rule": "Confirmation bias causes traders to seek information that confirms their existing view and ignore contradictory evidence. Before entering a trade, actively seek REASONS NOT TO ENTER. If you cannot find a strong bear case for a long trade, you may be biased. A mechanical system removes confirmation bias from the equation.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "BEHAVIORAL_BIAS_PENALTY: require systematic checklist to counter confirmation bias"
+      },
+      "keywords": [
+        "confirmation bias",
+        "seek contrary",
+        "mechanical",
+        "ignore evidence"
+      ],
+      "actions": []
+    },
+    {
+      "id": "montier_contrarian_extremes",
+      "level": 2,
+      "category": "signal",
+      "book": "The Little Book of Behavioral Investing",
+      "author": "James Montier",
+      "source_chapter": "Chapter 5 - Running with the Crowd",
+      "rule": "When market sentiment reaches extreme consensus (everyone is bullish or bearish), the contrarian trade has the highest probability. Fear/Greed index extremes, VIX spikes, or RSI at multi-month extremes signal that the crowd is positioned heavily on one side — fade the crowd. Contrarian signals should only be acted upon with multiple confirming indicators.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "CONTRARIAN_SIGNAL: extreme sentiment = crowd fade opportunity"
+      },
+      "keywords": [
+        "contrarian",
+        "extreme",
+        "consensus",
+        "fade the crowd",
+        "sentiment",
+        "fear greed"
+      ],
+      "actions": []
+    },
+    {
+      "id": "montier_herding_danger",
+      "level": 2,
+      "category": "filter",
+      "book": "The Little Book of Behavioral Investing",
+      "author": "James Montier",
+      "source_chapter": "Chapter 5 - Running with the Crowd",
+      "rule": "Herding — following the crowd without independent analysis — leads to bubbles and subsequent crashes. If a trade is 'obvious' to everyone (widely discussed on social media, news), it is likely already priced in and potentially dangerous. The best trades are usually uncomfortable and counter-consensus.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": -0.5,
+        "description": "Penalize trades that chase widely-publicized consensus momentum"
+      },
+      "keywords": [
+        "herding",
+        "crowd",
+        "bubble",
+        "obvious",
+        "social media",
+        "priced in"
+      ],
+      "actions": []
+    },
+    {
+      "id": "montier_loss_aversion",
+      "level": 2,
+      "category": "psychology",
+      "book": "The Little Book of Behavioral Investing",
+      "author": "James Montier",
+      "source_chapter": "Chapter 4 - Why Can't We Accept Losses?",
+      "rule": "Loss aversion causes traders to hold losing positions too long (hoping for recovery) and cut winning positions too soon (fear of giving back gains). The solution is systematic, pre-defined exits based on price, not emotion. Never let a loss run beyond your predefined stop, regardless of conviction.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "ENFORCE_STRICT_SL: loss aversion override — mechanical stop execution"
+      },
+      "keywords": [
+        "loss aversion",
+        "hold losers",
+        "cut winners",
+        "hope",
+        "mechanical",
+        "stop"
+      ],
+      "actions": []
+    },
+    {
+      "id": "montier_overconfidence_size",
+      "level": 2,
+      "category": "risk",
+      "book": "The Little Book of Behavioral Investing",
+      "author": "James Montier",
+      "source_chapter": "Chapter 2 - Overconfidence",
+      "rule": "After a string of winning trades, overconfidence leads to oversizing. Studies show traders increase position sizes by 30-50% after win streaks, right before a mean-reversion loss. After 5+ consecutive wins, reduce position size by 25% as a precaution.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "After win streak (5+), reduce kelly_fraction by 25% against overconfidence"
+      },
+      "keywords": [
+        "overconfidence",
+        "win streak",
+        "oversizing",
+        "reduce",
+        "mean reversion"
+      ],
+      "actions": []
+    },
+    {
+      "id": "montier_recency_bias",
+      "level": 2,
+      "category": "psychology",
+      "book": "The Little Book of Behavioral Investing",
+      "author": "James Montier",
+      "source_chapter": "Chapter 3 - Act in Haste, Repent at Leisure",
+      "rule": "Recency bias causes traders to give disproportionate weight to recent events. After a big move, traders assume the trend will continue indefinitely. After a crash, they assume markets will continue falling. Base rate analysis (what usually happens after similar situations historically) is more reliable than intuition based on recent events.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "BEHAVIORAL_BIAS_PENALTY: recency bias check via historical base rate"
+      },
+      "keywords": [
+        "recency bias",
+        "recent events",
+        "base rate",
+        "historical",
+        "intuition"
+      ],
+      "actions": []
+    },
+    {
+      "id": "montier_rules_based_system",
+      "level": 2,
+      "category": "strategy",
+      "book": "The Little Book of Behavioral Investing",
+      "author": "James Montier",
+      "source_chapter": "Chapter 10 - The Art of Valuation",
+      "rule": "A rules-based system removes the biggest risk in investing: yourself. The system doesn't get overconfident, scared, or bored. Every variable in the decision process should be defined BEFORE encountering the situation. If it's not in the rules, you don't do it.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Rules-based execution: only trade what matches pre-defined criteria"
+      },
+      "keywords": [
+        "rules-based",
+        "mechanical",
+        "system",
+        "remove bias",
+        "pre-defined"
+      ],
+      "actions": []
+    },
+    {
+      "id": "montier_valuation_anchor",
+      "level": 2,
+      "category": "signal",
+      "book": "The Little Book of Behavioral Investing",
+      "author": "James Montier",
+      "source_chapter": "Chapter 10 - The Art of Valuation",
+      "rule": "Anchoring bias: traders fixate on an arbitrary reference price (their entry, 52-week high) and make decisions relative to it rather than current fair value. The market doesn't know or care about your cost basis. Evaluate each trade as if entering fresh, ignoring sunk costs.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "BEHAVIORAL_BIAS_PENALTY: evaluate fresh, ignore anchoring to entry price"
+      },
+      "keywords": [
+        "anchoring",
+        "entry price",
+        "cost basis",
+        "sunk cost",
+        "fresh evaluation"
+      ],
+      "actions": []
+    },
+    {
+      "id": "steenbarger_consecutive_losses",
+      "level": 2,
+      "category": "risk",
+      "book": "Trading Psychology 2.0",
+      "author": "Brett N. Steenbarger",
+      "source_chapter": "Chapter 2 - Building on Strengths",
+      "rule": "After 3 consecutive losses, reduce position size by 50%. After 5 consecutive losses, stop trading and review. Loss streaks indicate either market regime change or degraded execution quality. Halving size during a losing streak prevents account destruction.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "LOSING_STREAK_PROTECTION: after 3 consecutive losses, halve position size"
+      },
+      "keywords": [
+        "consecutive losses",
+        "3 losses",
+        "reduce size",
+        "losing streak",
+        "review"
+      ],
+      "actions": []
+    },
+    {
+      "id": "steenbarger_deliberate_practice",
+      "level": 2,
+      "category": "psychology",
+      "book": "Trading Psychology 2.0",
+      "author": "Brett N. Steenbarger",
+      "source_chapter": "Chapter 7 - The Developing Trader",
+      "rule": "Deliberate practice — not mere repetition — creates expertise. Review every trade: what was the plan, what happened, what would you do differently. The trader who reviews 1000 trades with intent learns faster than one who takes 10,000 trades without reflection.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: deliberate practice — systematic trade review"
+      },
+      "keywords": [
+        "deliberate practice",
+        "review",
+        "reflection",
+        "expertise",
+        "plan"
+      ],
+      "actions": []
+    },
+    {
+      "id": "steenbarger_flow_state",
+      "level": 2,
+      "category": "psychology",
+      "book": "Trading Psychology 2.0",
+      "author": "Brett N. Steenbarger",
+      "source_chapter": "Chapter 4 - Cultivating Flow",
+      "rule": "The flow state (optimal performance) occurs when challenge matches skill level. Trade at a position size where losses don't cause emotional distress. If a potential loss would significantly affect your emotional state, the position is too large — reduce to a 'sleep at night' size.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "PSYCHOLOGY_FLAG: position size must allow flow state — emotional comfort"
+      },
+      "keywords": [
+        "flow state",
+        "challenge",
+        "skill",
+        "emotional",
+        "sleep at night",
+        "size"
+      ],
+      "actions": []
+    },
+    {
+      "id": "steenbarger_market_regime_adaptation",
+      "level": 2,
+      "category": "strategy",
+      "book": "Trading Psychology 2.0",
+      "author": "Brett N. Steenbarger",
+      "source_chapter": "Chapter 6 - Adapting to Market Cycles",
+      "rule": "Markets evolve — strategies that worked in trending conditions fail in ranging ones. The elite trader's edge is the ability to recognize regime changes early and adapt. Keep a running score of current strategy performance: if win rate drops below statistical expectation for 20+ trades, pause and reassess the strategy.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Regime adaptation: detect strategy degradation via rolling win rate"
+      },
+      "keywords": [
+        "market regime",
+        "adaptation",
+        "evolve",
+        "win rate drop",
+        "reassess"
+      ],
+      "actions": []
+    },
+    {
+      "id": "steenbarger_overtrading_signal",
+      "level": 2,
+      "category": "risk",
+      "book": "Trading Psychology 2.0",
+      "author": "Brett N. Steenbarger",
+      "source_chapter": "Chapter 5 - Overcoming Weaknesses",
+      "rule": "Overtrading is a psychological symptom, not a strategy. Signs of overtrading: taking trades outside your defined criteria, increasing size after losses, feeling compelled to 'be in the market'. When detected, immediately reduce to minimum size until the urge passes.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Overtrading detection: flag high trade frequency as psychological symptom"
+      },
+      "keywords": [
+        "overtrading",
+        "compelled",
+        "criteria",
+        "urge",
+        "size",
+        "psychological"
+      ],
+      "actions": []
+    },
+    {
+      "id": "steenbarger_process_metrics",
+      "level": 2,
+      "category": "performance",
+      "book": "Trading Psychology 2.0",
+      "author": "Brett N. Steenbarger",
+      "source_chapter": "Chapter 1 - Developing Best Practices",
+      "rule": "Track process metrics, not just P&L: Entry timing quality (how close to intended entry), stop adherence rate (% trades where stop was respected), plan adherence (% trades matching pre-defined criteria). A high-quality process precedes consistent P&L results.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Track process quality metrics: stop adherence, plan adherence"
+      },
+      "keywords": [
+        "process metrics",
+        "P&L",
+        "entry timing",
+        "stop adherence",
+        "quality"
+      ],
+      "actions": []
+    },
+    {
+      "id": "steenbarger_win_rate_context",
+      "level": 2,
+      "category": "performance",
+      "book": "Trading Psychology 2.0",
+      "author": "Brett N. Steenbarger",
+      "source_chapter": "Chapter 3 - Radical Acceptance",
+      "rule": "Win rate alone is meaningless without knowing the average win/loss ratio. A 40% win rate with 3:1 reward-risk has higher expectancy than a 60% win rate with 1:1 reward-risk. Always evaluate system quality using expectancy = (WR * avg_win) - (LR * avg_loss).",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Expectancy = (WR * avg_win) - (LR * avg_loss) > 0 required"
+      },
+      "keywords": [
+        "win rate",
+        "expectancy",
+        "reward risk",
+        "average win",
+        "average loss"
+      ],
+      "actions": []
+    },
+    {
+      "id": "advanced_mean_reversion_zscore",
+      "level": 3,
+      "category": "signal",
+      "book": "Advanced Algos",
+      "author": "Bissette, Strauss, Van Der Post",
+      "source_chapter": "Chapter - Mean Reversion",
+      "rule": "For intraday mean reversion: use VWAP deviation as the trigger. Price > 2 std dev above VWAP → short, target VWAP return. Price > 2 std dev below VWAP → long, target VWAP return. VWAP mean reversion works best in stocks during regular trading hours and in crypto during the first 4-6 hours of the UTC day.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "VWAP ±2 std as intraday mean reversion trigger"
+      },
+      "keywords": [
+        "VWAP",
+        "deviation",
+        "intraday",
+        "mean reversion",
+        "2 std dev"
+      ],
+      "actions": []
+    },
+    {
+      "id": "advanced_momentum_factor",
+      "level": 3,
+      "category": "signal",
+      "book": "Advanced Algos",
+      "author": "Bissette, Strauss, Van Der Post",
+      "source_chapter": "Chapter - Momentum Factors",
+      "rule": "The momentum factor (12-month return, skipping last month) is the most robust quantitative anomaly. Assets with strong 12-month momentum tend to continue outperforming. Skip the last month to avoid short-term reversal (1-month reversal effect). Rebalance monthly to maintain factor exposure.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Momentum factor: 12M return (skip 1M) as signal, monthly rebalance"
+      },
+      "keywords": [
+        "momentum factor",
+        "12 month",
+        "skip last month",
+        "reversal",
+        "rebalance"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_adf_test_stationarity",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - Cointegration and Stationarity",
+      "rule": "Before deploying a mean-reversion strategy on a spread, verify stationarity using the Augmented Dickey-Fuller (ADF) test. If ADF test p-value > 0.05, the spread is non-stationary — do NOT use mean-reversion. Only trade mean-reversion when the spread is proven stationary (p < 0.05).",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Statistical filter: mean-reversion strategies require confirmed stationarity"
+      },
+      "keywords": [
+        "ADF",
+        "stationarity",
+        "mean reversion",
+        "spread",
+        "p-value",
+        "cointegration"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_backtest_overfitting",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "Overfitting in backtesting is the #1 danger of algorithmic trading. A strategy with too many parameters 'curve-fits' to historical noise, producing excellent backtest results but poor live performance. Rule: minimum 252 trades (1 year of daily trades) per backtest with < 5 parameters.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Backtest validation: minimum 252 trades required, max 5 free parameters"
+      },
+      "keywords": [
+        "overfitting",
+        "curve fitting",
+        "backtest",
+        "parameters",
+        "noise",
+        "live performance"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_cointegration_pairs",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 4 - Cointegration",
+      "rule": "Cointegrated pairs are assets whose prices move together over the long term but diverge in the short term — the divergence is tradeable. Test cointegration with the Engle-Granger or Johansen test. Trade when the spread deviates by more than 2 standard deviations from its mean.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Pairs trading: 2-sigma deviation from spread mean triggers entry"
+      },
+      "keywords": [
+        "cointegration",
+        "pairs trading",
+        "spread",
+        "2 standard deviations",
+        "Engle-Granger"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_cross_sectional_momentum",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 3 - Momentum Strategies",
+      "rule": "Cross-sectional momentum: buy the top-performing assets and short the bottom performers from a universe of assets over the lookback period. This relative approach is more robust than time-series momentum alone. Rebalance monthly or quarterly to capture momentum factor.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Relative strength ranking for asset selection in multi-symbol portfolios"
+      },
+      "keywords": [
+        "cross-sectional",
+        "momentum",
+        "relative strength",
+        "top performers",
+        "ranking"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_fat_tail_risk",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Risk Management",
+      "rule": "Financial returns have fat tails — extreme losses happen far more often than a normal distribution predicts. Never assume returns are normally distributed when sizing positions. Use conditional Value-at-Risk (CVaR) rather than standard deviation for risk measurement. A 5-sigma event in finance happens every few years, not once every 3.5 million years.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Fat tails awareness: conservative sizing to withstand 5-sigma events"
+      },
+      "keywords": [
+        "fat tails",
+        "extreme losses",
+        "normal distribution",
+        "CVaR",
+        "5-sigma"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_half_kelly_conservative",
+      "level": 3,
+      "category": "sizing",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - The Basics of Mean-Reverting Strategies",
+      "rule": "In practice, use half-Kelly (f*/2) rather than full Kelly. Full Kelly is optimal only with perfect parameter estimates, which never occur. Parameter estimation errors cause full Kelly to over-bet by 50-100%. Half-Kelly reduces bet size significantly while losing only 25% of growth rate.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "CAP_KELLY: kelly_fraction capped at 0.5 of full Kelly — Chan's recommendation"
+      },
+      "keywords": [
+        "half kelly",
+        "conservative",
+        "parameter estimation",
+        "overbetting",
+        "growth rate"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_hurst_exponent",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - Mean-Reverting Strategies",
+      "rule": "The Hurst Exponent indicates the type of price process: H < 0.5 → mean-reverting process (use range strategies), H = 0.5 → random walk (no predictability), H > 0.5 → trending process (use momentum strategies). Calculate H on at least 100 data points for statistical validity.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "Hurst exponent determines regime: H<0.5 → RANGING, H>0.5 → TRENDING"
+      },
+      "keywords": [
+        "Hurst",
+        "exponent",
+        "mean reverting",
+        "trending",
+        "random walk",
+        "regime"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_information_ratio",
+      "level": 3,
+      "category": "performance",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Performance Metrics",
+      "rule": "The Information Ratio (IR) measures a strategy's excess return vs benchmark per unit of tracking error. IR = (Strategy Return - Benchmark Return) / Tracking Error Std Dev. IR > 0.5 is good for daily rebalanced strategies. IR is more meaningful than Sharpe ratio for strategies benchmarked against the market.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Performance metric: Information Ratio > 0.5 validates strategy vs benchmark"
+      },
+      "keywords": [
+        "information ratio",
+        "IR",
+        "tracking error",
+        "benchmark",
+        "excess return"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_kelly_criterion_formula",
+      "level": 3,
+      "category": "sizing",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - The Basics of Mean-Reverting Strategies",
+      "rule": "The Kelly formula for optimal position size: f = (m - r) / s² where m = expected return, r = risk-free rate, s² = variance of returns. For a binary win/loss system: f = (p*b - q) / b where p = win rate, b = profit/loss ratio, q = 1-p. This fraction maximizes long-term geometric growth rate.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Mathematical foundation for position sizing — use Kelly formula for f*"
+      },
+      "keywords": [
+        "kelly",
+        "formula",
+        "optimal",
+        "win rate",
+        "profit ratio",
+        "geometric growth"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_kelly_negative_skip",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - Position Sizing",
+      "rule": "If the Kelly fraction is negative, the expected value of the trade is negative. Do not take the trade — a negative Kelly means the strategy has no edge in the current market conditions. A 0% Kelly (do not bet) is preferable to a negative-expectancy position.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "If computed Kelly fraction < 0, refuse the trade entirely (no edge)"
+      },
+      "keywords": [
+        "negative kelly",
+        "no edge",
+        "expected value",
+        "skip trade",
+        "0%"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_leverage_control",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 2 - Leverage",
+      "rule": "Leverage amplifies both gains and losses. Using full Kelly already implies leverage in many strategies. Maximum leverage should be computed from the Kelly fraction and available margin. In volatile markets (crisis periods), reduce leverage by 50% as a precautionary measure.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Leverage cap: reduce by 50% in high-volatility regimes; Kelly-derived max leverage"
+      },
+      "keywords": [
+        "leverage",
+        "Kelly",
+        "margin",
+        "volatile",
+        "amplifies",
+        "reduce"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_market_impact",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "Large orders move the market against you (market impact). Position size must be limited to avoid moving the price more than 10 basis points. A rule of thumb: trade maximum 1% of the average daily volume of the asset. Exceeding this limit significantly degrades execution quality.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Market impact cap: max position = 1% of average daily volume"
+      },
+      "keywords": [
+        "market impact",
+        "volume",
+        "daily volume",
+        "1%",
+        "slippage",
+        "large order"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_momentum_crashes",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 3 - Momentum Strategies",
+      "rule": "Momentum strategies are subject to sudden, severe 'momentum crashes' — typically when market volatility spikes (VIX > 30) after a prolonged trend. Reduce position sizes significantly during high-volatility regimes. A volatility-scaled position sizing approach (÷ realized vol) mitigates this risk.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Volatility scaling: reduce size during VIX spikes to prevent momentum crash losses"
+      },
+      "keywords": [
+        "momentum crash",
+        "volatility",
+        "VIX",
+        "spike",
+        "reduce position",
+        "vol scaling"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_momentum_lookback_optimal",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 3 - Momentum Strategies",
+      "rule": "Time-series momentum strategies perform best with lookback periods of 3 to 12 months. Shorter lookback (< 1 month) captures noise; longer lookback (> 12 months) mean-reverts. The optimal lookback varies by asset class: Equities: 6-12 months, Commodities: 3-12 months, Crypto: 1-6 months.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Momentum lookback calibration: 3-12 months optimal for trend following"
+      },
+      "keywords": [
+        "momentum",
+        "lookback",
+        "3 months",
+        "12 months",
+        "time series",
+        "optimal"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_out_of_sample_test",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "Always reserve an out-of-sample dataset for final validation. Use 80% of data for in-sample development, 20% held out for OOS testing. A strategy is valid only if the OOS Sharpe ratio is within 50% of in-sample Sharpe. If OOS significantly underperforms in-sample, the strategy is overfit.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "OOS validation: in-sample/out-of-sample split for strategy robustness"
+      },
+      "keywords": [
+        "out of sample",
+        "OOS",
+        "validation",
+        "80/20",
+        "Sharpe ratio",
+        "overfit"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_regime_detection",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 6 - Interday Momentum and Mean Reversion",
+      "rule": "No single strategy works in all market regimes. Momentum strategies outperform in trending regimes. Mean-reversion strategies outperform in ranging regimes. Use a regime-detection mechanism (HMM, Hurst exponent, or ADX) to switch between strategies dynamically.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Regime detection is critical: TRENDING → momentum, RANGING → mean-reversion"
+      },
+      "keywords": [
+        "regime",
+        "momentum",
+        "mean reversion",
+        "switch",
+        "HMM",
+        "ADX",
+        "dynamic"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_sharpe_ratio_minimum",
+      "level": 3,
+      "category": "performance",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "A minimum annualized Sharpe Ratio of 1.0 is required before live deployment. Sharpe > 2.0 is excellent for an algorithmic strategy. The Sharpe should be calculated on out-of-sample data, not in-sample. A Sharpe of 0.5-1.0 is marginal and requires additional confirmation.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Sharpe ratio minimum standard for strategy approval"
+      },
+      "keywords": [
+        "Sharpe",
+        "ratio",
+        "1.0",
+        "minimum",
+        "annualized",
+        "deployment"
+      ],
+      "actions": []
+    },
+    {
+      "id": "chan_transaction_costs_realistic",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading",
+      "author": "Ernest P. Chan",
+      "source_chapter": "Chapter 1 - Backtesting and Automated Execution",
+      "rule": "Always include realistic transaction costs in backtests: commissions, bid-ask spread, and slippage (market impact). For high-frequency strategies, slippage can eliminate all profits. Rule of thumb: if removing transaction costs doubles your Sharpe, the strategy is marginal — costs are destroying the edge.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Transaction cost realism: commissions + spread + slippage must all be modeled"
+      },
+      "keywords": [
+        "transaction costs",
+        "commissions",
+        "slippage",
+        "bid-ask",
+        "realistic",
+        "backtest"
+      ],
+      "actions": []
+    },
+    {
+      "id": "koru_execution_algo_twap",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithm Trading: Mastering The Use Of Computer Algorithms",
+      "author": "Koru",
+      "source_chapter": "Chapter - Execution Algorithms",
+      "rule": "For large orders, use Time-Weighted Average Price (TWAP) execution to minimize market impact. Split the order into equal slices across a defined time window. TWAP is preferred when urgency is low and minimizing slippage is prioritized. VWAP execution (volume-weighted) is preferred when market participation rate matters.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Large order execution: TWAP slicing to minimize market impact"
+      },
+      "keywords": [
+        "TWAP",
+        "execution",
+        "large order",
+        "slippage",
+        "VWAP",
+        "split"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ml_feature_composite_signal",
+      "level": 3,
+      "category": "signal",
+      "book": "Machine Learning for Algorithmic Trading",
+      "author": "Stefan Jansen",
+      "source_chapter": "Chapter 4 - Financial Features",
+      "rule": "Composite signals that combine multiple weak indicators outperform single strong ones. Create a composite score from: momentum (3m return), mean reversion (Z-score of price), volatility (ATR percentile), and volume (OBV trend). A composite signal with all 4 components aligned in the same direction has statistically higher predictive power than any single component.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.5,
+        "description": "ML_CONFIDENCE_BOOST: composite multi-factor signal adds to score"
+      },
+      "keywords": [
+        "composite",
+        "signal",
+        "momentum",
+        "Z-score",
+        "ATR",
+        "OBV",
+        "multi-factor"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ml_feature_importance",
+      "level": 3,
+      "category": "strategy",
+      "book": "Machine Learning for Algorithmic Trading",
+      "author": "Stefan Jansen",
+      "source_chapter": "Chapter 4 - Feature Engineering",
+      "rule": "Periodically evaluate which features are driving model predictions (SHAP values). If a model is primarily driven by a single feature (> 50% importance), it is fragile — rebuild with more diverse features. Feature importance changes over time — retrain models quarterly.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Model robustness: diversify features, retrain quarterly, monitor SHAP"
+      },
+      "keywords": [
+        "SHAP",
+        "feature importance",
+        "model",
+        "fragile",
+        "retrain",
+        "quarterly"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ml_hidden_markov_regime",
+      "level": 3,
+      "category": "strategy",
+      "book": "Machine Learning for Algorithmic Trading",
+      "author": "Stefan Jansen",
+      "source_chapter": "Chapter 16 - Unsupervised Learning",
+      "rule": "Hidden Markov Models (HMM) identify latent market regimes more accurately than simple ADX thresholds. Typical HMM states: State 0 = Low volatility trend (momentum strategies work), State 1 = High volatility trending (reduce size), State 2 = Mean-reverting range (range strategies work). Switch strategy based on current HMM state.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.0,
+        "description": "ML_CONFIDENCE_BOOST: HMM regime detection improves strategy selection"
+      },
+      "keywords": [
+        "HMM",
+        "hidden markov",
+        "regime",
+        "state",
+        "clustering",
+        "latent"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ml_model_confidence_sizing",
+      "level": 3,
+      "category": "sizing",
+      "book": "Machine Learning for Algorithmic Trading",
+      "author": "Stefan Jansen",
+      "source_chapter": "Chapter 11 - Risk Management with ML",
+      "rule": "Scale position size proportionally to model confidence (predicted probability). P(signal) > 0.7: full position. P(signal) 0.6-0.7: 75% position. P(signal) 0.5-0.6: 50% position. P(signal) < 0.5: no trade. This translates model uncertainty directly into risk management.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "ML_CONFIDENCE_BOOST: scale position size by model probability"
+      },
+      "keywords": [
+        "model confidence",
+        "probability",
+        "0.7",
+        "position size",
+        "uncertainty"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ml_volatility_regime_features",
+      "level": 3,
+      "category": "strategy",
+      "book": "Machine Learning for Algorithmic Trading",
+      "author": "Stefan Jansen",
+      "source_chapter": "Chapter 5 - Engineered Features",
+      "rule": "Volatility regime features help ML models distinguish market conditions: ATR percentile (vs 52-week range): < 20% = low vol (mean reversion), > 80% = high vol (trending or crisis). Realized volatility vs implied volatility ratio: ratio < 0.8 = calm trend, ratio > 1.2 = turbulent, reduce position.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Volatility percentile-based regime detection for strategy selection"
+      },
+      "keywords": [
+        "volatility",
+        "regime",
+        "ATR percentile",
+        "realized",
+        "implied",
+        "features"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ml_walk_forward_validation",
+      "level": 3,
+      "category": "strategy",
+      "book": "Machine Learning for Algorithmic Trading",
+      "author": "Stefan Jansen",
+      "source_chapter": "Chapter 3 - Strategy Evaluation",
+      "rule": "Walk-forward optimization (WFO) prevents overfitting in ML strategies: Train on window T, test on T+1, roll forward. If the strategy's Sharpe degrades by > 30% from in-sample to OOS across multiple WFO periods, the model is overfit and should not be deployed. Minimum 5 walk-forward periods for statistical validity.",
+      "confidence": 1.0,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Walk-forward validation: minimum 5 periods, <30% Sharpe degradation"
+      },
+      "keywords": [
+        "walk-forward",
+        "WFO",
+        "overfitting",
+        "Sharpe degradation",
+        "rolling"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ml_zscore_mean_reversion",
+      "level": 3,
+      "category": "signal",
+      "book": "Machine Learning for Algorithmic Trading",
+      "author": "Stefan Jansen",
+      "source_chapter": "Chapter 7 - Time Series Strategies",
+      "rule": "The Z-score of price relative to its rolling mean is the most reliable mean-reversion trigger: Z = (price - rolling_mean) / rolling_std. Z > +2.0 = overbought, sell signal for mean reversion. Z < -2.0 = oversold, buy signal for mean reversion. Only valid in stationary markets (ADF confirmed) with Hurst < 0.5.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "RANGING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 1.5,
+        "description": "Z-score ±2 sigma trigger for mean reversion in stationary markets"
+      },
+      "keywords": [
+        "Z-score",
+        "mean reversion",
+        "rolling",
+        "2 sigma",
+        "stationary"
+      ],
+      "actions": []
+    },
+    {
+      "id": "python_bid_ask_spread_filter",
+      "level": 3,
+      "category": "filter",
+      "book": "Python for Algorithmic Trading Cookbook",
+      "author": "Jason Strimpel",
+      "source_chapter": "Chapter 3 - Execution and Order Management",
+      "rule": "The bid-ask spread is an immediate cost that must be factored into expected profit. Reject any trade where the spread exceeds 0.1% of the asset price for liquid assets, or 0.3% for less liquid assets. A wide spread signals low liquidity — your exits will be costly. Spread cost = spread / mid_price * 100 in basis points.",
+      "confidence": 0.95,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": -1.0,
+        "description": "Liquidity filter: reject if bid-ask spread > 0.1% (liquid) or 0.3% (illiquid)"
+      },
+      "keywords": [
+        "bid-ask",
+        "spread",
+        "liquidity",
+        "0.1%",
+        "cost",
+        "reject",
+        "filter"
+      ],
+      "actions": []
+    },
+    {
+      "id": "python_order_book_depth",
+      "level": 3,
+      "category": "filter",
+      "book": "Python for Algorithmic Trading Cookbook",
+      "author": "Jason Strimpel",
+      "source_chapter": "Chapter 3 - Execution and Order Management",
+      "rule": "Check order book depth before entry: ensure sufficient liquidity at your intended price. If your order size exceeds 10% of the best bid/ask quantity, expect significant slippage. Reduce size or use limit orders. For market orders, never exceed 1% of average daily volume in a single order.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": true,
+        "score_weight": 0.0,
+        "description": "Order book depth check: max 10% of best bid/ask, or use limit orders"
+      },
+      "keywords": [
+        "order book",
+        "depth",
+        "slippage",
+        "limit order",
+        "daily volume"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ratford_dow_seasonality",
+      "level": 3,
+      "category": "signal",
+      "book": "Algorithmic Trading Strategies",
+      "author": "Scotty Ratford",
+      "source_chapter": "Chapter - Seasonal Patterns",
+      "rule": "Day-of-week effects are statistically persistent: Monday: typically weakest day (weekend news digestion), slight negative bias. Tuesday-Wednesday: strongest days for continuation of prior week's trend. Friday: profit-taking before weekend, often reversal of Thursday's direction. Use this as a minor modifier: +0.3 on Tuesday/Wednesday, -0.3 on Monday/Friday.",
+      "confidence": 0.7,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.3,
+        "description": "Day-of-week seasonality: minor score modifier based on statistical tendency"
+      },
+      "keywords": [
+        "seasonality",
+        "Monday",
+        "Friday",
+        "day of week",
+        "calendar effect"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ratford_end_of_month_effect",
+      "level": 3,
+      "category": "signal",
+      "book": "Algorithmic Trading Strategies",
+      "author": "Scotty Ratford",
+      "source_chapter": "Chapter - Seasonal Patterns",
+      "rule": "The turn-of-month effect: the last 2 trading days and first 3 trading days of each month have statistically higher average returns due to institutional fund flows and pension rebalancing. Slightly increase long bias during this window for equity assets.",
+      "confidence": 0.7,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.3,
+        "description": "Turn-of-month: minor long bias boost during last 2 / first 3 trading days"
+      },
+      "keywords": [
+        "end of month",
+        "turn of month",
+        "pension",
+        "fund flows",
+        "rebalancing"
+      ],
+      "actions": []
+    },
+    {
+      "id": "ratford_multiple_entry_scale_in",
+      "level": 3,
+      "category": "strategy",
+      "book": "Algorithmic Trading Strategies",
+      "author": "Scotty Ratford",
+      "source_chapter": "Chapter - Entry Strategies",
+      "rule": "Scale-in entries reduce average entry price risk: Enter 50% at the initial signal, add 25% if price confirms with a new signal in the same direction, add final 25% only after the position is profitable. Never add to a losing position — averaging down is a destroyer of accounts.",
+      "confidence": 0.9,
+      "applicable_regimes": [
+        "TRENDING"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Scale-in strategy: 50/25/25 split on confirmation, never average losers"
+      },
+      "keywords": [
+        "scale in",
+        "average",
+        "confirm",
+        "add to winner",
+        "never average down"
+      ],
+      "actions": []
+    },
+    {
+      "id": "strimpel_autocorrelation_timing",
+      "level": 3,
+      "category": "signal",
+      "book": "Python for Algorithmic Trading Cookbook",
+      "author": "Jason Strimpel",
+      "source_chapter": "Chapter 7 - Time Series Analysis",
+      "rule": "Positive autocorrelation (AR coefficient > 0) in returns indicates momentum: recent positive returns predict near-future positive returns. Negative autocorrelation (AR < 0) indicates mean reversion: recent positive returns predict near-future negative returns. Test autocorrelation at lag 1 and lag 5 for intraday patterns.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "Autocorrelation test: positive AR = momentum strategy, negative AR = mean reversion"
+      },
+      "keywords": [
+        "autocorrelation",
+        "AR",
+        "momentum",
+        "mean reversion",
+        "lag 1",
+        "returns"
+      ],
+      "actions": []
+    },
+    {
+      "id": "strimpel_portfolio_rebalancing",
+      "level": 3,
+      "category": "strategy",
+      "book": "Python for Algorithmic Trading Cookbook",
+      "author": "Jason Strimpel",
+      "source_chapter": "Chapter 10 - Portfolio Construction",
+      "rule": "Systematic portfolio rebalancing captures mean-reversion between assets. Set rebalancing thresholds (5% drift from target) rather than calendar-based rebalancing. Threshold rebalancing reduces transaction costs while maintaining target allocation. Rebalance immediately when any position drifts more than 5% from target weight.",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Portfolio rebalancing: 5% drift threshold triggers allocation adjustment"
+      },
+      "keywords": [
+        "rebalancing",
+        "5% drift",
+        "threshold",
+        "allocation",
+        "target",
+        "portfolio"
+      ],
+      "actions": []
+    },
+    {
+      "id": "vanderpost_delta_hedge",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading Pro: Options Trading with Python",
+      "author": "L.J. Van Der Post",
+      "source_chapter": "Chapter - Delta Hedging",
+      "rule": "Delta measures the directional exposure of an options portfolio. Net portfolio Delta > 1.5 = excessive directional bet, reduce by closing positions or hedging. For a delta-neutral approach: periodically rebalance to keep net delta near 0. Delta hedging eliminates directional risk but retains volatility exposure (Vega).",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Delta monitoring: excessive directional delta > 1.5 triggers size reduction"
+      },
+      "keywords": [
+        "delta",
+        "hedge",
+        "options",
+        "directional",
+        "delta-neutral",
+        "rebalance"
+      ],
+      "actions": []
+    },
+    {
+      "id": "vanderpost_vega_vix_relationship",
+      "level": 3,
+      "category": "signal",
+      "book": "Power Trader: Options Trading with Python",
+      "author": "L.J. Van Der Post",
+      "source_chapter": "Chapter - Volatility Trading",
+      "rule": "Vega-positive strategies (long options) profit from volatility expansion. When VIX is historically low (< 15), buying options (long Vega) is cheap. When VIX spikes above 30, selling options (short Vega) captures elevated premium. Map current VIX level to strategy preference: VIX < 15: buy vol. VIX 15-25: neutral. VIX > 25: sell vol.",
+      "confidence": 0.8,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.5,
+        "description": "VIX-based volatility regime: low VIX favors long-vol, high VIX favors short-vol"
+      },
+      "keywords": [
+        "vega",
+        "VIX",
+        "volatility",
+        "long options",
+        "short options",
+        "premium"
+      ],
+      "actions": []
     }
-  ]
+  ],
+  "stats": {
+    "total": 133,
+    "by_level": {
+      "1": 38,
+      "2": 58,
+      "3": 37
+    },
+    "by_category": {
+      "signal": 46,
+      "risk": 20,
+      "trend": 2,
+      "filter": 16,
+      "psychology": 13,
+      "exit": 3,
+      "strategy": 24,
+      "sizing": 5,
+      "performance": 4
+    },
+    "by_author": {
+      "Thami Kabbaj": 11,
+      "John J. Murphy": 24,
+      "Bob Volman": 10,
+      "James Bruwer": 2,
+      "Chris Burniske": 6,
+      "T.D.C. Jamie": 5,
+      "Dr. Alexander Elder": 20,
+      "Robert Lustig": 3,
+      "James Montier": 8,
+      "Brett N. Steenbarger": 7,
+      "Bissette, Strauss, Van Der Post": 2,
+      "Ernest P. Chan": 18,
+      "Koru": 1,
+      "Stefan Jansen": 7,
+      "Jason Strimpel": 4,
+      "Scotty Ratford": 3,
+      "L.J. Van Der Post": 2
+    },
+    "by_regime": {
+      "TRENDING": 40,
+      "RANGING": 30,
+      "ALL": 78
+    },
+    "filters": 36,
+    "avg_confidence": 0.923
+  }
 }

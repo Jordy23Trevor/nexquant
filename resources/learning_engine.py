@@ -1,17 +1,26 @@
 """
-NexQuant Learning Engine
-========================
-Parses trading books (PDF / TXT / MD) placed in resources/books/
-and extracts actionable trading rules for the bot.
+NexQuant Learning Engine v2
+============================
+Moteur de chargement et d'indexation des connaissances de trading.
 
-Usage:
-    python resources/learning_engine.py               # process all new books
-    python resources/learning_engine.py --summary     # print loaded rules
-    python resources/learning_engine.py --reset       # rebuild full index
+Architecture (crescendo) :
+  Niveau 1 : Murphy  — Fondations (lecture du marché, indicateurs, tendances)
+  Niveau 2 : Elder   — Systèmes (Triple Screen, Iron Triangle, Impulse)
+  Niveau 3 : Chan    — Quantitatif (Kelly, stationnarité, backtesting)
 
-The bot loads the knowledge index at startup via:
+Usage :
+    python resources/learning_engine.py               # traiter les nouveaux livres
+    python resources/learning_engine.py --summary     # afficher les règles chargées
+    python resources/learning_engine.py --reset       # reconstruire l'index complet
+
+Le bot charge l'index au démarrage via :
     from resources.learning_engine import load_knowledge_index
     rules = load_knowledge_index()
+
+Le bot peut filtrer par niveau :
+    from resources.learning_engine import get_rules_by_level, get_rules_by_category
+    foundation_rules = get_rules_by_level(1)     # Murphy
+    risk_rules = get_rules_by_category("risk")
 """
 
 import os
@@ -22,10 +31,17 @@ import argparse
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 log = logging.getLogger("learning_engine")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Ajouter le répertoire parent (nexquant/) au sys.path pour les imports relatifs
+_THIS_FILE = Path(__file__).resolve()
+_NEXQUANT_ROOT = _THIS_FILE.parent.parent  # nexquant/
+if str(_NEXQUANT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_NEXQUANT_ROOT))
+
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR   = Path(__file__).parent
@@ -33,96 +49,141 @@ BOOKS_DIR  = BASE_DIR / "books"
 KNOW_DIR   = BASE_DIR / "knowledge"
 INDEX_FILE = BASE_DIR / "knowledge_index.json"
 
-# ─── Known authors and their key principles ───────────────────────────────────
-AUTHOR_RULE_SEEDS: Dict[str, Dict] = {
-    "elder": {
-        "author":  "Dr. Alexander Elder",
-        "source":  "Vivre du Trading",
-        "rules": [
-            {"id": "elder_triple_screen",    "category": "strategy",     "rule": "Triple Screen: weekly trend + daily oscillator + intraday entry."},
-            {"id": "elder_2pct_rule",        "category": "risk",         "rule": "Never risk more than 2% of account equity on a single trade."},
-            {"id": "elder_6pct_rule",        "category": "risk",         "rule": "Stop trading the month if monthly drawdown exceeds 6%."},
-            {"id": "elder_macd_divergence",  "category": "signal",       "rule": "MACD divergence from price is a high-probability reversal signal."},
-            {"id": "elder_force_index",      "category": "signal",       "rule": "Force Index (price * volume) confirms trend strength or weakness."},
-            {"id": "elder_ema_envelope",     "category": "signal",       "rule": "Price outside EMA envelope signals overbought/oversold conditions."},
-            {"id": "elder_iron_triangle",    "category": "risk",         "rule": "Iron Triangle: money management → entries → psychology (in that order)."},
-        ]
-    },
-    "kabbaj": {
-        "author":  "Thami Kabbaj",
-        "source":  "L'Art du Trading",
-        "rules": [
-            {"id": "kabbaj_kelly",           "category": "sizing",       "rule": "Kelly Fraction: size = edge / odds. Use 25% of Kelly (fractional Kelly) to reduce ruin risk."},
-            {"id": "kabbaj_rr_minimum",      "category": "risk",         "rule": "Minimum 2:1 reward-to-risk ratio on every trade entry."},
-            {"id": "kabbaj_partial_tp",      "category": "exit",         "rule": "Take 50% profit at TP1, let the rest run with a trailing stop."},
-            {"id": "kabbaj_price_action",    "category": "signal",       "rule": "Pure price action patterns (pin bars, engulfing) outperform indicators alone."},
-            {"id": "kabbaj_sector_rotation", "category": "strategy",     "rule": "Follow capital rotation between sectors to anticipate trend changes."},
-            {"id": "kabbaj_psychology",      "category": "psychology",   "rule": "Trading is 90% psychology. Discipline and routine create consistent results."},
-        ]
-    },
-    "douglas": {
-        "author":  "Mark Douglas",
-        "source":  "Trading in the Zone",
-        "rules": [
-            {"id": "douglas_probability",    "category": "psychology",   "rule": "Think in probabilities. Each trade is a unique event within a series."},
-            {"id": "douglas_edge",           "category": "strategy",     "rule": "Define your edge clearly. Execute it mechanically without hesitation."},
-            {"id": "douglas_accept_risk",    "category": "psychology",   "rule": "Accept the risk BEFORE placing the trade. Eliminate hope and fear."},
-            {"id": "douglas_consistency",    "category": "psychology",   "rule": "Consistency comes from executing your edge, not from being right."},
-        ]
-    },
-    "van_tharp": {
-        "author":  "Van Tharp",
-        "source":  "Trade Your Way to Financial Freedom",
-        "rules": [
-            {"id": "tharp_sqn",              "category": "performance",  "rule": "System Quality Number (SQN) > 2.5 is good, > 5 is excellent."},
-            {"id": "tharp_r_multiple",       "category": "risk",         "rule": "Express every trade as R-multiples. Expectancy > 0 over a large sample is the goal."},
-            {"id": "tharp_position_sizing",  "category": "sizing",       "rule": "Position sizing is the most critical factor in overall performance."},
-            {"id": "tharp_objectives",       "category": "strategy",     "rule": "Define your objectives before designing your system."},
-        ]
-    },
-    "livermore": {
-        "author":  "Jesse Livermore",
-        "source":  "Reminiscences of a Stock Operator",
-        "rules": [
-            {"id": "livermore_trend",        "category": "strategy",     "rule": "The trend is your friend. Never trade against the primary trend."},
-            {"id": "livermore_pyramiding",   "category": "sizing",       "rule": "Add to winning positions (pyramid) only when each unit is profitable."},
-            {"id": "livermore_patience",     "category": "psychology",   "rule": "Sitting tight in a winning trade is harder than entering — do it anyway."},
-            {"id": "livermore_pivot_points", "category": "signal",       "rule": "Buy at pivotal points where resistance turns support (breakout)."},
-        ]
-    },
-    "schwager": {
-        "author":  "Jack Schwager",
-        "source":  "Market Wizards",
-        "rules": [
-            {"id": "schwager_risk_first",    "category": "risk",         "rule": "All great traders focus on risk management, not returns."},
-            {"id": "schwager_methodology",   "category": "strategy",     "rule": "Have a clearly defined methodology. Follow it with discipline."},
-            {"id": "schwager_cut_losses",    "category": "exit",         "rule": "Cut losses short, let profits run. The asymmetry is essential."},
-            {"id": "schwager_market_type",   "category": "strategy",     "rule": "Adapt your approach to current market type (trending vs ranging)."},
-        ]
-    },
-    "chan": {
-        "author":  "Ernest Chan",
-        "source":  "Algorithmic Trading",
-        "rules": [
-            {"id": "chan_half_kelly",        "category": "sizing",       "rule": "Use half-Kelly position sizing to prevent overbetting and parameters estimation errors."},
-            {"id": "chan_stationarity",      "category": "strategy",     "rule": "Verify stationarity of the spread (e.g. using the ADF test) before running mean-reversion strategies."},
-            {"id": "chan_momentum",          "category": "strategy",     "rule": "Time-series momentum models perform best with lookback periods between 3 to 12 months."}
-        ]
-    },
-    "volman": {
-        "author":  "Bob Volman",
-        "source":  "Forex Price Action Scalping",
-        "rules": [
-            {"id": "volman_double_bends",    "category": "signal",       "rule": "Double bends and triple taps on a 25 EMA suggest high probability breakout setups."},
-            {"id": "volman_scalp_risk",      "category": "risk",         "rule": "Scalping setups require fixed stop-loss targets based on recent micro-supports (often 10 pips or less)."},
-            {"id": "volman_bb_breakout",     "category": "signal",       "rule": "Look for price squeeze/build-up right against a major horizontal level before a breakout."}
-        ]
-    }
+# ─── Catégories valides ───────────────────────────────────────────────────────
+VALID_CATEGORIES = {
+    "trend", "signal", "filter", "risk", "sizing", "strategy",
+    "exit", "psychology", "performance",
 }
 
-# ─── PDF text extraction (optional — requires pypdf) ─────────────────────────
+VALID_REGIMES = {"TRENDING", "RANGING", "ALL"}
+
+
+# ─── Chargement des modules de connaissances par livre ───────────────────────
+def _load_book_modules() -> List[Dict[str, Any]]:
+    """
+    Charge les regles depuis les modules Python structures des livres.
+    Ordre croissant de complexite (crescendo) : Niveau 1 -> Niveau 2 -> Niveau 3.
+    11 livres integres sur 3 niveaux.
+    """
+    all_rules: List[Dict[str, Any]] = []
+
+    # -- NIVEAU 1 : FONDATIONS -------------------------------------------------
+    try:
+        from resources.books_knowledge.murphy_technical_analysis import MURPHY_RULES
+        all_rules.extend(MURPHY_RULES)
+        log.info(f"  [Niveau 1] Murphy (Analyse Technique) -- {len(MURPHY_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Murphy non trouve : {e}")
+
+    try:
+        from resources.books_knowledge.volman_price_action import VOLMAN_RULES
+        all_rules.extend(VOLMAN_RULES)
+        log.info(f"  [Niveau 1] Volman (Price Action) -- {len(VOLMAN_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Volman non trouve : {e}")
+
+    # -- NIVEAU 2 : SYSTEMES ---------------------------------------------------
+    try:
+        from resources.books_knowledge.elder_trading import ELDER_RULES
+        all_rules.extend(ELDER_RULES)
+        log.info(f"  [Niveau 2] Elder (Triple Screen) -- {len(ELDER_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Elder non trouve : {e}")
+
+    try:
+        from resources.books_knowledge.kabbaj_art_trading import KABBAJ_RULES
+        all_rules.extend(KABBAJ_RULES)
+        log.info(f"  [Niveau 2] Kabbaj (L'Art du Trading) -- {len(KABBAJ_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Kabbaj non trouve : {e}")
+
+    try:
+        from resources.books_knowledge.steenbarger_psychology import STEENBARGER_RULES
+        all_rules.extend(STEENBARGER_RULES)
+        log.info(f"  [Niveau 2] Steenbarger (Psychology 2.0) -- {len(STEENBARGER_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Steenbarger non trouve : {e}")
+
+    try:
+        from resources.books_knowledge.montier_behavioral import MONTIER_RULES
+        all_rules.extend(MONTIER_RULES)
+        log.info(f"  [Niveau 2] Montier (Behavioral Investing) -- {len(MONTIER_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Montier non trouve : {e}")
+
+    try:
+        from resources.books_knowledge.burniske_crypto import CRYPTO_RULES
+        all_rules.extend(CRYPTO_RULES)
+        log.info(f"  [Niveau 2] Burniske/Bruwer (Cryptoassets) -- {len(CRYPTO_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Crypto non trouve : {e}")
+
+    try:
+        from resources.books_knowledge.contrarian_trading import CONTRARIAN_RULES
+        all_rules.extend(CONTRARIAN_RULES)
+        log.info(f"  [Niveau 2] Contrarian/Lustig -- {len(CONTRARIAN_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Contrarian non trouve : {e}")
+
+    # -- NIVEAU 3 : QUANTITATIF ------------------------------------------------
+    try:
+        from resources.books_knowledge.chan_algorithmic_trading import CHAN_RULES
+        all_rules.extend(CHAN_RULES)
+        log.info(f"  [Niveau 3] Chan (Algorithmic Trading) -- {len(CHAN_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Chan non trouve : {e}")
+
+    try:
+        from resources.books_knowledge.ml_algo_trading import ML_RULES
+        all_rules.extend(ML_RULES)
+        log.info(f"  [Niveau 3] Jansen/Bissette/Koru (ML Algo) -- {len(ML_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module ML non trouve : {e}")
+
+    try:
+        from resources.books_knowledge.python_algo_advanced import PYTHON_ALGO_RULES
+        all_rules.extend(PYTHON_ALGO_RULES)
+        log.info(f"  [Niveau 3] Strimpel/Ratford/VanDerPost (Python Algo) -- {len(PYTHON_ALGO_RULES)} regles")
+    except ImportError as e:
+        log.warning(f"  Module Python Algo non trouve : {e}")
+
+    log.info(f"\n  TOTAL : {len(all_rules)} regles chargees depuis 11 livres")
+    return all_rules
+
+
+
+# ─── Validation d'une règle ───────────────────────────────────────────────────
+def _validate_rule(rule: Dict[str, Any]) -> bool:
+    """Vérifie qu'une règle a les champs requis et des valeurs valides."""
+    required = ["id", "level", "category", "rule", "author", "confidence"]
+    for field in required:
+        if field not in rule:
+            log.warning(f"  ⚠️ Règle invalide — champ manquant '{field}': {rule.get('id', '?')}")
+            return False
+
+    if rule["level"] not in (1, 2, 3):
+        log.warning(f"  ⚠️ Règle [{rule['id']}] — niveau invalide: {rule['level']}")
+        return False
+
+    if rule["category"] not in VALID_CATEGORIES:
+        log.warning(f"  ⚠️ Règle [{rule['id']}] — catégorie invalide: {rule['category']}")
+        return False
+
+    if not (0.0 <= rule["confidence"] <= 1.0):
+        log.warning(f"  ⚠️ Règle [{rule['id']}] — confidence hors range: {rule['confidence']}")
+        return False
+
+    for regime in rule.get("applicable_regimes", []):
+        if regime not in VALID_REGIMES:
+            log.warning(f"  ⚠️ Règle [{rule['id']}] — régime invalide: {regime}")
+            return False
+
+    return True
+
+
+# ─── Extraction PDF (optionnel) ───────────────────────────────────────────────
 def _extract_pdf_text(path: Path) -> str:
-    """Extract raw text from a PDF file."""
+    """Extrait le texte brut d'un fichier PDF."""
     try:
         import pypdf
         reader = pypdf.PdfReader(str(path))
@@ -133,15 +194,15 @@ def _extract_pdf_text(path: Path) -> str:
                 pages.append(text)
         return "\n".join(pages)
     except ImportError:
-        log.warning("pypdf not installed — PDF text extraction disabled. Run: pip install pypdf")
+        log.warning("pypdf non installé — extraction PDF désactivée. pip install pypdf")
         return ""
     except Exception as e:
-        log.warning(f"Could not extract text from {path.name}: {e}")
+        log.warning(f"Impossible d'extraire le texte de {path.name}: {e}")
         return ""
 
 
 def _file_hash(path: Path) -> str:
-    """Return MD5 hash of file content for change detection."""
+    """Retourne le hash MD5 du fichier pour détection de changements."""
     h = hashlib.md5()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -149,30 +210,29 @@ def _file_hash(path: Path) -> str:
     return h.hexdigest()
 
 
-def _match_author_rules(text: str) -> List[Dict]:
-    """
-    Scan text for known author keywords and return matched rule sets.
-    This is a lightweight heuristic — replace with an LLM call for deeper extraction.
-    """
-    text_lower = text.lower()
-    matched = []
-    for key, data in AUTHOR_RULE_SEEDS.items():
-        signals = [key, data["author"].lower().split()[0], data["source"].lower().split()[0]]
-        if any(sig in text_lower for sig in signals):
-            for rule in data["rules"]:
-                r = dict(rule)
-                r["author"] = data["author"]
-                r["source"] = data["source"]
-                matched.append(r)
-    return matched
+def _compute_modules_hash() -> str:
+    """Hash combiné de tous les modules de connaissances pour invalider le cache."""
+    books_knowledge_dir = BASE_DIR / "books_knowledge"
+    combined = ""
+    for py_file in sorted(books_knowledge_dir.glob("*.py")):
+        if py_file.name != "__init__.py":
+            combined += _file_hash(py_file)
+    return hashlib.md5(combined.encode()).hexdigest()
 
 
-# ─── Index management ─────────────────────────────────────────────────────────
+# ─── Gestion de l'index ───────────────────────────────────────────────────────
 def _load_index() -> Dict:
     if INDEX_FILE.exists():
         with open(INDEX_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"version": 1, "updated_at": None, "books": {}, "rules": []}
+    return {
+        "version": 2,
+        "updated_at": None,
+        "modules_hash": None,
+        "books": {},
+        "rules": [],
+        "stats": {}
+    }
 
 
 def _save_index(index: Dict):
@@ -181,117 +241,190 @@ def _save_index(index: Dict):
         json.dump(index, f, ensure_ascii=False, indent=2)
 
 
-def _seed_builtin_rules(index: Dict) -> Dict:
-    """Inject built-in rules from known authors (always included)."""
-    builtin_ids = {r["id"] for r in index["rules"]}
-    added = 0
-    for key, data in AUTHOR_RULE_SEEDS.items():
-        for rule in data["rules"]:
-            if rule["id"] not in builtin_ids:
-                r = dict(rule)
-                r["author"] = data["author"]
-                r["source"] = data["source"]
-                r["origin"] = "builtin"
-                index["rules"].append(r)
-                builtin_ids.add(rule["id"])
-                added += 1
-    if added:
-        log.info(f"  {added} règles intégrées ajoutées à l'index")
-    return index
+def _build_stats(rules: List[Dict]) -> Dict:
+    """Génère des statistiques sur les règles chargées."""
+    stats: Dict[str, Any] = {
+        "total": len(rules),
+        "by_level": {},
+        "by_category": {},
+        "by_author": {},
+        "by_regime": {},
+        "filters": 0,
+        "avg_confidence": 0.0,
+    }
+
+    total_conf = 0.0
+    for rule in rules:
+        level = str(rule.get("level", "?"))
+        stats["by_level"][level] = stats["by_level"].get(level, 0) + 1
+
+        cat = rule.get("category", "?")
+        stats["by_category"][cat] = stats["by_category"].get(cat, 0) + 1
+
+        author = rule.get("author", "?")
+        stats["by_author"][author] = stats["by_author"].get(author, 0) + 1
+
+        for regime in rule.get("applicable_regimes", []):
+            stats["by_regime"][regime] = stats["by_regime"].get(regime, 0) + 1
+
+        impact = rule.get("parameter_impact", {})
+        if impact.get("filter", False):
+            stats["filters"] += 1
+
+        total_conf += rule.get("confidence", 0.0)
+
+    if rules:
+        stats["avg_confidence"] = round(total_conf / len(rules), 3)
+
+    return stats
 
 
-# ─── Main processing ──────────────────────────────────────────────────────────
-def process_books(reset: bool = False):
+# ─── Traitement principal ─────────────────────────────────────────────────────
+def process_books(reset: bool = False) -> Dict:
     """
-    Scan resources/books/ and extract rules from any new or changed file.
-    Supported formats: .pdf, .txt, .md
+    Charge les règles depuis les modules Python structurés (books_knowledge/).
+    Optionnellement, extrait aussi du texte des PDF dans books/ pour enrichissement futur.
     """
     KNOW_DIR.mkdir(parents=True, exist_ok=True)
+    index = {
+        "version": 2, "updated_at": None, "modules_hash": None,
+        "books": {}, "rules": [], "stats": {}
+    } if reset else _load_index()
 
-    index = {"version": 1, "updated_at": None, "books": {}, "rules": []} if reset else _load_index()
+    # Vérifier si les modules ont changé
+    current_hash = _compute_modules_hash()
+    if not reset and index.get("modules_hash") == current_hash and index.get("rules"):
+        log.info(f"Index à jour (modules hash identique) — {len(index['rules'])} règles, aucune modification.")
+        return index
 
-    # Always ensure built-in rules are present
-    index = _seed_builtin_rules(index)
+    log.info("=" * 60)
+    log.info("  NexQuant Learning Engine v2 — Chargement crescendo")
+    log.info("=" * 60)
 
-    book_files = list(BOOKS_DIR.glob("*.pdf")) + list(BOOKS_DIR.glob("*.txt")) + list(BOOKS_DIR.glob("*.md"))
+    # ── Étape 1: Charger les modules Python structurés ──────────────────────
+    log.info("\n📚 Chargement des modules de connaissances...")
+    raw_rules = _load_book_modules()
 
-    if not book_files:
-        log.info(f"Aucun livre trouvé dans {BOOKS_DIR}. Placez vos PDF/TXT/MD ici.")
-    else:
-        log.info(f"{len(book_files)} livre(s) trouvé(s) dans {BOOKS_DIR}")
-
-    for book_path in book_files:
-        file_hash = _file_hash(book_path)
-        book_key = book_path.name
-
-        if not reset and book_key in index["books"] and index["books"][book_key]["hash"] == file_hash:
-            log.info(f"  [{book_key}] inchangé — ignoré")
+    # ── Étape 2: Valider et dédupliquer ─────────────────────────────────────
+    validated: List[Dict] = []
+    seen_ids = set()
+    for rule in raw_rules:
+        if not _validate_rule(rule):
             continue
+        rule_id = rule["id"]
+        if rule_id in seen_ids:
+            log.warning(f"  ⚠️ Règle dupliquée ignorée : {rule_id}")
+            continue
+        seen_ids.add(rule_id)
+        # Assurer la présence de champs par défaut
+        rule.setdefault("applicable_regimes", ["ALL"])
+        rule.setdefault("parameter_impact", {})
+        rule.setdefault("keywords", [])
+        rule.setdefault("actions", [])  # Sera rempli par le semantic classifier
+        validated.append(rule)
 
-        log.info(f"  [{book_key}] traitement...")
+    log.info(f"\n  ✅ {len(validated)} règles valides sur {len(raw_rules)} extraites")
 
-        # Extract text
-        if book_path.suffix.lower() == ".pdf":
-            text = _extract_pdf_text(book_path)
-        else:
-            text = book_path.read_text(encoding="utf-8", errors="replace")
+    # ── Étape 3: Trier par niveau (crescendo) ───────────────────────────────
+    validated.sort(key=lambda r: (r.get("level", 99), r.get("id", "")))
 
-        # Match rules
-        new_rules = _match_author_rules(text)
+    # ── Étape 4: Mettre à jour l'index ──────────────────────────────────────
+    index["rules"] = validated
+    index["modules_hash"] = current_hash
+    index["stats"] = _build_stats(validated)
 
-        # Save per-book knowledge file
-        know_file = KNOW_DIR / (book_path.stem + ".json")
+    # ── Étape 5: Sauvegarder les connaissances par livre ────────────────────
+    books_grouped: Dict[str, List[Dict]] = {}
+    for rule in validated:
+        book_key = rule.get("book", "Unknown")
+        books_grouped.setdefault(book_key, []).append(rule)
+
+    for book_name, book_rules in books_grouped.items():
+        safe_name = "".join(c if c.isalnum() or c in " -._" else "_" for c in book_name)
+        know_file = KNOW_DIR / (safe_name[:60] + ".json")
+        level = book_rules[0].get("level", "?") if book_rules else "?"
+        author = book_rules[0].get("author", "?") if book_rules else "?"
         with open(know_file, "w", encoding="utf-8") as f:
             json.dump({
-                "book": book_key,
+                "book": book_name,
+                "author": author,
+                "level": level,
                 "processed_at": datetime.now().isoformat(),
-                "rules_found": len(new_rules),
-                "rules": new_rules
+                "rules_count": len(book_rules),
+                "rules": book_rules,
             }, f, ensure_ascii=False, indent=2)
+        log.info(f"  💾 [{book_name[:50]}] → {know_file.name} ({len(book_rules)} règles)")
 
-        # Merge into global index (deduplicate by id)
-        existing_ids = {r["id"] for r in index["rules"]}
-        added = 0
-        for rule in new_rules:
-            if rule["id"] not in existing_ids:
-                rule["origin"] = book_key
-                index["rules"].append(rule)
-                existing_ids.add(rule["id"])
-                added += 1
-
-        index["books"][book_key] = {
-            "hash": file_hash,
-            "processed_at": datetime.now().isoformat(),
-            "rules_extracted": len(new_rules),
-            "path": str(book_path)
-        }
-
-        log.info(f"  [{book_key}] {len(new_rules)} règles extraites, {added} nouvelles")
-
+    # ── Étape 6: Sauvegarder l'index global ─────────────────────────────────
     _save_index(index)
-    log.info(f"Index mis à jour — {len(index['rules'])} règles au total ({INDEX_FILE})")
+
+    log.info(f"\n{'=' * 60}")
+    log.info(f"  📊 Index global mis à jour : {len(validated)} règles")
+    log.info(f"  📁 Fichier : {INDEX_FILE}")
+
     return index
 
 
-# ─── Public API (used by bot at startup) ──────────────────────────────────────
+# ─── API publique (utilisée par le bot au démarrage) ─────────────────────────
 def load_knowledge_index() -> List[Dict]:
     """
-    Returns the full list of trading rules from the knowledge index.
-    Creates the index (with built-in rules) if it doesn't exist yet.
+    Retourne la liste complète des règles de trading depuis l'index.
+    Reconstruit l'index si nécessaire ou si les modules ont changé.
     """
+    # Si l'index n'existe pas ou est de l'ancienne version, le reconstruire
     if not INDEX_FILE.exists():
         process_books()
+        return _load_index().get("rules", [])
+
     index = _load_index()
+
+    # Vérifier la version et la cohérence du hash
+    if index.get("version", 1) < 2:
+        log.info("Index de l'ancienne version détecté — reconstruction...")
+        process_books(reset=True)
+        return _load_index().get("rules", [])
+
+    # Vérifier si les modules ont changé
+    try:
+        current_hash = _compute_modules_hash()
+        if index.get("modules_hash") != current_hash:
+            log.info("Modules de connaissances modifiés — mise à jour de l'index...")
+            process_books()
+            return _load_index().get("rules", [])
+    except Exception as e:
+        log.warning(f"Impossible de vérifier le hash des modules : {e}")
+
     return index.get("rules", [])
 
 
 def get_rules_by_category(category: str) -> List[Dict]:
-    """Returns rules filtered by category (risk, strategy, signal, sizing, exit, psychology)."""
+    """Retourne les règles filtrées par catégorie."""
     return [r for r in load_knowledge_index() if r.get("category") == category]
 
 
+def get_rules_by_level(level: int) -> List[Dict]:
+    """Retourne les règles d'un niveau spécifique (1=Murphy, 2=Elder, 3=Chan)."""
+    return [r for r in load_knowledge_index() if r.get("level") == level]
+
+
+def get_rules_by_regime(regime: str) -> List[Dict]:
+    """Retourne les règles applicables à un régime de marché donné."""
+    return [
+        r for r in load_knowledge_index()
+        if regime in r.get("applicable_regimes", []) or "ALL" in r.get("applicable_regimes", [])
+    ]
+
+
+def get_filter_rules() -> List[Dict]:
+    """Retourne uniquement les règles qui sont des filtres d'entrée obligatoires."""
+    return [
+        r for r in load_knowledge_index()
+        if r.get("parameter_impact", {}).get("filter", False)
+    ]
+
+
 def get_rules_summary() -> Dict[str, int]:
-    """Returns a count of rules per category."""
+    """Retourne un comptage des règles par catégorie."""
     rules = load_knowledge_index()
     summary: Dict[str, int] = {}
     for r in rules:
@@ -300,22 +433,64 @@ def get_rules_summary() -> Dict[str, int]:
     return summary
 
 
-# ─── CLI ──────────────────────────────────────────────────────────────────────
+def get_index_stats() -> Dict:
+    """Retourne les statistiques complètes de l'index."""
+    index = _load_index()
+    return index.get("stats", {})
+
+
+# ─── CLI ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="NexQuant Learning Engine")
-    parser.add_argument("--reset",   action="store_true", help="Rebuild full index")
-    parser.add_argument("--summary", action="store_true", help="Print rule summary")
+    parser = argparse.ArgumentParser(description="NexQuant Learning Engine v2")
+    parser.add_argument("--reset",   action="store_true", help="Reconstruire l'index complet")
+    parser.add_argument("--summary", action="store_true", help="Afficher le résumé des règles")
+    parser.add_argument("--level",   type=int, help="Filtrer par niveau (1, 2, ou 3)")
+    parser.add_argument("--filters", action="store_true", help="Afficher uniquement les filtres")
     args = parser.parse_args()
 
     index = process_books(reset=args.reset)
+    stats = index.get("stats", {})
 
-    if args.summary:
-        print("\n=== Résumé des règles chargées ===")
-        summary = get_rules_summary()
-        for cat, count in sorted(summary.items()):
-            print(f"  {cat:<14}: {count} règles")
-        print(f"\n  TOTAL: {sum(summary.values())} règles")
-        print(f"\n  Sources connues:")
-        for key, data in AUTHOR_RULE_SEEDS.items():
-            print(f"    - {data['author']} ({data['source']})")
-        print("\nFichier index:", INDEX_FILE)
+    if args.summary or args.level or args.filters:
+        print("\n" + "=" * 60)
+        print("  NexQuant Knowledge Base - Resume")
+        print("=" * 60)
+        print(f"\n  Total : {stats.get('total', 0)} regles")
+        print(f"  Filtres obligatoires : {stats.get('filters', 0)}")
+        print(f"  Confiance moyenne : {stats.get('avg_confidence', 0):.2%}")
+
+        print("\n  Par niveau (crescendo) :")
+        level_names = {"1": "Murphy - Fondations", "2": "Elder - Systemes", "3": "Chan - Quantitatif"}
+        for lvl, count in sorted(stats.get("by_level", {}).items()):
+            print(f"    Niveau {lvl} [{level_names.get(lvl, '?')}] : {count} regles")
+
+        print("\n  Par categorie :")
+        for cat, count in sorted(stats.get("by_category", {}).items()):
+            print(f"    {cat:<16}: {count} regles")
+
+        print("\n  Par auteur :")
+        for author, count in sorted(stats.get("by_author", {}).items()):
+            print(f"    {author:<40}: {count} regles")
+
+        print("\n  Par regime :")
+        for regime, count in sorted(stats.get("by_regime", {}).items()):
+            print(f"    {regime:<12}: {count} regles")
+
+        if args.level:
+            rules = get_rules_by_level(args.level)
+            level_names_full = {1: "Murphy", 2: "Elder", 3: "Chan"}
+            print(f"\n  Regles de niveau {args.level} ({level_names_full.get(args.level, '?')}) :")
+            for r in rules:
+                filter_tag = " [FILTRE]" if r.get("parameter_impact", {}).get("filter") else ""
+                print(f"    [{r['id']}]{filter_tag}")
+                print(f"      -> {r['rule'][:100]}...")
+
+        if args.filters:
+            filter_rules = get_filter_rules()
+            print(f"\n  Filtres d'entree obligatoires ({len(filter_rules)}) :")
+            for r in filter_rules:
+                print(f"    [{r['id']}] Niveau {r['level']} - {r['category']}")
+                print(f"      -> {r.get('parameter_impact', {}).get('description', 'N/A')}")
+
+        print(f"\n  Index : {INDEX_FILE}")
+        print("=" * 60)

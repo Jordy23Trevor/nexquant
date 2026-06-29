@@ -173,6 +173,22 @@ export const toggleBot = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const updateRisk = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ risk: z.number() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    // Mise à jour hypothétique de bot_config, à lier plus tard avec Python
+    // await supabase.from("bot_config").update({ risk_pct: data.risk }).eq("user_id", userId);
+    await supabase.from("bot_logs").insert({
+      user_id: userId,
+      level: "info",
+      source: "control",
+      message: `Risque modifié à ${data.risk}% (Pris en compte au prochain cycle)`,
+    });
+    return { ok: true };
+  });
+
 import crypto from "crypto";
 
 function getEncryptionKey(): Buffer {

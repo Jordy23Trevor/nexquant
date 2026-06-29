@@ -1,0 +1,36 @@
+{
+  "book": "Algorithmic Trading Pro: Options Trading with Python",
+  "author": "L.J. Van Der Post",
+  "level": 3,
+  "processed_at": "2026-06-29T01:16:53.069826",
+  "rules_count": 1,
+  "rules": [
+    {
+      "id": "vanderpost_delta_hedge",
+      "level": 3,
+      "category": "risk",
+      "book": "Algorithmic Trading Pro: Options Trading with Python",
+      "author": "L.J. Van Der Post",
+      "source_chapter": "Chapter - Delta Hedging",
+      "rule": "Delta measures the directional exposure of an options portfolio. Net portfolio Delta > 1.5 = excessive directional bet, reduce by closing positions or hedging. For a delta-neutral approach: periodically rebalance to keep net delta near 0. Delta hedging eliminates directional risk but retains volatility exposure (Vega).",
+      "confidence": 0.85,
+      "applicable_regimes": [
+        "ALL"
+      ],
+      "parameter_impact": {
+        "filter": false,
+        "score_weight": 0.0,
+        "description": "Delta monitoring: excessive directional delta > 1.5 triggers size reduction"
+      },
+      "keywords": [
+        "delta",
+        "hedge",
+        "options",
+        "directional",
+        "delta-neutral",
+        "rebalance"
+      ],
+      "actions": []
+    }
+  ]
+}

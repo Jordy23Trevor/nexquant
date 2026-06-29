@@ -1,0 +1,562 @@
+"""
+NexQuant — Knowledge Module: John J. Murphy
+===========================================
+Livre : "Technical Analysis of the Financial Markets" (1999)
+Niveau : 1 — Fondations (lecture du prix, indicateurs de base, tendances)
+
+Ce module constitue la couche FONDAMENTALE du bot. Les règles de Murphy sont
+des CONDITIONS NÉCESSAIRES avant d'entrer sur un trade : sans lire correctement
+le marché, aucune stratégie avancée n'est utile.
+
+Principes d'intégration :
+- level=1 : ces règles sont des FILTRES d'entrée (filter=True)
+- Sans la confirmation du régime de marché, le score ne suffit pas
+- La tendance primaire détermine le biais directionnel global
+
+Source : John J. Murphy — Technical Analysis of the Financial Markets
+Publisher : New York Institute of Finance, 1999
+"""
+from typing import List, Dict, Any
+
+MURPHY_RULES: List[Dict[str, Any]] = [
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHAPITRE 4 — DOW THEORY & STRUCTURE DE TENDANCE
+    # ═══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "murphy_trend_primary",
+        "level": 1,
+        "category": "trend",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 4 - Trend Basics",
+        "rule": (
+            "A trend in motion tends to continue until a clear reversal signal appears. "
+            "Always trade in the direction of the primary trend."
+        ),
+        "confidence": 1.0,
+        "applicable_regimes": ["TRENDING"],
+        "parameter_impact": {
+            "filter": True,
+            "score_weight": 1.5,
+            "description": "Refuse signals against the primary trend direction"
+        },
+        "keywords": ["trend", "primary trend", "dow theory", "direction"],
+    },
+    {
+        "id": "murphy_higher_highs_lows",
+        "level": 1,
+        "category": "trend",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 4 - Trend Basics",
+        "rule": (
+            "An uptrend is defined by a series of higher highs and higher lows. "
+            "A downtrend is defined by lower highs and lower lows. "
+            "Breaking this structure signals a potential reversal."
+        ),
+        "confidence": 1.0,
+        "applicable_regimes": ["TRENDING"],
+        "parameter_impact": {
+            "filter": True,
+            "score_weight": 1.0,
+            "description": "Validate structural trend via HH/HL for long, LH/LL for short"
+        },
+        "keywords": ["higher highs", "lower lows", "structure", "reversal"],
+    },
+    {
+        "id": "murphy_trendline_break",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 4 - Trendlines",
+        "rule": (
+            "A decisive break of a major trendline is one of the best early warning signals "
+            "of a change in trend. The longer and more times the trendline was tested, "
+            "the more significant the break."
+        ),
+        "confidence": 0.9,
+        "applicable_regimes": ["TRENDING", "RANGING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "Trendline break adds +1 to score as reversal signal"
+        },
+        "keywords": ["trendline", "break", "reversal", "warning"],
+    },
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHAPITRE 6 — SUPPORT ET RÉSISTANCE
+    # ═══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "murphy_support_resistance_role_reversal",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 6 - Support and Resistance",
+        "rule": (
+            "Once a support level is broken, it becomes a new resistance level. "
+            "Once a resistance level is broken, it becomes new support. "
+            "The more times a level is tested, the more significant it becomes."
+        ),
+        "confidence": 1.0,
+        "applicable_regimes": ["TRENDING", "RANGING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "Near key S/R levels adds to entry score; role reversal confirms breakout"
+        },
+        "keywords": ["support", "resistance", "role reversal", "breakout", "tested"],
+    },
+    {
+        "id": "murphy_round_numbers",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 6 - Support and Resistance",
+        "rule": (
+            "Round numbers tend to act as significant support and resistance levels. "
+            "Psychologically significant price levels (1000, 50000 etc.) attract concentration."
+        ),
+        "confidence": 0.75,
+        "applicable_regimes": ["ALL"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 0.5,
+            "description": "Minor bonus when price near round number levels"
+        },
+        "keywords": ["round numbers", "psychological level", "support", "resistance"],
+    },
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHAPITRE 7 — VOLUME
+    # ═══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "murphy_volume_confirms_trend",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 7 - Volume and Open Interest",
+        "rule": (
+            "Volume should increase in the direction of the trend. "
+            "In an uptrend, volume should be heavier on up days than on down days. "
+            "Declining volume in the trend direction is a warning of weakening."
+        ),
+        "confidence": 1.0,
+        "applicable_regimes": ["TRENDING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "Volume confirmation required for trend entry; REQUIRE_VOLUME_CONFIRM"
+        },
+        "keywords": ["volume", "confirm", "trend", "direction", "heavier"],
+    },
+    {
+        "id": "murphy_volume_breakout",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 7 - Volume and Open Interest",
+        "rule": (
+            "A price breakout from a consolidation pattern is only valid if accompanied "
+            "by a significant increase in volume (at least 1.5x average). "
+            "A breakout on low volume is suspect and often fails."
+        ),
+        "confidence": 1.0,
+        "applicable_regimes": ["TRENDING", "RANGING"],
+        "parameter_impact": {
+            "filter": True,
+            "score_weight": 1.0,
+            "description": "Breakout signals require volume spike filter"
+        },
+        "keywords": ["volume", "breakout", "consolidation", "average volume", "spike"],
+    },
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHAPITRE 9 — MOVING AVERAGES
+    # ═══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "murphy_ma_crossover",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 9 - Moving Averages",
+        "rule": (
+            "A bullish signal is generated when the shorter-period moving average crosses "
+            "above the longer-period moving average (golden cross). "
+            "A bearish signal is the opposite (death cross). "
+            "The 50-day and 200-day MAs are the most widely watched."
+        ),
+        "confidence": 1.0,
+        "applicable_regimes": ["TRENDING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "MA crossover adds to trending score"
+        },
+        "keywords": ["moving average", "crossover", "golden cross", "death cross", "50", "200"],
+    },
+    {
+        "id": "murphy_price_above_ma200",
+        "level": 1,
+        "category": "filter",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 9 - Moving Averages",
+        "rule": (
+            "Price above the 200-day moving average indicates a long-term bullish bias. "
+            "Price below the 200-day MA indicates a bearish bias. "
+            "Only take longs above the 200 MA, only take shorts below it."
+        ),
+        "confidence": 0.95,
+        "applicable_regimes": ["ALL"],
+        "parameter_impact": {
+            "filter": True,
+            "score_weight": 1.0,
+            "description": "Price vs EMA200 is a mandatory directional filter"
+        },
+        "keywords": ["200 MA", "200-day", "long-term bias", "above", "below"],
+    },
+    {
+        "id": "murphy_ma_as_dynamic_support",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 9 - Moving Averages",
+        "rule": (
+            "Moving averages act as dynamic support and resistance. "
+            "In a strong uptrend, pullbacks to the 20 or 50 MA offer low-risk entry points. "
+            "In a downtrend, rallies to the MA offer short entry points."
+        ),
+        "confidence": 0.9,
+        "applicable_regimes": ["TRENDING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "Pullback to MA in trend = high probability entry bonus"
+        },
+        "keywords": ["moving average", "dynamic support", "pullback", "entry point"],
+    },
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHAPITRE 10 — OSCILLATEURS (RSI, MACD, Stochastique)
+    # ═══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "murphy_rsi_overbought_oversold",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+        "rule": (
+            "RSI above 70 signals overbought conditions (potential reversal or pause). "
+            "RSI below 30 signals oversold conditions (potential bounce). "
+            "In strong trends, overbought/oversold can persist — use divergence for better timing."
+        ),
+        "confidence": 0.9,
+        "applicable_regimes": ["RANGING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "RSI extreme zones add to ranging score"
+        },
+        "keywords": ["RSI", "overbought", "oversold", "70", "30"],
+    },
+    {
+        "id": "murphy_rsi_divergence",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+        "rule": (
+            "Bearish divergence: price makes a new high but RSI makes a lower high — "
+            "indicates weakening momentum and potential reversal. "
+            "Bullish divergence: price makes a new low but RSI makes a higher low — "
+            "indicates momentum recovery."
+        ),
+        "confidence": 0.95,
+        "applicable_regimes": ["TRENDING", "RANGING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.5,
+            "description": "Divergence between price and RSI is the strongest reversal warning"
+        },
+        "keywords": ["divergence", "RSI", "momentum", "reversal", "higher low", "lower high"],
+    },
+    {
+        "id": "murphy_stochastic_cross",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+        "rule": (
+            "A buy signal is generated when the Stochastic %K crosses above %D below 20 (oversold). "
+            "A sell signal when %K crosses below %D above 80 (overbought). "
+            "Best used in ranging markets; less reliable in strong trends."
+        ),
+        "confidence": 0.85,
+        "applicable_regimes": ["RANGING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "Stochastic cross in extreme zone adds to ranging entry score"
+        },
+        "keywords": ["stochastic", "K", "D", "oversold", "overbought", "cross", "ranging"],
+    },
+    {
+        "id": "murphy_macd_signal_cross",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+        "rule": (
+            "The MACD line crossing above the signal line is a buy signal. "
+            "Crossing below is a sell signal. "
+            "Histogram crossing zero line is an earlier but less reliable signal."
+        ),
+        "confidence": 0.95,
+        "applicable_regimes": ["TRENDING", "RANGING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "MACD crossover is a core trend entry signal"
+        },
+        "keywords": ["MACD", "signal", "cross", "histogram", "zero line"],
+    },
+    {
+        "id": "murphy_oscillator_trend_caveat",
+        "level": 1,
+        "category": "filter",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 10 - Oscillators and Contrary Opinion",
+        "rule": (
+            "Oscillators are most useful in non-trending (ranging) markets. "
+            "In strongly trending markets, overbought and oversold signals can be misleading. "
+            "Always determine the market regime before relying on oscillator readings."
+        ),
+        "confidence": 1.0,
+        "applicable_regimes": ["ALL"],
+        "parameter_impact": {
+            "filter": True,
+            "score_weight": 0.0,
+            "description": "Suppress oscillator-only signals in TRENDING regime; weight by regime"
+        },
+        "keywords": ["oscillator", "trend", "ranging", "misleading", "regime"],
+    },
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHAPITRE 9 — BOLLINGER BANDS
+    # ═══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "murphy_bollinger_squeeze",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 9 - Moving Averages & Bollinger Bands",
+        "rule": (
+            "Bollinger Band squeeze (narrow bands) indicates low volatility and predicts "
+            "an upcoming explosive move. The direction of the breakout determines the trade. "
+            "A squeeze followed by a close outside the band is a high-probability signal."
+        ),
+        "confidence": 0.9,
+        "applicable_regimes": ["RANGING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "BB squeeze detection adds to entry score"
+        },
+        "keywords": ["bollinger", "squeeze", "narrow", "volatility", "breakout", "bands"],
+    },
+    {
+        "id": "murphy_bollinger_band_walks",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 9 - Bollinger Bands",
+        "rule": (
+            "Price can 'walk the band' during strong trends, staying near the upper band "
+            "in an uptrend or near the lower band in a downtrend. "
+            "Do not short just because price is at the upper band in a strong trend."
+        ),
+        "confidence": 0.9,
+        "applicable_regimes": ["TRENDING"],
+        "parameter_impact": {
+            "filter": True,
+            "score_weight": 0.0,
+            "description": "Prevent short signals when price walks upper BB in uptrend"
+        },
+        "keywords": ["bollinger", "walk", "trend", "upper band", "lower band", "strong"],
+    },
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHAPITRE 12 — CHANDELIERS JAPONAIS
+    # ═══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "murphy_candle_engulfing",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 12 - Candlestick Charting",
+        "rule": (
+            "A bullish engulfing pattern at a support level is a strong reversal signal. "
+            "A bearish engulfing at resistance confirms selling pressure. "
+            "The larger the engulfing candle relative to the prior candle, the stronger the signal."
+        ),
+        "confidence": 0.9,
+        "applicable_regimes": ["TRENDING", "RANGING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "Engulfing pattern near key levels adds to entry score"
+        },
+        "keywords": ["engulfing", "bullish", "bearish", "reversal", "support", "resistance"],
+    },
+    {
+        "id": "murphy_candle_hammer_star",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 12 - Candlestick Charting",
+        "rule": (
+            "A hammer at the bottom of a downtrend signals potential reversal. "
+            "A shooting star at the top of an uptrend signals potential reversal. "
+            "Long shadow shows rejection of the extreme price level."
+        ),
+        "confidence": 0.85,
+        "applicable_regimes": ["TRENDING", "RANGING"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 1.0,
+            "description": "Hammer/Shooting star pattern detection"
+        },
+        "keywords": ["hammer", "shooting star", "shadow", "rejection", "reversal", "wick"],
+    },
+    {
+        "id": "murphy_candle_doji_indecision",
+        "level": 1,
+        "category": "signal",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 12 - Candlestick Charting",
+        "rule": (
+            "A doji candle (open ≈ close) indicates indecision and potential trend reversal. "
+            "At market extremes or after a long trend, doji signals exhaustion. "
+            "Requires confirmation from the following candle before acting."
+        ),
+        "confidence": 0.75,
+        "applicable_regimes": ["ALL"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 0.5,
+            "description": "Doji near extremes adds minor signal; needs next candle confirmation"
+        },
+        "keywords": ["doji", "indecision", "reversal", "exhaustion", "open", "close"],
+    },
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHAPITRE 13 — CONFIRMATION MULTI-TIMEFRAME
+    # ═══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "murphy_multi_timeframe_alignment",
+        "level": 1,
+        "category": "filter",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 13 - The Link Between Stocks and Bonds",
+        "rule": (
+            "Analysis should always begin with the longer timeframe to establish the primary trend, "
+            "then move to shorter timeframes for entry timing. "
+            "Never trade against the higher timeframe trend."
+        ),
+        "confidence": 1.0,
+        "applicable_regimes": ["ALL"],
+        "parameter_impact": {
+            "filter": True,
+            "score_weight": 1.0,
+            "description": "Higher timeframe alignment is a mandatory entry filter (ENFORCE_MULTI_TIMEFRAME)"
+        },
+        "keywords": ["timeframe", "higher timeframe", "alignment", "trend", "entry timing"],
+    },
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # GESTION DU RISQUE (Murphy — principes généraux)
+    # ═══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "murphy_stop_loss_mandatory",
+        "level": 1,
+        "category": "risk",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 15 - Money Management",
+        "rule": (
+            "Every trade must have a pre-determined stop-loss before entry. "
+            "The stop should be placed at a logical technical level (below support, above resistance). "
+            "A trade without a stop is a gamble, not a trade."
+        ),
+        "confidence": 1.0,
+        "applicable_regimes": ["ALL"],
+        "parameter_impact": {
+            "filter": True,
+            "score_weight": 0.0,
+            "description": "Mandatory stop-loss enforcement; ENFORCE_STRICT_SL"
+        },
+        "keywords": ["stop loss", "mandatory", "pre-determined", "technical level"],
+    },
+    {
+        "id": "murphy_reward_risk_ratio",
+        "level": 1,
+        "category": "risk",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 15 - Money Management",
+        "rule": (
+            "A minimum reward-to-risk ratio of 3:1 should be targeted. "
+            "If the potential reward is less than 3 times the risk, the trade should be avoided. "
+            "This ensures profitable trading even with a 50% win rate."
+        ),
+        "confidence": 0.95,
+        "applicable_regimes": ["ALL"],
+        "parameter_impact": {
+            "filter": True,
+            "score_weight": 0.0,
+            "description": "Minimum R:R filter before entry — Murphy suggests 3:1"
+        },
+        "keywords": ["reward", "risk", "ratio", "3:1", "minimum", "win rate"],
+    },
+    {
+        "id": "murphy_diversification",
+        "level": 1,
+        "category": "risk",
+        "book": "Technical Analysis of the Financial Markets",
+        "author": "John J. Murphy",
+        "source_chapter": "Chapter 15 - Money Management",
+        "rule": (
+            "Do not concentrate all capital in a single market or a single trade. "
+            "Diversify across uncorrelated markets to reduce portfolio risk. "
+            "Position sizing should reflect the correlation between open positions."
+        ),
+        "confidence": 0.85,
+        "applicable_regimes": ["ALL"],
+        "parameter_impact": {
+            "filter": False,
+            "score_weight": 0.0,
+            "description": "Portfolio-level diversification rule — reduces per-trade sizing when correlated positions exist"
+        },
+        "keywords": ["diversification", "concentration", "uncorrelated", "portfolio", "position sizing"],
+    },
+]

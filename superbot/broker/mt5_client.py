@@ -106,6 +106,7 @@ class MT5Client(Broker):
                 "free_margin": 0.0,
                 "margin_level": 0.0,
                 "open_positions": 0,
+                "leverage": 1,
                 "account_type": "MT5_FUSION_MARKETS",
             }
 
@@ -123,6 +124,7 @@ class MT5Client(Broker):
             "free_margin": acc_info.margin_free,
             "margin_level": margin_level,
             "open_positions": open_positions_count,
+            "leverage": acc_info.leverage,
             "account_type": "MT5_REAL" if acc_info.trade_mode == mt5.ACCOUNT_TRADE_MODE_REAL else "MT5_DEMO",
             "company": acc_info.company
         }

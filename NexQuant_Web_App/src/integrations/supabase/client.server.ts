@@ -39,7 +39,22 @@ function createSupabaseAdminClient() {
       ...(!SUPABASE_SERVICE_ROLE_KEY ? ['SUPABASE_SERVICE_ROLE_KEY'] : []),
     ];
     const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
-    console.error(`[Supabase] ${message}`);
+    console.warn(`[Supabase] ${message}`);
+
+    if (process.env.NODE_ENV === 'development') {
+      const fallbackKey = process.env.SUPABASE_PUBLISHABLE_KEY || '';
+      return createClient<Database>(SUPABASE_URL || '', fallbackKey, {
+        global: {
+          fetch: createSupabaseFetch(fallbackKey),
+        },
+        auth: {
+          storage: undefined,
+          persistSession: false,
+          autoRefreshToken: false,
+        }
+      });
+    }
+
     throw new Error(message);
   }
 
