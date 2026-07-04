@@ -710,7 +710,19 @@ class NewsManager:
             'on_chain': self.latest_sentiment.on_chain,
             'timestamp': self.latest_sentiment.timestamp.isoformat(),
             'recent_high_impact_count': len(self.get_recent_high_impact_news(hours=6)),
-            'avoidance_active': self.should_avoid_trading_due_to_news()[0]
+            'avoidance_active': self.should_avoid_trading_due_to_news()[0],
+            'recent_events': [
+                {
+                    'title': event.title,
+                    'source': event.source,
+                    'timestamp': event.timestamp.isoformat(),
+                    'impact': event.impact,
+                    'currency': event.currency,
+                    'description': event.description,
+                    'url': event.url
+                }
+                for event in self.get_recent_high_impact_news(hours=24)
+            ]
         }
 
     def _is_cached_valid(self, key: str, minutes: int = 10) -> bool:

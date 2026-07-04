@@ -109,7 +109,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                             'confidence': news_sentiment.get('overall', {}).get('confidence', 0.0) or 0.0,
                             'fear_greed_value': news_sentiment.get('fear_greed', {}).get('value'),
                             'avoidance_active': news_sentiment.get('avoidance_active', False),
-                            'recent_high_impact_count': news_sentiment.get('recent_high_impact_count', 0)
+                            'recent_high_impact_count': news_sentiment.get('recent_high_impact_count', 0),
+                            'recent_events': news_sentiment.get('recent_events', [])
                         }
                     }
 
@@ -1696,11 +1697,11 @@ td.name { color: var(--txt); font-weight: 600; }
               <thead>
                 <tr>
                   <th>Symbole</th><th>Sens</th><th>Quantité</th>
-                  <th>Entrée</th><th>Actuel</th><th>P&amp;L non réalisé</th>
+                  <th>Entrée</th><th>Actuel</th><th>Liquidation</th><th>P&amp;L non réalisé</th>
                   <th>Stop loss</th><th>Take profit</th>
                 </tr>
               </thead>
-              <tbody id="pos-tbody"><tr><td colspan="8" class="empty">Aucune position ouverte</td></tr></tbody>
+              <tbody id="pos-tbody"><tr><td colspan="9" class="empty">Aucune position ouverte</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -2489,6 +2490,34 @@ async function fetchData() {
     setEl('s-conf',  safe(fmt(news.confidence, 2)));
     setEl('s-avoid', news.avoidance_active ? 'Actif' : 'Inactif');
 
+    // ── News body list ──
+    const newsBody = document.getElementById('news-body');
+    if (newsBody) {
+      const events = news.recent_events || [];
+      if (!events.length) {
+        newsBody.innerHTML = '<div class="empty"><i class="fa-solid fa-circle-info"></i> Aucune actualité à fort impact récente</div>';
+        newsBody.className = 'empty';
+      } else {
+        newsBody.className = '';
+        newsBody.innerHTML = events.map(ev => {
+          const dateObj = new Date(ev.timestamp);
+          const timeStr = isNaN(dateObj.getTime()) ? '' : dateObj.toLocaleDateString('fr-FR', {month:'2-digit', day:'2-digit'}) + ' ' + dateObj.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+          const impactBadge = ev.impact === 'HIGH' ? '<span class="badge badge-short" style="background:#ef4444; color:#fff; border:none; padding:2px 6px;">HIGH</span>' : `<span class="badge" style="background:#f59e0b; color:#fff; border:none; padding:2px 6px;">${ev.impact}</span>`;
+          return `<div style="padding: 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 11px; color: var(--txt-secondary); font-weight:600">${ev.currency || 'ALL'} · ${ev.source || 'Unknown'}</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <span style="font-size: 10px; color: var(--txt-muted); font-family: monospace;">${timeStr}</span>
+                ${impactBadge}
+              </div>
+            </div>
+            <div style="font-size: 12px; color: var(--txt); font-weight: 500;">${escapeHtml(ev.title || '')}</div>
+            ${ev.description ? `<div style="font-size: 11px; color: var(--txt-secondary); margin-top: 2px;">${escapeHtml(ev.description)}</div>` : ''}
+          </div>`;
+        }).join('');
+      }
+    }
+
     // ── Risk panel ──
     const exp = parseFloat(risk.current_risk_pct ?? 0);
     setEl('r-risk',   isNaN(exp) ? '—' : fmt(exp) + ' %');
@@ -2506,7 +2535,7 @@ async function fetchData() {
       const pos  = d.positions || {};
       const keys = Object.keys(pos);
       if (!keys.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty"><i class="fa-solid fa-briefcase"></i> Aucune position ouverte</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="empty"><i class="fa-solid fa-briefcase"></i> Aucune position ouverte</td></tr>';
       } else {
         tbody.innerHTML = keys.map(sym => {
           const p    = pos[sym] || {};
@@ -2515,12 +2544,14 @@ async function fetchData() {
           const dec = getDecimals();
           const pref = getCurrencyPrefix();
           const rate = getRate();
+          const liq = parseFloat(p.liquidation_price || 0);
           return `<tr>
             <td class="name mono">${sym}</td>
             <td><span class="badge badge-${side === 'LONG' ? 'long' : 'short'}">${side || '—'}</span></td>
             <td class="mono">${fmt(p.size, 4)}</td>
             <td class="mono">${pref}${fmt(p.entry_price, dec)}</td>
             <td class="mono">${pref}${fmt(p.current_price || p.mark_price, dec)}</td>
+            <td class="mono neg" style="font-weight: 600; color: #ef4444;">${liq > 0 ? pref + fmt(liq, dec) : '—'}</td>
             <td class="mono ${upnl >= 0 ? 'pos' : 'neg'}">${(upnl >= 0 ? '+' : '') + fmt(upnl * rate)} ${selectedCurrency}</td>
             <td class="mono ${p.stop_loss ? 'neg' : ''}">${p.stop_loss > 0 ? pref + fmt(p.stop_loss, dec) : '—'}</td>
             <td class="mono ${p.take_profit ? 'pos' : ''}">${p.take_profit > 0 ? pref + fmt(p.take_profit, dec) : '—'}</td>

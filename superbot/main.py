@@ -482,8 +482,9 @@ class SuperBot:
                             'side': pos['side'],
                             'size': pos['size'],
                             'entry_price': pos['entry_price'],
-                            'stop_loss': pos.get('stop_loss', 0.0),
-                            'take_profit': pos.get('take_profit', 0.0),
+                            'stop_loss': pos.get('stop_loss', 0.0) or self.positions.get(symbol, {}).get('stop_loss', 0.0),
+                            'take_profit': pos.get('take_profit', 0.0) or self.positions.get(symbol, {}).get('take_profit', 0.0),
+                            'liquidation_price': pos.get('liquidation_price', 0.0),
                             'timestamp': self.positions.get(symbol, {}).get('timestamp') or pos.get('timestamp') or datetime.now(timezone.utc),
                             'status': 'open'
                         }
@@ -1080,18 +1081,42 @@ class SuperBot:
                 
                 old_sl = pos_risk.get('stop_loss', 0.0)
                 
+                # Récupérer la position brute du courtier pour vérifier la présence des ordres SL/TP réels
+                broker_pos = self.broker.get_position(symbol)
+                broker_tp = broker_pos.get('take_profit', 0.0) if broker_pos else 0.0
+                broker_sl = broker_pos.get('stop_loss', 0.0) if broker_pos else 0.0
+                
                 # Lancer la mise à jour (calcul du trailing stop / break-even)
                 self.risk_manager.update_open_position(symbol, current_price)
                 
                 new_sl = pos_risk.get('stop_loss', 0.0)
+                theoretical_tp = pos_risk.get('take_profit', 0.0)
                 
-                # Si le stop loss a été modifié localement, mettre à jour chez le broker
-                if new_sl != old_sl and new_sl > 0:
-                    log.info(f"Mise à jour du Stop Loss pour {symbol} chez le courtier : {old_sl:.5f} -> {new_sl:.5f}")
-                    success = self.broker.modify_sl_tp(symbol, new_sl, pos_risk.get('take_profit', 0.0))
+                # Recalculer le TP théorique si manquant
+                if theoretical_tp == 0.0:
+                    entry_price = pos_risk.get('entry_price', current_price)
+                    side = pos_risk.get('side', 'LONG')
+                    _, theoretical_tp = self.risk_manager.calculate_sl_tp_levels(
+                        entry_price=entry_price,
+                        atr_value=atr_value,
+                        position_side=side,
+                        asset_type=self.broker.get_asset_type(),
+                        symbol=symbol
+                    )
+                    pos_risk['take_profit'] = theoretical_tp
+                    self.positions[symbol]['take_profit'] = theoretical_tp
+                    log.info(f"Recalcul du Take Profit théorique pour {symbol} : {theoretical_tp:.5f}")
+                
+                # Mettre à jour si le SL a changé, ou s'il manque le SL ou le TP chez le courtier
+                should_update_broker = (new_sl != old_sl and new_sl > 0) or (broker_sl == 0.0 and new_sl > 0) or (broker_tp == 0.0 and theoretical_tp > 0)
+                
+                if should_update_broker:
+                    log.info(f"Mise à jour SL/TP pour {symbol} chez le courtier (SL: {old_sl:.5f} -> {new_sl:.5f}, TP: {theoretical_tp:.5f})")
+                    success = self.broker.modify_sl_tp(symbol, new_sl, theoretical_tp)
                     if success:
                         # Mettre à jour notre dictionnaire local de suivi de position
                         self.positions[symbol]['stop_loss'] = new_sl
+                        self.positions[symbol]['take_profit'] = theoretical_tp
 
     def _execute_signal_trade(self, symbol: str, signal_data: dict, df_with_indicators):
         """
