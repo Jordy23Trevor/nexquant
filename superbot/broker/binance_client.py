@@ -595,22 +595,22 @@ class BinanceClient(Broker):
 
         def run():
             orders = self._client.futures_get_open_orders(symbol=binance_symbol)
-            sl_order = None
-            tp_order = None
+            sl_orders = []
+            tp_orders = []
             for o in orders:
-                if o.get("type") == "STOP_MARKET":
-                    sl_order = o
-                elif o.get("type") == "TAKE_PROFIT_MARKET":
-                    tp_order = o
+                if o.get("type") in ["STOP_MARKET", "STOP"]:
+                    sl_orders.append(o)
+                elif o.get("type") in ["TAKE_PROFIT_MARKET", "TAKE_PROFIT"]:
+                    tp_orders.append(o)
 
             # Mettre à jour le SL
             if sl > 0:
-                if sl_order:
+                for old_sl in sl_orders:
                     try:
-                        self._client.futures_cancel_order(symbol=binance_symbol, orderId=sl_order["orderId"])
-                        time.sleep(0.2)
+                        self._client.futures_cancel_order(symbol=binance_symbol, orderId=old_sl["orderId"])
+                        time.sleep(0.1)
                     except BinanceAPIException as e:
-                        log.warning(f"️ Impossible d'annuler l'ancien SL : {e.message}")
+                        log.warning(f"⚠️ Impossible d'annuler l'ancien SL : {e.message}")
 
                 try:
                     self._client.futures_create_order(
@@ -624,12 +624,12 @@ class BinanceClient(Broker):
 
             # Mettre à jour le TP
             if tp > 0:
-                if tp_order:
+                for old_tp in tp_orders:
                     try:
-                        self._client.futures_cancel_order(symbol=binance_symbol, orderId=tp_order["orderId"])
-                        time.sleep(0.2)
+                        self._client.futures_cancel_order(symbol=binance_symbol, orderId=old_tp["orderId"])
+                        time.sleep(0.1)
                     except BinanceAPIException as e:
-                        log.warning(f"️ Impossible d'annuler l'ancien TP : {e.message}")
+                        log.warning(f"⚠️ Impossible d'annuler l'ancien TP : {e.message}")
 
                 try:
                     self._client.futures_create_order(
