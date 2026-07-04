@@ -39,8 +39,11 @@ class RiskManager:
         self.TP_ATR_MULT = config.get('TP_ATR_MULT', 3.0)  # Multiplicateur ATR pour TP
         self.TRAIL_ATR_MULT = config.get('TRAIL_ATR_MULT', 1.0)  # Multiplicateur ATR pour trailing
         self.BE_ATR_MULT = config.get('BE_ATR_MULT', 1.0)  # Multiplicateur ATR pour break-even
+        self.BE_DYN_RR = config.get('BE_DYN_RR', True)  # Activer le break-even dynamique (1:1 R:R)
+        self.BE_DYN_RR_RATIO = config.get('BE_DYN_RR_RATIO', 1.0)  # Ratio R:R pour le break-even dynamique
         self.MIN_POSITION_SIZE = config.get('MIN_POSITION_SIZE', 0.001)  # Taille min position
         self.MAX_POSITION_SIZE = config.get('MAX_POSITION_SIZE', 1000.0)  # Taille max position
+
 
         # Multiplicateurs ATR dynamiques par type d'actif
         self.ATR_MULTIPLIERS = {
@@ -608,6 +611,11 @@ class RiskManager:
 
         position = self.open_positions[symbol]
 
+        # Enregistrer le stop loss initial si non présent pour les calculs de R:R
+        if 'initial_sl' not in position or position['initial_sl'] == 0:
+            position['initial_sl'] = position.get('stop_loss', 0.0)
+
+
         try:
             # Calculer le P&L actuel et le pourcentage
             if position['side'] == 'LONG':
@@ -695,28 +703,46 @@ class RiskManager:
             if atr_value <= 0:
                 return
 
-            # Calculer le profit actuel en unités d'ATR
-            if position['side'] == 'LONG':
-                profit_in_atr = (current_price - position['entry_price']) / atr_value
-                # Activer le break-even quand le profit atteint BE_ATR_MULT * ATR
-                if profit_in_atr >= self.BE_ATR_MULT:
+            # Déterminer si le break-even doit se déclencher
+            should_trigger = False
+            if self.BE_DYN_RR:
+                initial_sl = position.get('initial_sl', 0.0)
+                if position['side'] == 'LONG':
+                    initial_risk = position['entry_price'] - initial_sl
+                    current_profit = current_price - position['entry_price']
+                    should_trigger = (initial_risk > 0 and current_profit >= initial_risk * self.BE_DYN_RR_RATIO)
+                else: # SHORT
+                    initial_risk = initial_sl - position['entry_price']
+                    current_profit = position['entry_price'] - current_price
+                    should_trigger = (initial_risk > 0 and current_profit >= initial_risk * self.BE_DYN_RR_RATIO)
+            else:
+                if position['side'] == 'LONG':
+                    profit_in_atr = (current_price - position['entry_price']) / atr_value
+                    should_trigger = (profit_in_atr >= self.BE_ATR_MULT)
+                else: # SHORT
+                    profit_in_atr = (position['entry_price'] - current_price) / atr_value
+                    should_trigger = (profit_in_atr >= self.BE_ATR_MULT)
+
+            if should_trigger:
+                position['break_even_activated'] = True
+                if position['side'] == 'LONG':
                     old_sl = position.get('stop_loss', 0)
-                    # Déplacer le stop loss légèrement au-dessus du prix d'entrée pour couvrir les frais
-                    new_sl = position['entry_price'] * 1.001  # Légèrement au-dessus pour les frais
-                    if new_sl > old_sl:  # Seulement si ça améliore le stop loss
+                    new_sl = position['entry_price'] * 1.0005  # Légèrement au-dessus pour couvrir les frais
+                    if new_sl > old_sl:
                         position['stop_loss'] = new_sl
-                        position['break_even_activated'] = True
                         log.info(f"Break-even activé pour {symbol} (LONG): SL moved to {new_sl:.4f}")
-            else:  # SHORT
-                profit_in_atr = (position['entry_price'] - current_price) / atr_value
-                if profit_in_atr >= self.BE_ATR_MULT:
+                    else:
+                        log.info(f"Break-even activé pour {symbol} (LONG) mais le trailing stop actuel ({old_sl:.4f}) est meilleur que BE ({new_sl:.4f})")
+                else:  # SHORT
                     old_sl = position.get('stop_loss', float('inf'))
-                    # Déplacer le stop loss légèrement en-dessous du prix d'entrée pour couvrir les frais
-                    new_sl = position['entry_price'] * 0.999  # Légèrement en-dessous pour les frais
-                    if new_sl < old_sl or old_sl == 0:  # Seulement si ça améliore le stop loss
+                    new_sl = position['entry_price'] * 0.9995  # Légèrement en-dessous pour couvrir les frais
+                    if new_sl < old_sl or old_sl == 0:
                         position['stop_loss'] = new_sl
-                        position['break_even_activated'] = True
                         log.info(f"Break-even activé pour {symbol} (SHORT): SL moved to {new_sl:.4f}")
+                    else:
+                        log.info(f"Break-even activé pour {symbol} (SHORT) mais le trailing stop actuel ({old_sl:.4f}) est meilleur que BE ({new_sl:.4f})")
+
+
 
         except Exception as e:
             log.error(f"Erreur lors de la vérification du break-even pour {symbol}: {e}")

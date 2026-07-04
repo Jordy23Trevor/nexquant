@@ -77,6 +77,8 @@ from superbot.config import (
     KELLY_FRACTION, MIN_TRADES_FOR_KELLY, SL_ATR_MULT, TP_ATR_MULT,
     TRAIL_ATR_MULT, BE_ATR_MULT, MIN_POSITION_SIZE, MAX_POSITION_SIZE,
     COOLDOWN_SECONDS,  # ✅ BUG FIX #5
+    MAX_FOREX_CURRENCY_EXPOSURE, MAX_SPREAD_PIPS, BE_DYN_RR, BE_DYN_RR_RATIO,
+
     
     # Strategy / Indicators
     SCORE_MIN, EMA_FAST, EMA_SLOW, EMA_TREND, HTF_EMA, D1_EMA, W1_EMA,
@@ -342,6 +344,8 @@ class SuperBot:
                 'TP_ATR_MULT': TP_ATR_MULT,
                 'TRAIL_ATR_MULT': TRAIL_ATR_MULT,
                 'BE_ATR_MULT': BE_ATR_MULT,
+                'BE_DYN_RR': BE_DYN_RR,
+                'BE_DYN_RR_RATIO': BE_DYN_RR_RATIO,
                 'MIN_POSITION_SIZE': actual_min_pos,
                 'MAX_POSITION_SIZE': actual_max_pos,
                 'COOLDOWN_SECONDS': COOLDOWN_SECONDS,  # ✅ BUG FIX #5
@@ -1112,6 +1116,121 @@ class SuperBot:
         # Mettre le solde en cache pour les prochains appels analyze_market du cycle
         self._cached_balance = account_balance
         entry_price = signal_data['entry_price']
+
+        # 2d. Filtres avancés Forex (Session, Spread, Corrélation, Pivots Obstacles)
+        if self.broker.get_asset_type() == 'forex':
+            # A. Session horaire (Londres 08h00 - 18h00, bloquer nuits & vendredi soir/week-end)
+            from datetime import timedelta
+            now_utc = datetime.utcnow()
+            
+            # Déterminer si DST (British Summer Time - UTC+1) est active à Londres
+            is_dst = False
+            if 3 < now_utc.month < 10:
+                is_dst = True
+            elif now_utc.month == 3:
+                last_sunday = 31 - (datetime(now_utc.year, 3, 31).weekday() + 1) % 7
+                if now_utc.day >= last_sunday:
+                    is_dst = True
+            elif now_utc.month == 10:
+                last_sunday = 31 - (datetime(now_utc.year, 10, 31).weekday() + 1) % 7
+                if now_utc.day < last_sunday:
+                    is_dst = True
+
+            london_offset = 1 if is_dst else 0
+            london_time = now_utc + timedelta(hours=london_offset)
+            london_hour = london_time.hour
+            weekday = london_time.weekday() # 0 = Lundi, ..., 4 = Vendredi, 5 = Samedi, 6 = Dimanche
+
+            # Règle : entre 08h00 et 18h00 heure de Londres
+            in_hours = (8 <= london_hour < 18)
+            
+            # Bloquer la nuit, le week-end et le vendredi soir (après 17h00 heure de Londres)
+            is_weekend = (weekday >= 5) or (weekday == 4 and london_hour >= 17) or (weekday == 6 and london_hour < 17)
+            
+            if not in_hours or is_weekend:
+                log.info(
+                    f"🚫 Trade {symbol} rejeté : En dehors de la session Forex (Londres 08h-18h) ou week-end. "
+                    f"Heure Londres : {london_time.strftime('%H:%M:%S')} (Jour de la semaine: {weekday})"
+                )
+                return
+
+
+            # B. Garde-fou Spread
+            spread = self.broker.get_spread(symbol)
+            if spread > MAX_SPREAD_PIPS:
+                log.info(f"🚫 Trade {symbol} rejeté : Spread trop large ({spread:.1f} pips > {MAX_SPREAD_PIPS} pips max)")
+                return
+
+            # C. Corrélation de devises
+            clean = symbol.upper().replace("/", "")
+            if len(clean) >= 6:
+                base_cand = clean[:3]
+                quote_cand = clean[3:6]
+                
+                currency_exposure = {}
+                for open_sym, pos in self.positions.items():
+                    if pos.get('size', 0) > 0:
+                        open_clean = open_sym.upper().replace("/", "")
+                        if len(open_clean) >= 6:
+                            op_base = open_clean[:3]
+                            op_quote = open_clean[3:6]
+                            op_side = pos.get('side', '').upper()
+                            
+                            if op_side in ['LONG', 'BUY']:
+                                currency_exposure[op_base] = currency_exposure.get(op_base, 0) + 1
+                                currency_exposure[op_quote] = currency_exposure.get(op_quote, 0) - 1
+                            elif op_side in ['SHORT', 'SELL']:
+                                currency_exposure[op_base] = currency_exposure.get(op_base, 0) - 1
+                                currency_exposure[op_quote] = currency_exposure.get(op_quote, 0) + 1
+
+                cand_side = 'LONG' if signal_data.get('should_long') else 'SHORT'
+                if cand_side == 'LONG':
+                    new_base_exp = currency_exposure.get(base_cand, 0) + 1
+                    new_quote_exp = currency_exposure.get(quote_cand, 0) - 1
+                else:
+                    new_base_exp = currency_exposure.get(base_cand, 0) - 1
+                    new_quote_exp = currency_exposure.get(quote_cand, 0) + 1
+
+                if abs(new_base_exp) > MAX_FOREX_CURRENCY_EXPOSURE or abs(new_quote_exp) > MAX_FOREX_CURRENCY_EXPOSURE:
+                    log.info(
+                        f"🚫 Trade {symbol} rejeté : Risque de corrélation de devises trop élevé. "
+                        f"Exposition nette après trade : {base_cand}={new_base_exp}, {quote_cand}={new_quote_exp} "
+                        f"(limite autorisée: +/- {MAX_FOREX_CURRENCY_EXPOSURE})"
+                    )
+                    return
+
+            # D. Obstacle pivot
+            last_row = df_with_indicators.iloc[-1]
+            pivot = last_row.get('pivot', 0)
+            r1 = last_row.get('r1', 0)
+            s1 = last_row.get('s1', 0)
+            r2 = last_row.get('r2', 0)
+            s2 = last_row.get('s2', 0)
+
+            target_obstacle = 0.0
+            if signal_data.get('should_long'):
+                obstacles = [val for val in [r1, r2] if val > entry_price]
+                target_obstacle = min(obstacles) if obstacles else 0.0
+            elif signal_data.get('should_short'):
+                obstacles = [val for val in [s1, s2] if val < entry_price]
+                target_obstacle = max(obstacles) if obstacles else 0.0
+
+            atr_value = df_with_indicators.iloc[-1].get('atr', 0)
+            sl_price, _ = self.risk_manager.calculate_sl_tp_levels(
+                entry_price, atr_value, 
+                "LONG" if signal_data.get('should_long') else "SHORT", 
+                asset_type="forex", symbol=symbol
+            )
+            
+            if target_obstacle > 0:
+                potential_gain = abs(target_obstacle - entry_price)
+                potential_risk = abs(entry_price - sl_price)
+                if potential_risk > 0:
+                    real_rr = potential_gain / potential_risk
+                    if real_rr < 1.0:
+                        log.info(f"🚫 Trade {symbol} rejeté : Obstacle pivot trop proche. R:R réel potentiel = {real_rr:.2f} < 1.0 (Obstacle à {target_obstacle:.5f})")
+                        return
+
 
         # 2b. Filtre volume minimum (protection contre le slippage sur actifs illiquides)
         if self.broker.get_asset_type() == "crypto":

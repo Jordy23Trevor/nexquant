@@ -110,6 +110,11 @@ class Broker(abc.ABC):
         """Retourne le dernier prix coté (mid price) pour un instrument."""
         pass
 
+    def get_spread(self, symbol: str) -> float:
+        """Retourne le spread actuel (en pips/points) pour un instrument."""
+        return 0.0
+
+
     @abc.abstractmethod
     def get_min_order_size(self, symbol: str) -> float:
         """Retourne la taille minimale d'ordre autorisée pour un instrument."""

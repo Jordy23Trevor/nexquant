@@ -152,6 +152,13 @@ class PaperForexClient(Broker):
 
         return price_data["price"]
 
+    def get_spread(self, symbol: str) -> float:
+        """Retourne le spread typique pour un symbole forex."""
+        normalized = self._normalize_symbol(symbol)
+        info = self._get_symbol_info(normalized)
+        return float(info.get("typical_spread", 1.0))
+
+
     def get_balance(self) -> float:
         """Solde disponible en devise de base du compte de simulation."""
         return 10000.0

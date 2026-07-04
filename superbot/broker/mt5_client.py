@@ -530,6 +530,19 @@ class MT5Client(Broker):
             return 0.0
         return (tick.bid + tick.ask) / 2
 
+    def get_spread(self, symbol: str) -> float:
+        """Retourne le spread actuel en pips."""
+        symbol = self.normalize_symbol(symbol)
+        self._call_api(lambda: mt5.symbol_select(symbol, True), False)
+        tick = self._call_api(lambda: mt5.symbol_info_tick(symbol), None)
+        if tick is None or tick.bid == 0.0 or tick.ask == 0.0:
+            return 0.0
+        spread_raw = tick.ask - tick.bid
+        normalized = symbol.upper().replace("/", "")
+        pip_size = 0.01 if "JPY" in normalized else 0.0001
+        return spread_raw / pip_size
+
+
     def get_min_order_size(self, symbol: str) -> float:
         symbol = self.normalize_symbol(symbol)
         info = self._call_api(lambda: mt5.symbol_info(symbol), None)

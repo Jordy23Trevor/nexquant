@@ -139,6 +139,55 @@ class TechnicalIndicators:
         # === ATR (pour le risk management) ===
         result['atr'] = calculate_atr(high_price, low_price, close_price, self.config.get('ATR_LEN', 14))
 
+        # === PIVOT POINTS (supports et résistances dynamiques quotidiens) ===
+        try:
+            # Resampler en journalier pour obtenir les niveaux High, Low, Close du jour précédent
+            df_temp = result.copy()
+            if not isinstance(df_temp.index, pd.DatetimeIndex):
+                df_temp.index = pd.to_datetime(df_temp.index)
+            
+            daily = df_temp.resample('D').agg({
+                'high': 'max',
+                'low': 'min',
+                'close': 'last'
+            }).dropna()
+            
+            # Shift d'un jour pour utiliser les données de la veille
+            daily_prev = daily.shift(1)
+            
+            daily_prev['pivot'] = (daily_prev['high'] + daily_prev['low'] + daily_prev['close']) / 3
+            daily_prev['r1'] = (2 * daily_prev['pivot']) - daily_prev['low']
+            daily_prev['s1'] = (2 * daily_prev['pivot']) - daily_prev['high']
+            daily_prev['r2'] = daily_prev['pivot'] + (daily_prev['high'] - daily_prev['low'])
+            daily_prev['s2'] = daily_prev['pivot'] - (daily_prev['high'] - daily_prev['low'])
+            
+            # Aligner les valeurs quotidiennes avec les lignes horaires
+            df_temp['date_only'] = df_temp.index.normalize()
+            daily_prev = daily_prev.reset_index()
+            daily_prev.rename(columns={'index': 'date_only'}, inplace=True)
+            
+            merged = pd.merge(df_temp.reset_index(), daily_prev[['date_only', 'pivot', 'r1', 's1', 'r2', 's2']], on='date_only', how='left')
+            merged.set_index('index', inplace=True)
+            
+            # Assigner au résultat final
+            result['pivot'] = merged['pivot'].ffill().bfill()
+            result['r1'] = merged['r1'].ffill().bfill()
+            result['s1'] = merged['s1'].ffill().bfill()
+            result['r2'] = merged['r2'].ffill().bfill()
+            result['s2'] = merged['s2'].ffill().bfill()
+        except Exception as e:
+            log.warning(f"Impossible de calculer les pivots quotidiens resamplés ({e}), repli sur pivots par bougie.")
+            # Repli sur le calcul simple basé sur la bougie précédente
+            prev_high = result['high'].shift(1)
+            prev_low = result['low'].shift(1)
+            prev_close = result['close'].shift(1)
+            result['pivot'] = (prev_high + prev_low + prev_close) / 3
+            result['r1'] = (2 * result['pivot']) - prev_low
+            result['s1'] = (2 * result['pivot']) - prev_high
+            result['r2'] = result['pivot'] + (prev_high - prev_low)
+            result['s2'] = result['pivot'] - (prev_high - prev_low)
+
+
         # === INDICATEURS SUPPLÉMENTAIRES ===
         # Stochastic Oscillator (pour les marchés en range)
         result['stoch_k'], result['stoch_d'] = self._calculate_stochastic(

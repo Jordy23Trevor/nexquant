@@ -147,6 +147,13 @@ TP_ATR_MULT = float(os.getenv("TP_ATR_MULT", "3.0"))  # Take Profit = 3.0 × ATR
 TRAIL_ATR_MULT = float(os.getenv("TRAIL_ATR_MULT", "1.0"))  # Trailing stop distance
 BE_ATR_MULT = float(os.getenv("BE_ATR_MULT", "1.0"))  # Breakeven activation threshold
 
+# Forex filters
+MAX_FOREX_CURRENCY_EXPOSURE = int(os.getenv("MAX_FOREX_CURRENCY_EXPOSURE", "1"))
+MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.0"))
+BE_DYN_RR = os.getenv("BE_DYN_RR", "true").lower() == "true"
+BE_DYN_RR_RATIO = float(os.getenv("BE_DYN_RR_RATIO", "1.0"))
+
+
 # Score thresholds
 SCORE_MIN = int(os.getenv("SCORE_MIN", "6"))  # Minimum score to enter (out of 10 max base score)
 # Note : CRYPTO_SCORE_MIN (défini dans la section instruments) remplace ce seuil pour la crypto
@@ -174,7 +181,7 @@ MIN_TRADES_FOR_KELLY = int(os.getenv("MIN_TRADES_FOR_KELLY", "20"))  # Min trade
 # =============================================================================
 # News avoidance windows (minutes)
 NEWS_AVOIDANCE_BEFORE = int(os.getenv("NEWS_AVOIDANCE_BEFORE", "30"))  # Block entry X min before news
-NEWS_AVOIDANCE_AFTER = int(os.getenv("NEWS_AVOIDANCE_AFTER", "15"))   # Block entry X min after news
+NEWS_AVOIDANCE_AFTER = int(os.getenv("NEWS_AVOIDANCE_AFTER", "30"))   # Block entry X min after news
 
 # News impact on position sizing
 NEWS_RISK_REDUCTION_FACTOR = float(os.getenv("NEWS_RISK_REDUCTION_FACTOR", "0.5"))  # Reduce risk by this factor if news today
@@ -344,6 +351,8 @@ __all__ = [
     "SCORE_MIN", "MAX_DAILY_LOSS_PCT", "MAX_MONTHLY_LOSS_PCT", "MAX_OPEN_POSITIONS",
     "MIN_POSITION_SIZE", "MAX_POSITION_SIZE", "KELLY_FRACTION", "MIN_TRADES_FOR_KELLY",
     "COOLDOWN_SECONDS",  # ✅ BUG FIX #5
+    "MAX_FOREX_CURRENCY_EXPOSURE", "MAX_SPREAD_PIPS", "BE_DYN_RR", "BE_DYN_RR_RATIO",
+
 
     # News & Sentiment
     "NEWS_AVOIDANCE_BEFORE", "NEWS_AVOIDANCE_AFTER", "NEWS_RISK_REDUCTION_FACTOR",

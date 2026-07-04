@@ -1,12 +1,16 @@
-# 📈 NexQuant — Intelligence de Trading Quantitative
+# 📈 NexQuant (v2) — Intelligence de Trading Quantitative Unifiée
 
-**NexQuant** est un écosystème de trading algorithmique modulaire, automatisé et distribué conçu pour les marchés financiers modernes (Cryptomonnaies, Actions/ETFs US et Forex). Il allie un client d'exécution Python léger et ultra-rapide à une interface web SaaS premium et réactive (React + Vite + Supabase).
+**NexQuant** est un écosystème de trading algorithmique modulaire, distribué et automatisé conçu pour les marchés financiers modernes (**Cryptomonnaies, Actions/ETFs US et Forex**). 
+
+Il concilie :
+1. **Un moteur d'exécution local en Python** (nom de code : **SuperBot**) ultra-léger et ultra-rapide.
+2. **Une console Web SaaS premium** construite avec **React, Vite, TypeScript, Tailwind CSS, et Supabase** (comprenant la facturation par abonnement Stripe).
 
 ---
 
-## 🌌 Architecture Globale de la v2
+## 🌌 Architecture Globale en Client Distribué
 
-NexQuant utilise une architecture en **client distribué** permettant de concilier la rapidité d'exécution locale et la puissance de contrôle centralisée d'un SaaS moderne.
+NexQuant utilise une architecture décentralisée pour garantir la confidentialité et la vitesse d'exécution :
 
 ```
                   ┌────────────────────────────────────────┐
@@ -31,82 +35,104 @@ NexQuant utilise une architecture en **client distribué** permettant de concili
                       Futures      Forex    Stocks/ETFs
 ```
 
----
-
-## 🚀 Fonctionnalités Majeures
-
-### 1. Moteur Multi-Broker Flexible
-* **Binance Futures** : Trading de dérivés crypto avec levier réglable et gestion dynamique des marges.
-* **MetaTrader 5 (MT5)** : Intégration pour le Forex (Fusion Markets) avec exécution au volume (lots) et gestion des heures de marché.
-* **Alpaca Markets** : Trading d'actions et d'ETFs US avec détection et respect automatique des heures d'ouverture de la bourse de New York (NYSE).
-* **Paper Forex Engine** : Simulateur interne complet pour le test de stratégies Forex hors ligne sans risque.
-
-### 2. Gestion de Risque et Filtres Quantitatifs de Pointe
-* **Filtre de Qualité de Signal** : Analyse de la force d'un signal (score sur 10) et exigences minimales de Risk/Reward avant exécution.
-* **Ajustement de Risque par Corrélation** : Analyse de la corrélation historique des rendements d'un actif. Si deux actifs ou plus sont fortement corrélés, le dimensionnement des positions est réduit automatiquement (facteur de réduction) pour éviter la sur-exposition.
-* **Disjoncteur de Pertes (Circuit Breaker)** : Blocage temporaire ou arrêt des transactions après un nombre configurable de pertes consécutives (`MAX_CONSECUTIVE_LOSS`) ou un dépassement du drawdown maximum autorisé.
-* **Gestion Avancée de la Fraction de Kelly** : Calcul dynamique de la taille optimale de position ajustée selon le taux de réussite historique du robot.
-* **Intégration du Funding Rate** : Prise en compte du taux de financement (Funding Rate) sur Binance Futures pour optimiser les stratégies de Carry Trade (réduction automatique de la taille si les frais de financement pénalisent la direction du trade).
-
-### 3. Écosystème SaaS & Facturation Commerciale
-* **Chiffrement Centralisé des Clés (Supabase Vault)** : Vos clés API de trading sont configurées sur le site web et chiffrées de manière ultra-sécurisée avec **pgsodium (AES-256)**. Elles sont envoyées au bot local lors de l'authentification et stockées uniquement en RAM, sans jamais toucher au disque dur du client.
-* **Vérification de Licence & Bêta** : Une période d'essai de 1 mois s'active automatiquement à l'inscription. Passé ce délai, le bot local est bloqué automatiquement via l'API d'ingestion sécurisée si aucun abonnement Stripe n'est actif.
-* **Mise à Jour Automatique (Auto-Update)** : Le bot interroge le serveur au démarrage pour comparer sa version avec la version officielle et télécharge de manière transparente les correctifs nécessaires.
+* **Sécurisation des Clés (Supabase Vault & pgsodium)** : Les clés d'API des courtiers sont renseignées sur la console SaaS, chiffrées en base de données avec l'extension cryptographique **pgsodium (AES-256)**. Elles sont injectées dans la RAM du bot local lors de l'authentification et ne touchent jamais son disque dur.
+* **Télémétrie en Temps Réel** : Le bot pousse ses statistiques de performance (solde, équité, positions ouvertes, PnL, historique des trades clos) vers Supabase pour affichage instantané sur le dashboard Web.
+* **Contrôle à distance** : Permet de mettre en pause ou de reprendre le bot local à distance depuis l'interface Web via un canal de requêtes sécurisé.
 
 ---
 
-## 📂 Structure du Répertoire Git
+## 🚀 Fonctionnalités Clés & Filtres de Risque Avancés (v2)
+
+Pour stabiliser le bot Forex & Crypto et viser un **winrate cible de 50-55%**, plusieurs filtres quantitatifs et de gestion de capital ont été intégrés :
+
+### 1. Garde-fous et Filtres Forex
+* **Filtre Temporel de Session (Session Filter)** : Restreint l'ouverture des trades Forex aux heures de haute liquidité (de **08h00 à 18h00 heure de Londres**, calculant automatiquement l'heure d'été/BST et d'hiver/GMT). Bloque les entrées la nuit et le **vendredi soir après 17h00** (et le week-end) pour éviter les fausses cassures de faible volume.
+* **Garde-fou sur le Spread (Spread Guard)** : Récupère le spread réel Bid/Ask du courtier. Si le spread est supérieur à `MAX_SPREAD_PIPS` (ex: `1.5` ou `2.0` pips), le trade est rejeté. Idéal pour éviter le slippage pendant le Rollover quotidien de 23h00.
+* **Calculateur d'Exposition de Devise (Correlation Filter)** : Évalue l'exposition nette sur chaque devise (ex: si vous avez déjà un LONG `EUR/USD`, une exposition de `+1 EUR` et `-1 USD` est enregistrée). Si un signal sur `GBP/USD` survient, il est rejeté car l'exposition cumulée sur l'USD dépasserait `MAX_FOREX_CURRENCY_EXPOSURE = 1`. Cela protège le portefeuille du risque systémique lié à une devise unique.
+* **Filtre d'Obstacle Pivot (Pivot R:R Filter)** : Calcule les points pivots quotidiens (Pivot, R1, S1, R2, S2) à partir des bougies de la veille resamplées. Si le premier niveau pivot faisant obstacle (R1/R2 pour LONG, S1/S2 pour SHORT) est plus proche de l'entrée que le Stop Loss (R:R réel potentiel < 1:1), le trade est rejeté.
+
+### 2. Protections de Portefeuille Globales
+* **Break-Even Adaptatif Précoce (R:R 1:1)** : Dès qu'une position atteint un gain latent égal à son risque initial (R:R de 1:1), le Stop Loss est déplacé au point d'entrée pour éliminer définitivement le risque de perte sur ce trade. Si le trailing stop est déjà plus avantageux, il est préservé.
+* **News Filter (Évitement d'Annonces)** : Se connecte à Forex Factory et bloque le trading **30 minutes avant et 30 minutes après** les annonces économiques majeures classées "Rouges" (taux d'intérêt de la FED/BCE, CPI/inflation, NFP/emploi).
+* **Crypto Range Prevention (Trend-Following Strict)** : Le range trading est entièrement désactivé sur les cryptomonnaies. Si un signal crypto survient en régime `RANGING`, il est immédiatement bloqué. Le trading crypto est uniquement effectué en suivi de tendance (`TRENDING`) pour éviter les manipulations de liquidité.
+* **Altcoin Pruning** : Pruning des altcoins secondaires illiquides. Seul le top 10 des cryptomonnaies est autorisé, avec une blacklist stricte (`SOL/USDT`) et un score d'entrée plus exigeant (`CRYPTO_SCORE_MIN = 7`).
+* **Disjoncteur (Circuit Breaker)** : Coupe le bot après un nombre de pertes d'affilée (`MAX_CONSECUTIVE_LOSS`) ou si le drawdown quotidien max (`MAX_DAILY_LOSS_PCT`) est atteint.
+
+---
+
+## 🛠️ Démarrage Rapide
+
+### 📂 Structure du Répertoire
 
 ```
 nexquant/
 ├── superbot/                  # 🐍 Backend : Bot de Trading Python
-│   ├── broker/                # Adaptateurs de courtiers (Binance, MT5, Alpaca...)
-│   ├── risk/                  # Module de calcul de risque et d'historique
-│   ├── strategy/              # Logique algorithmique adaptative (trend vs range)
-│   ├── indicators/            # Indicateurs techniques (EMA, RSI, MACD, Ichimoku...)
-│   ├── news/                  # Analyse sémantique de sentiment NLP (Sentence-Transformers)
-│   ├── dashboard/             # API locale et dashboard de supervision en direct
-│   └── main.py                # Point d'entrée de l'exécuteur du bot
-├── NexQuant_Web_App/          # ⚛️ Frontend : Application Web React
-│   ├── src/                   # Composants de l'interface client, graphiques & intégrations
-│   └── tsconfig.json, etc.    # Configurations TypeScript/Vite/Bun
-├── docs/                      # 📖 Centre de Documentation
-│   ├── architecture/          # Spécifications et diagrammes d'architecture broker
-│   └── plans/                 # Plans de développement et historique d'implémentation
-├── GLOBAL_DOCUMENTATION.md    # Guide de référence multilingue complet (Markdown)
-└── GLOBAL_DOCUMENTATION.html  # Guide interactif avec sélecteur de langue et recherche
+│   ├── broker/                # Adaptateurs brokers (Binance, MT5, Alpaca, Paper)
+│   ├── risk/                  # RiskManager (Kelly, drawdown, BE, corrélation)
+│   ├── strategy/              # Logique de signal & filtres (trending vs ranging)
+│   ├── indicators/            # Calculateurs techniques vectorisés (OHLCV)
+│   ├── news/                  # Analyse sémantique NLP et calendrier économique
+│   └── main.py                # Boucle d'exécution et orchestration principale
+├── NexQuant_Web_App/          # ⚛️ Frontend : Console SaaS React
+│   ├── src/                   # Interface utilisateur, graphiques & intégration Supabase
+│   └── supabase/              # Politiques de sécurité (RLS) et schémas SQL
 ```
 
----
-
-## 🛠️ Démarrage Rapide (Développement)
-
-### 1. Lancement du Bot Python
-1. Installez les dépendances nécessaires :
+### 1. Installation et Lancement du Bot Python
+1. Accédez au répertoire racine :
    ```bash
    cd nexquant
    pip install -r requirements.txt
    ```
-2. Dupliquez et renommez le fichier `.env.backup` en `.env`, puis configurez vos variables (clés API ou jetons SaaS).
+2. Créez votre fichier de variables d'environnement `.env` :
+   ```bash
+   cp .env.backup .env
+   ```
+   Renseignez vos clés API courtier ou vos jetons SaaS.
 3. Démarrez l'exécuteur :
    ```bash
    python superbot/main.py
    ```
 
-### 2. Lancement de la Console Web (Vite React)
-1. Installez les packages Node (de préférence avec Bun pour plus de rapidité) :
+### 2. Installation et Lancement de la Console Web React
+1. Allez dans le répertoire de la Web App :
    ```bash
    cd nexquant/NexQuant_Web_App
+   ```
+2. Installez les packages (avec **Bun** recommandé ou **npm**) :
+   ```bash
    bun install   # ou npm install
    ```
-2. Copiez le fichier `.env` du frontend et configurez les clés d'accès à Supabase.
-3. Démarrez le serveur de développement :
+3. Configurez le fichier `.env.local` :
+   ```env
+   VITE_SUPABASE_URL=https://votre-url-supabase.supabase.co
+   VITE_SUPABASE_ANON_KEY=votre-cle-anonyme-supabase
+   ```
+4. Démarrez le serveur de développement :
    ```bash
    bun run dev   # ou npm run dev
    ```
 
 ---
 
-## 📖 Accès à la Documentation Expert
+## ⚙️ Paramètres Clés de Configuration (`.env`)
 
-Pour une plongée en profondeur dans les détails mathématiques de nos stratégies adaptatives ou le paramétrage des webhooks TradingView, ouvrez le fichier interactif **`GLOBAL_DOCUMENTATION.html`** dans n'importe quel navigateur internet. Il dispose d'un moteur de recherche dynamique et est traduit en Français 🇫🇷, Anglais 🇬🇧 et Espagnol 🇪🇸.
+| Variable | Description | Valeur Recommandée |
+|---|---|---|
+| `BROKER_TYPE` | Courtier actif (`binance`, `mt5`, `alpaca`, `paper_forex`) | `mt5` (Forex Live) / `paper_forex` (Test) |
+| `RISK_PCT` | Capital risqué par transaction | `1.0` % (conservateur) |
+| `MAX_FOREX_CURRENCY_EXPOSURE` | Nombre maximal de positions exposées à une même devise | `1` |
+| `MAX_SPREAD_PIPS` | Spread maximum en pips toléré pour entrer en position | `1.5` ou `2.0` |
+| `BE_DYN_RR` | Active le déplacement du SL à l'entrée au R:R 1:1 | `true` |
+| `NEWS_AVOIDANCE_BEFORE` / `_AFTER` | Minutes de blocage autour des publications majeures | `30` |
+| `CRYPTO_SCORE_MIN` | Score minimum requis pour les signaux crypto | `7` |
+
+---
+
+## 🛡️ Guide de Workflow Git Sécurisé
+
+Pour maintenir la stabilité de l'application et éviter toute coupure de synchronisation avec Lovable :
+1. **Ne poussez JAMAIS directement sur `main`**. Le commit direct ou le force-push sur la branche de production est interdit.
+2. Créez toujours une branche de fonctionnalité (`feature/nom-feature` ou `docs/nom-doc`).
+3. Suivez la convention des messages de commits (ex: `feat(risk): add dynamic sl`, `fix(mt5): resolve lot size calculation`, `docs: update setup manual`).
+4. Poussez la branche et ouvrez une **Pull Request** sur GitHub. Attendez les validations CI/CD et la relecture de code avant de fusionner en mode **Squash and Merge**.

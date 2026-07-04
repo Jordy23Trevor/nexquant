@@ -158,10 +158,14 @@ class TradingStrategy:
             total_score = trend_score
             details = {**trend_details, 'regime': 'TRENDING'}
         else:
+            if is_crypto:
+                log.info(f"🚫 Range trading désactivé pour la crypto {symbol} (Trend Following uniquement)")
+                return self._create_neutral_signal(f"RANGING_CRYPTO_BLOCKED:{symbol}")
             ranging_score, ranging_details = self._calculate_ranging_score(df_with_indicators)
             trend_score, trend_details = 0, {}  # Pas utilisé en range
             total_score = ranging_score
             details = {**ranging_details, 'regime': 'RANGING'}
+
 
         # Vérifier les triggers (conditions d'entrée)
         trigger_long, trigger_short = self._check_entry_triggers(df_with_indicators, is_trending)
