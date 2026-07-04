@@ -161,20 +161,13 @@ class TechnicalIndicators:
             daily_prev['r2'] = daily_prev['pivot'] + (daily_prev['high'] - daily_prev['low'])
             daily_prev['s2'] = daily_prev['pivot'] - (daily_prev['high'] - daily_prev['low'])
             
-            # Aligner les valeurs quotidiennes avec les lignes horaires
-            df_temp['date_only'] = df_temp.index.normalize()
-            daily_prev = daily_prev.reset_index()
-            daily_prev.rename(columns={'index': 'date_only'}, inplace=True)
-            
-            merged = pd.merge(df_temp.reset_index(), daily_prev[['date_only', 'pivot', 'r1', 's1', 'r2', 's2']], on='date_only', how='left')
-            merged.set_index('index', inplace=True)
-            
-            # Assigner au résultat final
-            result['pivot'] = merged['pivot'].ffill().bfill()
-            result['r1'] = merged['r1'].ffill().bfill()
-            result['s1'] = merged['s1'].ffill().bfill()
-            result['r2'] = merged['r2'].ffill().bfill()
-            result['s2'] = merged['s2'].ffill().bfill()
+            # Aligner les valeurs quotidiennes avec les lignes horaires de manière robuste sans reset_index
+            date_only = df_temp.index.normalize()
+            result['pivot'] = pd.Series(date_only.map(daily_prev['pivot']), index=result.index).ffill().bfill()
+            result['r1'] = pd.Series(date_only.map(daily_prev['r1']), index=result.index).ffill().bfill()
+            result['s1'] = pd.Series(date_only.map(daily_prev['s1']), index=result.index).ffill().bfill()
+            result['r2'] = pd.Series(date_only.map(daily_prev['r2']), index=result.index).ffill().bfill()
+            result['s2'] = pd.Series(date_only.map(daily_prev['s2']), index=result.index).ffill().bfill()
         except Exception as e:
             log.warning(f"Impossible de calculer les pivots quotidiens resamplés ({e}), repli sur pivots par bougie.")
             # Repli sur le calcul simple basé sur la bougie précédente
