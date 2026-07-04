@@ -4,6 +4,8 @@ import hashlib
 import json
 import logging
 import os
+import queue
+import threading
 from typing import Dict, Any, Optional
 
 log = logging.getLogger("telemetry")
@@ -11,7 +13,8 @@ log = logging.getLogger("telemetry")
 class TelemetryClient:
     """
     Client de télémétrie pour connecter le bot local à la plateforme Web NexQuant.
-    Gère la signature HMAC-SHA256, l'envoi de données (ingest) et la récupération de configuration.
+    Gère la signature HMAC-SHA256, l'envoi asynchrone des données (ingest) 
+    et la récupération synchrone de configuration/licence.
     """
 
     def __init__(self, api_url: Optional[str] = None, user_id: Optional[str] = None, ingest_token: Optional[str] = None):
@@ -21,10 +24,18 @@ class TelemetryClient:
         self.ingest_token = ingest_token or os.getenv("NEXQUANT_INGEST_TOKEN")
         self.enabled = bool(self.user_id and self.ingest_token)
 
+        # File d'attente et thread worker pour l'envoi asynchrone
+        self._telemetry_queue = queue.Queue()
+        self._worker_thread = None
+        self._running = False
+
         if not self.enabled:
             log.warning("⚠️  Télémétrie désactivée : NEXQUANT_USER_ID ou NEXQUANT_INGEST_TOKEN non configuré dans .env")
         else:
             log.info(f"Télémétrie activée pour l'utilisateur {self.user_id} sur {self.api_url}")
+            self._running = True
+            self._worker_thread = threading.Thread(target=self._telemetry_worker, daemon=True, name="TelemetryWorker")
+            self._worker_thread.start()
 
     def _sign_payload(self, payload_str: str) -> str:
         """Calcule la signature HMAC-SHA256 du corps de la requête."""
@@ -36,8 +47,8 @@ class TelemetryClient:
             hashlib.sha256
         ).hexdigest()
 
-    def _post(self, endpoint: str, data: dict) -> Optional[dict]:
-        """Envoie une requête POST sécurisée et signée au serveur."""
+    def _post_immediate(self, endpoint: str, data: dict) -> Optional[dict]:
+        """Envoie immédiatement une requête POST sécurisée et signée au serveur (synchrone/bloquant)."""
         if not self.enabled:
             return None
 
@@ -67,8 +78,54 @@ class TelemetryClient:
             log.debug(f"Impossible de contacter le serveur de télémétrie : {e}")
             return None
 
+    def _post_async(self, endpoint: str, data: dict) -> bool:
+        """Ajoute la requête d'envoi de données à la queue asynchrone d'arrière-plan."""
+        if not self.enabled:
+            return False
+        
+        try:
+            # Éviter la croissance infinie de la file d'attente si le serveur est injoignable
+            if self._telemetry_queue.qsize() > 1000:
+                try:
+                    self._telemetry_queue.get_nowait()
+                    self._telemetry_queue.task_done()
+                except (queue.Empty, ValueError):
+                    pass
+            
+            self._telemetry_queue.put((endpoint, data))
+            return True
+        except Exception:
+            return False
+
+    def _telemetry_worker(self):
+        """Thread worker d'arrière-plan traitant la file d'attente de télémétrie."""
+        while self._running:
+            try:
+                task = self._telemetry_queue.get(timeout=1.0)
+                if task is None:
+                    break
+                
+                endpoint, data = task
+                try:
+                    self._post_immediate(endpoint, data)
+                except Exception:
+                    pass
+                finally:
+                    self._telemetry_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception:
+                pass
+
+    def stop(self):
+        """Arrête proprement le thread de télémétrie."""
+        self._running = False
+        if self._worker_thread:
+            self._telemetry_queue.put(None)
+            self._worker_thread.join(timeout=2.0)
+
     def push_heartbeat(self, is_running: bool, broker_type: str, testnet: bool) -> bool:
-        """Envoie un signal de présence (heartbeat) du bot."""
+        """Envoie un signal de présence (heartbeat) du bot de manière synchrone."""
         payload = {
             "kind": "heartbeat",
             "user_id": self.user_id,
@@ -78,11 +135,11 @@ class TelemetryClient:
                 "testnet": testnet
             }
         }
-        res = self._post("ingest", payload)
+        res = self._post_immediate("ingest", payload)
         return res is not None and not res.get("is_expired", False)
 
     def push_equity(self, equity: float, pnl_total: float = 0.0, drawdown: float = 0.0) -> bool:
-        """Envoie une capture de la courbe d'équité."""
+        """Envoie une capture de la courbe d'équité de manière asynchrone."""
         payload = {
             "kind": "equity",
             "user_id": self.user_id,
@@ -92,11 +149,10 @@ class TelemetryClient:
                 "drawdown": float(drawdown)
             }
         }
-        res = self._post("ingest", payload)
-        return res is not None
+        return self._post_async("ingest", payload)
 
     def push_position(self, symbol: str, side: str, qty: float, entry_price: float, current_price: float, pnl: float, pnl_pct: float, status: str = "open", broker: str = "binance") -> bool:
-        """Envoie les détails d'une position ouverte ou fermée."""
+        """Envoie les détails d'une position ouverte ou fermée de manière asynchrone."""
         payload = {
             "kind": "position",
             "user_id": self.user_id,
@@ -112,12 +168,10 @@ class TelemetryClient:
                 "broker": broker
             }
         }
-        res = self._post("ingest", payload)
-        return res is not None
+        return self._post_async("ingest", payload)
 
     def push_log(self, level: str, message: str, source: str = "engine") -> bool:
-        """Envoie un log d'exécution pour affichage distant."""
-        # Adapter les niveaux log Python aux niveaux attendus par Supabase
+        """Envoie un log d'exécution pour affichage distant de manière asynchrone."""
         lvl_map = {
             "DEBUG": "debug",
             "INFO": "info",
@@ -137,11 +191,10 @@ class TelemetryClient:
                 "message": message
             }
         }
-        res = self._post("ingest", payload)
-        return res is not None
+        return self._post_async("ingest", payload)
 
     def push_regime(self, symbol: str, regime: str, confidence: float, trend_direction: str = "neutral", news_sentiment: float = 0.0) -> bool:
-        """Envoie l'état du régime de marché."""
+        """Envoie l'état du régime de marché de manière asynchrone."""
         payload = {
             "kind": "regime",
             "user_id": self.user_id,
@@ -153,13 +206,11 @@ class TelemetryClient:
                 "news_sentiment": float(news_sentiment)
             }
         }
-        res = self._post("ingest", payload)
-        return res is not None
+        return self._post_async("ingest", payload)
 
     def sync_config(self, current_version: str = "v1.0.0") -> Optional[dict]:
         """
-        Récupère la configuration de trading, les clés API du broker et vérifie les mises à jour.
-        Retourne la configuration si succès, None en cas d'erreur ou dict avec 'is_expired': True si la licence a expiré.
+        Récupère la configuration de trading, les clés API du broker et vérifie les mises à jour (synchrone).
         """
         if not self.enabled:
             return None
@@ -169,7 +220,7 @@ class TelemetryClient:
             "version": current_version
         }
         
-        return self._post("config", payload)
+        return self._post_immediate("config", payload)
 
 
 class TelemetryLoggingHandler(logging.Handler):
@@ -197,3 +248,7 @@ class TelemetryLoggingHandler(logging.Handler):
             )
         except Exception:
             pass
+
+
+# Export des classes publiques
+__all__ = ['TelemetryClient', 'TelemetryLoggingHandler']

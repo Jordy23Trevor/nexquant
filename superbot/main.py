@@ -68,7 +68,7 @@ import traceback
 
 # Importer les modules du SuperBot
 from superbot.config import (
-    BROKER_TYPE, INSTRUMENTS, GRANULARITY, ENABLE_PAPER_TRADING,
+    BROKER_TYPE, INSTRUMENTS, GRANULARITY,
     LOG_LEVEL, LOG_FILE, ENABLE_DASHBOARD, WEBHOOK_ENABLED,
     WEBHOOK_SECRET, WEBHOOK_HOST, WEBHOOK_PORT,
     
@@ -76,6 +76,7 @@ from superbot.config import (
     RISK_PCT, MAX_DAILY_LOSS_PCT, MAX_MONTHLY_LOSS_PCT, MAX_OPEN_POSITIONS,
     KELLY_FRACTION, MIN_TRADES_FOR_KELLY, SL_ATR_MULT, TP_ATR_MULT,
     TRAIL_ATR_MULT, BE_ATR_MULT, MIN_POSITION_SIZE, MAX_POSITION_SIZE,
+    COOLDOWN_SECONDS,  # ✅ BUG FIX #5
     
     # Strategy / Indicators
     SCORE_MIN, EMA_FAST, EMA_SLOW, EMA_TREND, HTF_EMA, D1_EMA, W1_EMA,
@@ -87,7 +88,10 @@ from superbot.config import (
     # News & Sentiment
     NEWS_ASSETS, NEWS_UPDATE_INTERVAL, NEWS_AVOIDANCE_BEFORE, NEWS_AVOIDANCE_AFTER,
     NEWS_RISK_REDUCTION_FACTOR, NEWS_HIGH_IMPACT_ONLY, FEAR_GREED_EXTREME_FEAR,
-    FEAR_GREED_EXTREME_GREED, CRYPTOCOMPARE_API_KEY
+    FEAR_GREED_EXTREME_GREED, CRYPTOCOMPARE_API_KEY,
+
+    # Filtres crypto — rapport post-mortem 2026-07-02
+    CRYPTO_BLACKLIST, CRYPTO_SCORE_MIN, CRYPTO_BUY_BLOCK_BTC_DROP, CRYPTO_BNB_VOLUME_FACTOR,
 )
 from superbot.broker import create_broker
 from superbot.strategy import TradingStrategy
@@ -173,6 +177,10 @@ class SuperBot:
         self.session_pnl_by_symbol: Dict[str, float] = {}
         self.session_date = datetime.now().date()
         self.ASSET_BLOCK_LOSS_THRESHOLD = float(os.getenv('ASSET_BLOCK_LOSS_THRESHOLD', 50.0))  # USD
+        self.CLOUD_SYNC_INTERVAL = 300.0       # 5 minutes (300s)
+        self.TELEMETRY_INTERVAL = 120.0        # 2 minutes (120s)
+        self._last_cloud_sync = 0.0
+        self._last_telemetry_push = 0.0
 
         # Statistiques et monitoring
         self.stats = {
@@ -335,7 +343,8 @@ class SuperBot:
                 'TRAIL_ATR_MULT': TRAIL_ATR_MULT,
                 'BE_ATR_MULT': BE_ATR_MULT,
                 'MIN_POSITION_SIZE': actual_min_pos,
-                'MAX_POSITION_SIZE': actual_max_pos
+                'MAX_POSITION_SIZE': actual_max_pos,
+                'COOLDOWN_SECONDS': COOLDOWN_SECONDS,  # ✅ BUG FIX #5
             })
             log.info("Gestionnaire de risques initialisé")
 
@@ -377,7 +386,12 @@ class SuperBot:
                 'ICHIMOKU_KIJUN': ICHIMOKU_KIJUN,
                 'ICHIMOKU_SENKOU_SPAN_B': ICHIMOKU_SENKOU_SPAN_B,
                 'ICHIMOKU_DISPLACEMENT': ICHIMOKU_DISPLACEMENT,
-                'VWAP_WINDOW': VWAP_WINDOW
+                'VWAP_WINDOW': VWAP_WINDOW,
+                # Filtres crypto — rapport post-mortem 2026-07-02
+                'CRYPTO_BLACKLIST': CRYPTO_BLACKLIST,
+                'CRYPTO_SCORE_MIN': CRYPTO_SCORE_MIN,
+                'CRYPTO_BUY_BLOCK_BTC_DROP': CRYPTO_BUY_BLOCK_BTC_DROP,
+                'CRYPTO_BNB_VOLUME_FACTOR': CRYPTO_BNB_VOLUME_FACTOR,
             })
             log.info("Stratégie de trading initialisée")
 
@@ -529,15 +543,21 @@ class SuperBot:
                         try:
                             exit_price = self.broker.get_current_price(symbol)
                             if side == 'LONG':
-                                pnl = (exit_price - entry_price) * size
+                                raw_pnl = (exit_price - entry_price) * size
                             else:
-                                pnl = (entry_price - exit_price) * size
-                            log.info(f"Calcul théorique de la fermeture pour {symbol} : Exit={exit_price}, P&L={pnl:.2f}")
+                                raw_pnl = (entry_price - exit_price) * size
+                            # ✅ BUG FIX #1 — Conversion devise de cotation → devise du compte
+                            # Sur les paires XXX/JPY, le PnL brut est en JPY, pas en USD.
+                            # On divise par exit_price (taux XXXJPY) pour obtenir le PnL en USD.
+                            pnl = self._convert_pnl_to_account_currency(symbol, raw_pnl, exit_price)
+                            log.info(f"Calcul théorique de la fermeture pour {symbol} : Exit={exit_price}, P&L={pnl:.2f} (brut={raw_pnl:.2f})")
                         except Exception as e:
                             log.error(f"Erreur lors du calcul théorique de fermeture pour {symbol} : {e}")
                             
                     # Enregistrer le trade clôturé
                     if self.risk_manager:
+                        # ✅ BUG FIX #3 — Propager market_regime depuis la position ouverte vers la clôture
+                        market_regime_at_open = old_pos.get('market_regime', 'UNKNOWN')
                         trade_record = {
                             'symbol': symbol,
                             'side': 'buy' if side == 'LONG' else 'sell',
@@ -546,7 +566,8 @@ class SuperBot:
                             'position_size': size,
                             'pnl': pnl,
                             'timestamp': datetime.now(timezone.utc).isoformat(),
-                            'status': 'closed'
+                            'status': 'closed',
+                            'market_regime': market_regime_at_open
                         }
                         self.risk_manager.record_trade(trade_record)
 
@@ -576,11 +597,18 @@ class SuperBot:
                         current_pnl = self.session_pnl_by_symbol.get(symbol, 0.0)
                         self.session_pnl_by_symbol[symbol] = current_pnl + pnl
 
-                        # Vérifier si le seuil de perte est atteint (basé sur % du capital initial)
-                        threshold_usd = self.initial_balance * self.ASSET_BLOCK_LOSS_THRESHOLD
+                        # Calculer le seuil de perte de session de manière hybride/safe
+                        val = self.ASSET_BLOCK_LOSS_THRESHOLD
+                        if val >= 1.0:
+                            threshold_usd = val
+                        elif 0.0 < val < 1.0:
+                            threshold_usd = self.initial_balance * val
+                        else:
+                            threshold_usd = float('inf')  # Désactivé si <= 0
+
                         if self.session_pnl_by_symbol[symbol] < -threshold_usd:
                             self.blocked_symbols.add(symbol)
-                            log.warning(f"🚫 {symbol} BLOQUÉ - Perte session: {self.session_pnl_by_symbol[symbol]:.2f} USD (seuil: -{threshold_usd:.2f} USD / {self.ASSET_BLOCK_LOSS_THRESHOLD*100:.1f}%)")
+                            log.warning(f"🚫 {symbol} BLOQUÉ - Perte session: {self.session_pnl_by_symbol[symbol]:.2f} USD (seuil: -{threshold_usd:.2f} USD)")
                         elif pnl < 0:
                             log.info(f"📉 {symbol} : {self.session_pnl_by_symbol[symbol]:.2f} USD de perte cumulée en session")
             # Mettre à jour self.positions
@@ -590,7 +618,7 @@ class SuperBot:
             if self.risk_manager:
                 self.risk_manager.open_positions = {
                     symbol: {
-                        'symbol': symbol,
+                        'symbol': symbol,  # ✅ BUG FIX #2 — Nécessaire pour la conversion JPY→USD du PnL latent
                         'side': pos['side'],
                         'entry_price': pos['entry_price'],
                         'size': pos['size'],
@@ -729,10 +757,15 @@ class SuperBot:
             try:
                 # Réinitialiser le cache des données de marché pour ce cycle
                 self._market_data_cache = {}
+                self._indicators_cache = {}
+                self._strategy_cache = {}
+                self._cached_balance = 0.0  # sera mis à jour au premier appel get_balance()
 
-                # 📡 TÉLÉMÉTRIE CLOUD : Synchronisation et heartbeat à chaque cycle
-                if self.telemetry.enabled:
+                now_time = time.time()
+                # 📡 TÉLÉMÉTRIE CLOUD : Synchronisation et heartbeat (fréquence réduite)
+                if self.telemetry.enabled and (now_time - self._last_cloud_sync >= self.CLOUD_SYNC_INTERVAL):
                     res = self.telemetry.sync_config(current_version="v1.0.0")
+                    self._last_cloud_sync = now_time
                     if res:
                         if res.get("is_expired"):
                             log.error("❌ Licence expirée ou inactive détectée. Arrêt automatique du bot.")
@@ -758,7 +791,10 @@ class SuperBot:
                         broker_type=self.broker.get_asset_type(),
                         testnet=getattr(self.broker, 'testnet', True) or getattr(self.broker, 'account_type', 'PAPER') == 'PAPER' or 'demo' in str(getattr(self.broker, 'server', '')).lower() or 'demo' in str(getattr(self.broker, 'company', '')).lower()
                     )
-                    
+                
+                # 📡 TÉLÉMÉTRIE CLOUD : Envoi périodique des métriques du compte et des positions actives
+                if self.telemetry.enabled and (now_time - self._last_telemetry_push >= self.TELEMETRY_INTERVAL):
+                    self._last_telemetry_push = now_time
                     # Envoyer l'état de l'équité
                     try:
                         acc_summary = self.broker.get_account_summary()
@@ -848,20 +884,30 @@ class SuperBot:
                 except Exception as e:
                     log.warning(f"Erreur lors de la sélection/rotation crypto au cycle #{cycle_count} : {e}")
 
-                # Traiter chaque instrument (mélangé aléatoirement pour éviter tout biais d'ordre)
+                # Traiter chaque instrument en parallèle pour accélérer l'exécution (mélangé aléatoirement)
                 import random
+                from concurrent.futures import ThreadPoolExecutor
                 scanned_instruments = list(self.instruments)
                 random.shuffle(scanned_instruments)
-                for symbol in scanned_instruments:
-                    if not self.running:
-                        break
 
+                def run_process_symbol(symbol):
+                    if not self.running or self.shutdown_event.is_set():
+                        return
                     try:
                         self._process_symbol(symbol)
                     except Exception as e:
                         log.error(f"Erreur lors du traitement de {symbol} : {e}")
                         log.debug(traceback.format_exc())
                         self.stats['errors_count'] += 1
+
+                max_workers = min(16, len(scanned_instruments)) if scanned_instruments else 1
+                if max_workers > 1:
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        # Convertir le map en list pour forcer l'évaluation dans le bloc 'with'
+                        list(executor.map(run_process_symbol, scanned_instruments))
+                else:
+                    for symbol in scanned_instruments:
+                        run_process_symbol(symbol)
 
                 # Mettre à jour le dashboard si disponible
                 if self.dashboard:
@@ -915,8 +961,14 @@ class SuperBot:
                 log.debug(f"Données insuffisantes pour {symbol} : {len(df) if df is not None else 0} barres")
                 return
 
-            # 2. Calculer les indicateurs techniques
-            df_with_indicators = self.technical_indicators.calculate_all_indicators(df.copy())
+            # 2. Calculer les indicateurs techniques (avec cache de cycle)
+            if not hasattr(self, '_indicators_cache'):
+                self._indicators_cache = {}
+            if symbol in self._indicators_cache:
+                df_with_indicators = self._indicators_cache[symbol]
+            else:
+                df_with_indicators = self.technical_indicators.calculate_all_indicators(df.copy())
+                self._indicators_cache[symbol] = df_with_indicators
             self.market_data[symbol] = df_with_indicators
 
             # === GESTION DE RISQUE CONTINUE DES POSITIONS OUVERTES ===
@@ -943,8 +995,41 @@ class SuperBot:
                     log.debug(f"Hors session US ({now_utc}) : skip {symbol}")
                     return
 
-            # 3. Analyser le marché et générer un signal de trading
-            signal_data = self.strategy.analyze_market(df_with_indicators)
+            # 3. Analyser le marché et générer un signal de trading (avec cache de cycle)
+            if not hasattr(self, '_strategy_cache'):
+                self._strategy_cache = {}
+            if symbol in self._strategy_cache:
+                signal_data = self._strategy_cache[symbol]
+            else:
+                # Passer le vrai solde et le Kelly réel calculé depuis l'historique au modèle
+                _real_balance = getattr(self, '_cached_balance', 0.0)
+                _real_win_rate = None
+                if self.risk_manager and len(self.risk_manager.trade_history) >= self.risk_manager.MIN_TRADES_FOR_KELLY:
+                    _real_win_rate = self.risk_manager._calculate_kelly_fraction()
+
+                # P1-1 : Calculer la variation BTC 24h depuis les données de marché en cache
+                _btc_change_24h = None
+                if self.broker.get_asset_type() == "crypto":
+                    btc_sym = 'BTC/USDT'
+                    btc_df_24h = self.market_data.get(btc_sym)
+                    if btc_df_24h is not None and len(btc_df_24h) >= 24:
+                        try:
+                            price_now = float(btc_df_24h.iloc[-1]['close'])
+                            price_24h = float(btc_df_24h.iloc[-24]['close'])  # 24 bougies H1 = 24h
+                            if price_24h > 0:
+                                _btc_change_24h = (price_now - price_24h) / price_24h * 100.0
+                                log.debug(f"[P1-1] Variation BTC 24h: {_btc_change_24h:+.2f}%")
+                        except Exception as _e:
+                            log.debug(f"[P1-1] Impossible de calculer la variation BTC 24h: {_e}")
+
+                signal_data = self.strategy.analyze_market(
+                    df_with_indicators,
+                    account_balance=_real_balance,
+                    real_win_rate=_real_win_rate,
+                    symbol=symbol,
+                    btc_change_24h=_btc_change_24h
+                )
+                self._strategy_cache[symbol] = signal_data
             signal_data['symbol'] = symbol  # Ajouter le symbole au signal
 
             # DEBUG: log signal details and pre-check news avoidance
@@ -1024,29 +1109,53 @@ class SuperBot:
 
         # 2. Récupérer le solde et le prix d'entrée
         account_balance = self.broker.get_balance()
+        # Mettre le solde en cache pour les prochains appels analyze_market du cycle
+        self._cached_balance = account_balance
         entry_price = signal_data['entry_price']
 
-        # Déterminer le stop loss et take profit
-        sl_price = signal_data['sl_price']
-        tp_price = signal_data['tp_price']
+        # 2b. Filtre volume minimum (protection contre le slippage sur actifs illiquides)
+        if self.broker.get_asset_type() == "crypto":
+            last_bar = df_with_indicators.iloc[-1]
+            volume = float(last_bar.get('volume', 0))
+            volume_ma = float(last_bar.get('volume_ma', 0))
+            # Rejeter si le volume de la bougie est inférieur à 20% de la moyenne mobile de volume
+            if volume_ma > 0 and volume < volume_ma * 0.20:
+                log.info(f"🚨 Volume insuffisant pour {symbol} ({volume:.0f} < 20% de {volume_ma:.0f}) — risque de slippage, trade rejeté")
+                return
 
-        # Si les prix SL/TP ne sont pas fournis, les calculer basé sur l'ATR
-        if sl_price == 0 or tp_price == 0:
-            atr_value = df_with_indicators.iloc[-1].get('atr', 0)
-            if atr_value > 0:
-                position_side = "LONG" if signal_data['should_long'] else "SHORT"
-                sl_price, tp_price = self.risk_manager.calculate_sl_tp_levels(
-                    entry_price, atr_value, position_side, asset_type=self.broker.get_asset_type()
-                )
-            else:
-                # Fallback : utiliser un pourcentage fixe provenant de la configuration
-                risk_pct = RISK_PCT / 100.0  # Convertir de pourcentage en décimal
-                if signal_data['should_long']:
-                    sl_price = entry_price * (1 - risk_pct)
-                    tp_price = entry_price * (1 + risk_pct * 2)  # RR 1:2
-                else:
-                    sl_price = entry_price * (1 + risk_pct)
-                    tp_price = entry_price * (1 - risk_pct * 2)
+        # 2c. Filtre de dominance BTC pour les altcoins
+        # Ne pas ouvrir un SHORT sur un altcoin si BTC est en tendance haussière forte
+        if self.broker.get_asset_type() == "crypto" and 'BTC' not in symbol.upper():
+            btc_symbol = 'BTC/USDT'
+            if btc_symbol in self.market_data and not self.market_data[btc_symbol].empty:
+                btc_df = self.market_data[btc_symbol]
+                btc_last = btc_df.iloc[-1]
+                btc_ema_fast = btc_last.get('ema_fast', 0)
+                btc_ema_slow = btc_last.get('ema_slow', 0)
+                btc_adx = btc_last.get('adx', 0)
+                btc_bullish_trend = btc_ema_fast > btc_ema_slow and btc_adx > 25
+                btc_bearish_trend = btc_ema_fast < btc_ema_slow and btc_adx > 25
+
+                if signal_data['should_short'] and btc_bullish_trend:
+                    log.info(f"🚨 Filtre dominance BTC : SHORT {symbol} rejeté — BTC est en tendance haussière forte (ADX={btc_adx:.1f})")
+                    return
+                if signal_data['should_long'] and btc_bearish_trend:
+                    log.info(f"🚨 Filtre dominance BTC : LONG {symbol} rejeté — BTC est en tendance baissière forte (ADX={btc_adx:.1f})")
+                    return
+
+        # 3. Déterminer le stop loss et take profit via le Risk Manager (pour appliquer les multiplicateurs spécifiques à l'actif)
+        atr_value = df_with_indicators.iloc[-1].get('atr', 0)
+        if atr_value > 0 and self.risk_manager:
+            position_side = "LONG" if signal_data['should_long'] else "SHORT"
+            sl_price, tp_price = self.risk_manager.calculate_sl_tp_levels(
+                entry_price, atr_value, position_side,
+                asset_type=self.broker.get_asset_type(),
+                symbol=symbol
+            )
+        else:
+            # Fallback : utiliser les valeurs calculées par la stratégie
+            sl_price = signal_data.get('sl_price') or (entry_price * 0.98 if signal_data['should_long'] else entry_price * 1.02)
+            tp_price = signal_data.get('tp_price') or (entry_price * 1.04 if signal_data['should_long'] else entry_price * 0.96)
 
         # 3. Calculer la taille de position avec le Risk Manager
         position_size, size_details = self.risk_manager.calculate_position_size(
@@ -1113,8 +1222,9 @@ class SuperBot:
             }
             self.risk_manager.record_trade(trade_record)
 
-            # Mettre à jour la position suivie
-            self._update_position_tracking(symbol, side, position_size, entry_price, sl_price, tp_price)
+            # Mettre à jour la position suivie (avec market_regime pour propagation à la clôture)
+            self._update_position_tracking(symbol, side, position_size, entry_price, sl_price, tp_price,
+                                            market_regime=signal_data.get('market_regime', 'UNKNOWN'))
 
         else:
             log.error(f"Échec de l'exécution du trade pour {symbol}")
@@ -1137,8 +1247,23 @@ class SuperBot:
                     if df is None or len(df) < 50:
                         continue
 
-                    indicators = self.technical_indicators.calculate_all_indicators(df.copy())
-                    signal = self.strategy.analyze_market(indicators)
+                    # Utiliser le cache du cycle pour les indicateurs
+                    if not hasattr(self, '_indicators_cache'):
+                        self._indicators_cache = {}
+                    if symbol in self._indicators_cache:
+                        indicators = self._indicators_cache[symbol]
+                    else:
+                        indicators = self.technical_indicators.calculate_all_indicators(df.copy())
+                        self._indicators_cache[symbol] = indicators
+
+                    # Utiliser le cache du cycle pour les signaux
+                    if not hasattr(self, '_strategy_cache'):
+                        self._strategy_cache = {}
+                    if symbol in self._strategy_cache:
+                        signal = self._strategy_cache[symbol]
+                    else:
+                        signal = self.strategy.analyze_market(indicators)
+                        self._strategy_cache[symbol] = signal
 
                     # Calcul du score de force de tendance/momentum
                     last = df.iloc[-1]
@@ -1207,7 +1332,8 @@ class SuperBot:
                     if active_sym in self.positions:
                         log.info(f"Fermeture de la position sur {active_sym} pour rotation vers {best_inactive}")
                         self.broker.close_position(active_sym, reason="Rotation de portefeuille crypto")
-                        self._sync_positions_with_broker()
+                        # Bug#5 fix : pas de _sync_positions_with_broker ici
+                        # La synchronisation est déjà faite au début du cycle dans la boucle principale
 
             self._active_crypto_symbols = current_active
             log.info(f"Évaluation Crypto : {len(scores)} actifs scannés | Actifs actifs : {self._active_crypto_symbols}")
@@ -1262,7 +1388,42 @@ class SuperBot:
             log.error(f"Erreur lors de la récupération des données pour {symbol} : {e}")
             return None
 
-    def _update_position_tracking(self, symbol: str, side: str, size: float, entry_price: float, stop_loss: float = 0.0, take_profit: float = 0.0):
+    def _convert_pnl_to_account_currency(self, symbol: str, pnl: float, reference_price: float) -> float:
+        """
+        ✅ BUG FIX #1 — Convertit un PnL brut dans la devise de cotation vers la devise du compte (USD).
+
+        Pour les paires forex classiques (ex: EURUSD), le PnL est déjà en USD → pas de conversion.
+        Pour les paires dont la devise de cotation est le JPY (ex: USDJPY, GBPJPY, EURJPY),
+        le PnL brut calculé par (price_diff * size) est en JPY. On divise par le taux de change
+        (reference_price = taux au moment de la clôture) pour obtenir le montant en USD.
+
+        Cette méthode peut être étendue pour d'autres devises de cotation (CHF, CAD, etc.)
+        si le compte de trading n'est pas libellé dans la même devise.
+
+        Args:
+            symbol: Symbole de l'instrument (ex: 'GBPJPY', 'EURUSD')
+            pnl: PnL brut calculé en devise de cotation
+            reference_price: Prix de sortie (taux de change au moment de la clôture)
+
+        Returns:
+            PnL converti en USD (devise du compte)
+        """
+        normalized = symbol.strip().upper().replace("/", "")
+        # Paires dont la quote currency est le JPY : le PnL brut est en JPY
+        if normalized.endswith("JPY"):
+            if reference_price > 0:
+                converted = pnl / reference_price
+                log.debug(f"Conversion PnL JPY→USD pour {symbol} : {pnl:.2f} JPY / {reference_price:.3f} = {converted:.2f} USD")
+                return converted
+            else:
+                log.warning(f"Prix de référence nul pour {symbol}, conversion JPY→USD impossible")
+                return pnl
+        # Pour toutes les autres paires (EURUSD, GBPUSD, etc.), le PnL est déjà en USD
+        return pnl
+
+    def _update_position_tracking(self, symbol: str, side: str, size: float, entry_price: float,
+                                   stop_loss: float = 0.0, take_profit: float = 0.0,
+                                   market_regime: str = 'UNKNOWN'):
         """
         Met à jour le suivi des positions ouvertes.
 
@@ -1273,6 +1434,7 @@ class SuperBot:
             entry_price: Prix d'entrée
             stop_loss: Niveau de Stop Loss
             take_profit: Niveau de Take Profit
+            market_regime: Régime de marché au moment de l'ouverture
         """
         position_side = "LONG" if side == "buy" else "SHORT"
 
@@ -1283,10 +1445,12 @@ class SuperBot:
             'stop_loss': stop_loss,
             'take_profit': take_profit,
             'timestamp': datetime.now(timezone.utc),
-            'status': 'open'
+            'status': 'open',
+            # ✅ BUG FIX #3 — Stocker le régime de marché pour propagation à la clôture
+            'market_regime': market_regime
         }
 
-        log.debug(f"Position suivie mise à jour pour {symbol} : {position_side} {size}")
+        log.debug(f"Position suivie mise à jour pour {symbol} : {position_side} {size} | Régime: {market_regime}")
 
         if self.telemetry.enabled:
             try:

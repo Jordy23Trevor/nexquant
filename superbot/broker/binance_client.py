@@ -213,10 +213,11 @@ class BinanceClient(Broker):
             self._client = BnClient(
                 key, secret,
                 testnet=True,
+                requests_params={"timeout": 10}
             )
             log.info("Connecté au TESTNET Binance Futures")
         else:
-            self._client = BnClient(key, secret)
+            self._client = BnClient(key, secret, requests_params={"timeout": 10})
             log.info("Connecté à Binance Futures (RÉEL)")
 
         # Synchroniser l'heure d'abord (évite les erreurs de timestamp)

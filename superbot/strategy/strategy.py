@@ -96,12 +96,20 @@ class TradingStrategy:
             f"kelly={self.kelly_fraction}, règles_actives={len(self.knowledge_rules)}"
         )
 
-    def analyze_market(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def analyze_market(self, df: pd.DataFrame,
+                       account_balance: float = 0.0,
+                       real_win_rate: Optional[float] = None,
+                       symbol: str = "",
+                       btc_change_24h: Optional[float] = None) -> Dict[str, Any]:
         """
         Analyse complète du marché pour générer un signal de trading.
 
         Args:
-            df: DataFrame avec données OHLCV brutes
+            df: DataFrame avec données OHLCV et indicateurs déjà calculés (ou brut)
+            account_balance: Solde réel du compte (0 = non fourni, estimation interne)
+            real_win_rate: Win rate réel calculé par le RiskManager (None = estimation 0.55)
+            symbol: Symbole de l'actif analysé (utilisé pour les filtres crypto)
+            btc_change_24h: Variation BTC sur 24h en % (négatif = baisse, None = non disponible)
 
         Returns:
             Dictionnaire contenant l'analyse complète et le signal de trading
@@ -110,8 +118,12 @@ class TradingStrategy:
             log.warning(f"Données insuffisantes pour l'analyse: {len(df)} barres")
             return self._create_neutral_signal("INSUFFICIENT_DATA")
 
-        # Calculer tous les indicateurs
-        df_with_indicators = self.indicators.calculate_all_indicators(df.copy())
+        # Bug#1 fix : ne recalculer les indicateurs que si le DataFrame est brut
+        # (sans colonne 'rsi', donc pas encore enrichi par TechnicalIndicators)
+        if 'rsi' not in df.columns:
+            df_with_indicators = self.indicators.calculate_all_indicators(df.copy())
+        else:
+            df_with_indicators = df  # Déjà enrichi par main.py — évite le triple calcul
 
         # Obtenir les valeurs les plus récentes (On utilise les bougies clôturées pour éviter le repainting)
         current_candle = df_with_indicators.iloc[-1]
@@ -121,6 +133,23 @@ class TradingStrategy:
         # Déterminer le régime de marché
         market_regime = self.indicators.get_market_regime(df_with_indicators)
         is_trending = market_regime == 'TRENDING'
+
+        # ── Détecter si l'actif est une crypto ───────────────────────────
+        sym_upper = symbol.upper().replace("/", "").replace("-", "")
+        is_crypto = (
+            self.config.get('BROKER_TYPE') == 'binance' or
+            any(k in sym_upper for k in ["USDT", "BUSD"]) or
+            (any(sym_upper.startswith(k) for k in ["BTC", "ETH", "SOL", "LTC", "XRP"]) and "USD" in sym_upper)
+        )
+        is_btc_pair = "BTC" in sym_upper and ("USDT" in sym_upper or "USD" in sym_upper)
+        is_altcoin = is_crypto and not is_btc_pair
+
+        # ── P0-2 : Vérifier la blacklist crypto ─────────────────────────────
+        crypto_blacklist = self.config.get('CRYPTO_BLACKLIST', [])
+        is_blacklisted = symbol in crypto_blacklist or sym_upper in [b.upper().replace("/","") for b in crypto_blacklist]
+        if is_blacklisted:
+            log.info(f"[P0-2] {symbol} est dans la CRYPTO_BLACKLIST — signal neutre forçé.")
+            return self._create_neutral_signal(f"BLACKLISTED:{symbol}")
 
         # Calculer les scores selon le régime
         if is_trending:
@@ -136,6 +165,20 @@ class TradingStrategy:
 
         # Vérifier les triggers (conditions d'entrée)
         trigger_long, trigger_short = self._check_entry_triggers(df_with_indicators, is_trending)
+
+        # ── P2-2 : Volume strict pour BNB/USDT ───────────────────────────────
+        bnb_vol_factor = self.config.get('CRYPTO_BNB_VOLUME_FACTOR', 1.5)
+        if sym_upper == "BNBUSDT" and (trigger_long or trigger_short):
+            latest_v = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else df_with_indicators.iloc[-1]
+            volume = latest_v.get('volume', 0)
+            volume_ma = latest_v.get('volume_ma', 0)
+            if volume_ma > 0 and volume < volume_ma * bnb_vol_factor:
+                log.info(
+                    f"[P2-2] BNB/USDT : volume insuffisant ({volume:.0f} < {volume_ma * bnb_vol_factor:.0f}) "
+                    f"— trigger annulé (overtrading prevention)."
+                )
+                trigger_long = False
+                trigger_short = False
 
         # Calculer le ratio risque/rendement potentiel (basé sur le prix d'entrée actuel)
         current_price = current_candle['close']
@@ -174,51 +217,88 @@ class TradingStrategy:
             }
         )
 
-        # Calculer la taille de position basée sur le risque et Kelly
-        account_balance = 10000.0  # Valeur par défaut, à remplacer par le vrai solde
-        risk_amount = account_balance * (risk_pct / 100.0)
+        # Bug#2 fix : utiliser le vrai solde si fourni, sinon 0 (le sizing réel est dans RiskManager)
+        effective_balance = account_balance if account_balance > 0 else 10000.0
+        risk_amount = effective_balance * (risk_pct / 100.0)
 
         # Déterminer si on prend le trade
+        # ── P1-2 : Score minimum 7 pour crypto en ADX faible ────────────────────
+        effective_score_min = self.score_min
+        if is_crypto:
+            latest_bar = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else df_with_indicators.iloc[-1]
+            adx_val = latest_bar.get('adx', 999)
+            adx_threshold = self.config.get('ADX_TREND', 22)
+            if adx_val < adx_threshold:
+                crypto_score_min = self.config.get('CRYPTO_SCORE_MIN', 7)
+                if crypto_score_min > effective_score_min:
+                    log.debug(
+                        f"[P1-2] ADX={adx_val:.1f} < {adx_threshold} sur crypto {symbol} "
+                        f"— score_min élevé à {crypto_score_min} (vs {effective_score_min})."
+                    )
+                    effective_score_min = crypto_score_min
+
         should_long = (
-                adjusted_score >= self.score_min and
+                adjusted_score >= effective_score_min and
                 trigger_long and
                 rr_ratio >= 2.0 and  # R:R minimum de 2:1
                 news_filter_passed
         )
 
         should_short = (
-                adjusted_score >= self.score_min and
+                adjusted_score >= effective_score_min and
                 trigger_short and
                 rr_ratio >= 2.0 and  # R:R minimum de 2:1
                 news_filter_passed
         )
 
+        # ── P0-1 : Bloquer les BUY crypto si tendance D1 BTC baissière ───────────
+        # Stratégie : utiliser l'EMA200 de la paire elle-même comme proxy de la tendance D1.
+        # Si le prix est sous l'EMA200 H1, la tendance de fond est baissière — bloquer les BUY.
+        if is_crypto and should_long:
+            latest_bar_p01 = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else df_with_indicators.iloc[-1]
+            price_p01 = latest_bar_p01.get('close', 0)
+            ema200_p01 = latest_bar_p01.get('ema_trend', 0)  # EMA200
+            if ema200_p01 > 0 and price_p01 < ema200_p01:
+                log.info(
+                    f"[P0-1] {symbol} : prix ({price_p01:.4f}) < EMA200 ({ema200_p01:.4f}) "
+                    f"— tendance D1 baissière, BUY BLOQUÉ."
+                )
+                should_long = False
+
+        # ── P1-1 : Détecteur de régime inter-sessions (variation BTC 24h) ──────
+        # Si BTC a baissé de > CRYPTO_BUY_BLOCK_BTC_DROP% sur 24h,
+        # bloquer les signaux BUY sur TOUS les altcoins (copycat crash pattern).
+        if is_altcoin and should_long and btc_change_24h is not None:
+            block_threshold = self.config.get('CRYPTO_BUY_BLOCK_BTC_DROP', 2.0)
+            if btc_change_24h <= -block_threshold:
+                log.info(
+                    f"[P1-1] Régime BTC baissier détecté (BTC 24h: {btc_change_24h:+.2f}% < −{block_threshold}%) "
+                    f"— BUY altcoin {symbol} BLOQUÉ."
+                )
+                should_long = False
+
         # Calculer la taille de position si on prend le trade
         position_size = 0.0
         if should_long or should_short:
             entry_price = current_price
-            # Utiliser le SL calculé pour le potentiel RR, ou un SL par défaut basé sur ATR
             sl_for_size = sl_price if sl_price > 0 else entry_price - (latest['atr'] * self.config.get('SL_ATR_MULT', 1.5))
             tp_for_size = tp_price if tp_price > 0 else entry_price + (latest['atr'] * self.config.get('TP_ATR_MULT', 3.0))
 
-            # Calculer la taille de base basée sur le risque
             base_size = calculate_position_size_from_risk(
-                account_balance, risk_pct, entry_price, sl_for_size
+                effective_balance, risk_pct, entry_price, sl_for_size
             )
 
-            # Appliquer la fraction de Kelly (méthode Kabbaj conservatrice)
-            # Pour simplifier, on utilise un win rate estimé basé sur la performance historique
-            # Dans une implémentation complète, ceci viendrait d'un suivi de performance
-            estimated_win_rate = 0.55  # Estimation conservatrice
-            avg_win = rr_ratio * (entry_price - sl_for_size) if sl_for_size < entry_price else (sl_for_size - entry_price) * rr_ratio
+            # Bug#5 fix : utiliser le win rate réel du RiskManager si disponible
+            estimated_win_rate = real_win_rate if real_win_rate is not None else 0.55
+            avg_win = rr_ratio * abs(entry_price - sl_for_size)
             avg_loss = abs(entry_price - sl_for_size)
 
             if avg_loss > 0 and rr_ratio > 0:
                 kelly_fraction_raw = calculate_kelly_fraction(estimated_win_rate, avg_win, avg_loss)
-                kelly_fraction_applied = min(kelly_fraction_raw * kelly_frac, 0.02)  # Plafonné à 2% comme dans le plan
+                kelly_fraction_applied = min(kelly_fraction_raw * kelly_frac, 0.02)
                 position_size = base_size * kelly_fraction_applied
             else:
-                position_size = base_size * kelly_frac  # Fallback
+                position_size = base_size * kelly_frac
 
         # Mettre à jour l'historique des scores
         self.score_history.append({
@@ -909,8 +989,10 @@ class TradingStrategy:
                 # --- RÈGLES ALEXANDER ELDER ---
                 # Ne jamais acheter si le système d'impulsion est rouge (tendance et momentum contraires)
                 elder_allow_long = latest.get('elder_impulse', 0) != -1
-                # Tendance de fond Triple Screen (Screen 1) doit être haussière
-                elder_screen1_ok = latest.get('elder_screen1_up', True)
+                # Bug#3 fix : elder_screen1_ok est True SEULEMENT si l'indicateur existe ET est positif
+                # Si l'indicateur est absent, on ne bloque pas mais on ne le valide pas non plus
+                _screen1_val = latest.get('elder_screen1_up', None)
+                elder_screen1_ok = (_screen1_val is None) or bool(_screen1_val)
 
                 trigger_long = (ema_cross or macd_cross or supertrend_up or pullback_long) and elder_allow_long and elder_screen1_ok
 
@@ -931,8 +1013,9 @@ class TradingStrategy:
                 # --- RÈGLES ALEXANDER ELDER ---
                 # Ne jamais vendre si le système d'impulsion est vert (tendance et momentum contraires)
                 elder_allow_short = latest.get('elder_impulse', 0) != 1
-                # Tendance de fond Triple Screen (Screen 1) doit être baissière
-                elder_screen1_ok = latest.get('elder_screen1_down', True)
+                # Bug#3 fix : même logique de sécurité pour l'écran baissier
+                _screen1_down_val = latest.get('elder_screen1_down', None)
+                elder_screen1_ok = (_screen1_down_val is None) or bool(_screen1_down_val)
 
                 trigger_short = (ema_cross or macd_cross or supertrend_down or pullback_short) and elder_allow_short and elder_screen1_ok
         else:
@@ -962,10 +1045,19 @@ class TradingStrategy:
             kabbaj_squeeze_breakout_long = prev.get('kabbaj_squeeze', False) and latest['close'] > latest.get('bb_upper', 0)
             kabbaj_squeeze_breakout_short = prev.get('kabbaj_squeeze', False) and latest['close'] < latest.get('bb_lower', 0)
 
-            if (rsi_cross_up or stoch_cross_up) and (candle_bullish or near_support) or kabbaj_squeeze_breakout_long:
+            # Bug#4 fix : parenthèses explicites + filtre volume obligatoire sur le squeeze Kabbaj
+            # Sans parenthèses, Python évaluait : (A and B) or C — le squeeze seul suffisait à entrer
+            volume = latest.get('volume', 0)
+            volume_ma = latest.get('volume_ma', volume)
+            volume_above_avg = volume >= volume_ma * 1.1 if volume_ma > 0 else True
+
+            kabbaj_squeeze_breakout_long = kabbaj_squeeze_breakout_long and volume_above_avg
+            kabbaj_squeeze_breakout_short = kabbaj_squeeze_breakout_short and volume_above_avg
+
+            if ((rsi_cross_up or stoch_cross_up) and (candle_bullish or near_support)) or kabbaj_squeeze_breakout_long:
                 trigger_long = True
 
-            if (rsi_cross_down or stoch_cross_down) and (candle_bearish or near_resistance) or kabbaj_squeeze_breakout_short:
+            if ((rsi_cross_down or stoch_cross_down) and (candle_bearish or near_resistance)) or kabbaj_squeeze_breakout_short:
                 trigger_short = True
 
         return trigger_long, trigger_short

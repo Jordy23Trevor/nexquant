@@ -45,6 +45,11 @@ class RiskManager:
         # Multiplicateurs ATR dynamiques par type d'actif
         self.ATR_MULTIPLIERS = {
             'forex': {'sl': 1.5, 'tp': 3.0},
+            # ✅ BUG FIX #4 — Multiplicateurs spécifiques pour paires JPY (volatility intrinsèque plus élevée)
+            # GBPJPY, USDJPY, EURJPY bougent 150-250 pips/jour vs 60-100 pour EURUSD.
+            # Un SL à 1.5×ATR déclenchait des fermetures prématurées (ex: GBPJPY fermé en 4 min le 2026-07-01).
+            # R:R maintenu à 1:2 en augmentant proportionnellement SL et TP.
+            'forex_jpy': {'sl': 2.0, 'tp': 4.0},
             'stock': {'sl': 2.0, 'tp': 4.0},
             'crypto': {'sl': 2.5, 'tp': 5.0}
         }
@@ -59,6 +64,12 @@ class RiskManager:
         self.month_start_balance = 0.0
         self.last_daily_reset = datetime.now().date()
         self.last_monthly_reset = datetime.now().replace(day=1).date()
+
+        # ✅ BUG FIX #5 — Cooldown entre deux trades consécutifs sur le même symbole.
+        # Empêche le rechargement immédiat après une perte (ex: USDCAD réouvert 21min après une perte).
+        # 1 heure = au moins 1 bougie H1 complète, permettant un changement de contexte marché.
+        self.COOLDOWN_SECONDS = config.get('COOLDOWN_SECONDS', 3600)  # 1h par défaut
+        self.last_trade_close_time: Dict[str, datetime] = {}  # symbol -> heure de dernière clôture
 
         # Positions actuelles et historique
         self.open_positions: Dict[str, Dict[str, Any]] = {}
@@ -119,6 +130,14 @@ class RiskManager:
         if symbol and self.consecutive_losses.get(symbol, 0) >= 3:
             log.info(f"Symbole {symbol} bloqué (3 pertes consécutives atteintes).")
             return False
+
+        # ✅ BUG FIX #5 — Cooldown : vérifier le délai depuis la dernière clôture sur ce symbole
+        if symbol and symbol in self.last_trade_close_time:
+            elapsed = (datetime.now() - self.last_trade_close_time[symbol]).total_seconds()
+            if elapsed < self.COOLDOWN_SECONDS:
+                remaining_min = (self.COOLDOWN_SECONDS - elapsed) / 60
+                log.info(f"Cooldown actif pour {symbol} : {remaining_min:.0f}min restantes avant prochain trade autorisé")
+                return False
 
         # Vérifier le nombre maximum de positions ouvertes
         if len(self.open_positions) >= self.MAX_OPEN_POSITIONS:
@@ -408,10 +427,23 @@ class RiskManager:
             return None
 
     def calculate_sl_tp_levels(self, entry_price: float, atr_value: float,
-                                  position_side: str, asset_type: str = "forex") -> Tuple[float, float]:
+                                  position_side: str, asset_type: str = "forex",
+                                  symbol: str = "") -> Tuple[float, float]:
         """
         Calcule les niveaux de stop loss et take profit basés sur l'ATR, avec multiplicateurs selon l'actif.
+
+        ✅ BUG FIX #4 — Le paramètre `symbol` permet de détecter automatiquement les paires JPY
+        et d'appliquer des multiplicateurs ATR plus larges (2.0×SL / 4.0×TP) pour compenser
+        leur plus grande amplitude intra-journalière.
         """
+        # Détecter si la paire est une paire JPY — appliquer des multiplicateurs adaptés
+        effective_asset_type = asset_type
+        if symbol:
+            normalized = symbol.strip().upper().replace("/", "")
+            if normalized.endswith("JPY") and asset_type == "forex":
+                effective_asset_type = "forex_jpy"
+                log.debug(f"Multiplicateurs ATR élargis appliqués pour paire JPY {symbol}: SL=2.0×ATR, TP=4.0×ATR")
+
         if atr_value <= 0:
             risk_pct = 0.02
             if position_side == "LONG":
@@ -422,7 +454,7 @@ class RiskManager:
                 tp_price = entry_price * (1 - risk_pct * 2)
             return sl_price, tp_price
 
-        mults = self.ATR_MULTIPLIERS.get(asset_type, self.ATR_MULTIPLIERS['forex'])
+        mults = self.ATR_MULTIPLIERS.get(effective_asset_type, self.ATR_MULTIPLIERS['forex'])
         sl_mult, tp_mult = mults['sl'], mults['tp']
 
         if position_side == "LONG":
@@ -467,6 +499,8 @@ class RiskManager:
                 else:
                     self.consecutive_losses[symbol] = 0
                     log.debug(f"📈 Gain enregistré pour {symbol}. Réinitialisation de la série de pertes.")
+                # ✅ BUG FIX #5 — Enregistrer l'heure de clôture pour le cooldown
+                self.last_trade_close_time[symbol] = datetime.now()
 
             # Écrire dans le fichier JSON Lines
             log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
@@ -577,11 +611,21 @@ class RiskManager:
         try:
             # Calculer le P&L actuel et le pourcentage
             if position['side'] == 'LONG':
-                pnl = (current_price - position['entry_price']) * position['size']
+                raw_pnl = (current_price - position['entry_price']) * position['size']
                 pnl_pct = (current_price / position['entry_price'] - 1) * 100
             else:  # SHORT
-                pnl = (position['entry_price'] - current_price) * position['size']
+                raw_pnl = (position['entry_price'] - current_price) * position['size']
                 pnl_pct = (position['entry_price'] / current_price - 1) * 100
+
+            # ✅ BUG FIX #2 — Conversion du PnL latent (unrealized) en devise du compte
+            # Même problème que pour les clôtures : les paires JPY retournent un PnL en Yen.
+            sym = position.get('symbol', symbol)
+            normalized_sym = sym.strip().upper().replace("/", "")
+            if normalized_sym.endswith("JPY") and current_price > 0:
+                pnl = raw_pnl / current_price
+                log.debug(f"Conversion PnL unrealized JPY→USD pour {sym}: {raw_pnl:.2f} JPY / {current_price:.3f} = {pnl:.2f} USD")
+            else:
+                pnl = raw_pnl
 
             position['current_price'] = current_price
             position['unrealized_pnl'] = pnl

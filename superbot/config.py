@@ -12,7 +12,7 @@ load_dotenv(dotenv_path=env_path)
 # =============================================================================
 # BROKER CONFIGURATION
 # =============================================================================
-BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, paper_forex, mt5
+BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, mt5
 
 # =============================================================================
 # METATRADER 5 (MT5) CONFIGURATION (associated with Fusion Markets)
@@ -35,7 +35,9 @@ LEVERAGE = int(os.getenv("LEVERAGE", "5"))
 # =============================================================================
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
 ALPACA_API_SECRET = os.getenv("ALPACA_API_SECRET", "")
-ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")  # Use paper trading by default
+_alpaca_use_paper = os.getenv("ALPACA_USE_PAPER", "true").lower() == "true"
+_default_alpaca_url = "https://paper-api.alpaca.markets" if _alpaca_use_paper else "https://api.alpaca.markets"
+ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", _default_alpaca_url)
 ALPACA_API_VERSION = os.getenv("ALPACA_API_VERSION", "v2")
 
 # =============================================================================
@@ -58,6 +60,28 @@ FOREX_DATA_PROVIDER = os.getenv("FOREX_DATA_PROVIDER", "twelvedata")
 # For Paper Forex: "EUR/USD", "GBP/USD", "USD/JPY"
 INSTRUMENTS_STR = os.getenv("INSTRUMENTS", "BTC/USDT")
 INSTRUMENTS = [s.strip() for s in INSTRUMENTS_STR.split(",")]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 📊 RAPPORT CRYPTO (2026-07-02) — Corrections appliquées
+# ─────────────────────────────────────────────────────────────────────────────
+# P0-2 : SOL/USDT retiré (0% WR, −484 USD sur 4 trades) jusqu'à correction
+#         du filtre dominance BTC. Ajouter dans CRYPTO_BLACKLIST pour le bloquer
+#         même s'il est présent dans INSTRUMENTS.
+# P2-1 : ADA/USDT (20% WR, −51 USD) remplacé par XRP/USDT (corrélation BTC < ADA)
+CRYPTO_BLACKLIST_STR = os.getenv("CRYPTO_BLACKLIST", "SOL/USDT")
+CRYPTO_BLACKLIST: list = [s.strip() for s in CRYPTO_BLACKLIST_STR.split(",") if s.strip()]
+
+# P1-2 : Score minimum plus strict pour les paires crypto en période de faible ADX.
+#         Default = 7 (vs 6 global). Le bot générait trop de signaux BNB en range (38% WR).
+CRYPTO_SCORE_MIN = int(os.getenv("CRYPTO_SCORE_MIN", "7"))
+
+# P1-1 : Si BTC a baissé de > X% sur 24h, bloquer TOUS les signaux BUY sur les altcoins.
+#         Cible les crash copycat observés sur SOL/ADA/BNB les 29-30 juin 2026.
+CRYPTO_BUY_BLOCK_BTC_DROP = float(os.getenv("CRYPTO_BUY_BLOCK_BTC_DROP", "2.0"))
+
+# P2-1 : Volume minimum BNB/USDT — 150% de la moyenne mobile 20 périodes.
+#         Réduit l'overtrading en période de range directionnel faible.
+CRYPTO_BNB_VOLUME_FACTOR = float(os.getenv("CRYPTO_BNB_VOLUME_FACTOR", "1.5"))
 
 # Timeframes for analysis
 GRANULARITY = os.getenv("GRANULARITY", "1h")  # Main trading timeframe
@@ -125,6 +149,7 @@ BE_ATR_MULT = float(os.getenv("BE_ATR_MULT", "1.0"))  # Breakeven activation thr
 
 # Score thresholds
 SCORE_MIN = int(os.getenv("SCORE_MIN", "6"))  # Minimum score to enter (out of 10 max base score)
+# Note : CRYPTO_SCORE_MIN (défini dans la section instruments) remplace ce seuil pour la crypto
 
 # Drawdown limits (Elder's rules)
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))  # Max daily drawdown %
@@ -134,6 +159,11 @@ MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))  # Max concurrent
 # Position sizing limits (will be adjusted by broker-specific min/max)
 MIN_POSITION_SIZE = float(os.getenv("MIN_POSITION_SIZE", "0.001"))
 MAX_POSITION_SIZE = float(os.getenv("MAX_POSITION_SIZE", "1000.0"))
+
+# ✅ BUG FIX #5 — Cooldown minimum entre deux trades consécutifs sur le même symbole (en secondes)
+# Valeur par défaut : 3600s (1 heure = au moins 1 bougie H1 complète pour renouveler le contexte)
+# Peut être ajusté via .env : COOLDOWN_SECONDS=1800 (30min) pour des stratégies plus actives
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "3600"))
 
 # Kelly fraction parameters
 KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.25"))  # Use 25% of Kelly optimum (conservative)
@@ -208,7 +238,7 @@ ERROR_LOG_FILE = LOG_DIR / "errors.log"
 # =============================================================================
 # DEVELOPMENT & TESTING
 # =============================================================================
-ENABLE_PAPER_TRADING = os.getenv("ENABLE_PAPER_TRADING", "true").lower() == "true"
+# ENABLE_PAPER_TRADING supprimé — utiliser le broker alpaca avec paper-api.alpaca.markets pour simuler
 BACKTEST_MODE = os.getenv("BACKTEST_MODE", "false").lower() == "true"
 LOG_TRADES = os.getenv("LOG_TRADES", "true").lower() == "true"
 ENABLE_DASHBOARD = os.getenv("ENABLE_DASHBOARD", "true").lower() == "true"
@@ -224,7 +254,7 @@ def validate_config():
     errors = []
 
     # 1. Broker type check
-    valid_brokers = ["binance", "alpaca", "paper_forex", "mt5"]
+    valid_brokers = ["binance", "alpaca", "mt5"]
     if BROKER_TYPE.lower() not in valid_brokers:
         errors.append(f"BROKER_TYPE '{BROKER_TYPE}' est invalide. Doit être l'un de : {valid_brokers}")
 
@@ -283,6 +313,8 @@ validate_config()
 # Export all config values
 __all__ = [
     "validate_config",
+    # Crypto-specific filters (rapport 2026-07-02)
+    "CRYPTO_BLACKLIST", "CRYPTO_SCORE_MIN", "CRYPTO_BUY_BLOCK_BTC_DROP", "CRYPTO_BNB_VOLUME_FACTOR",
     # Broker
     "BROKER_TYPE",
 
@@ -292,7 +324,7 @@ __all__ = [
     # Alpaca
     "ALPACA_API_KEY", "ALPACA_API_SECRET", "ALPACA_BASE_URL", "ALPACA_API_VERSION",
 
-    # Paper Forex
+    # Forex data providers (utilisés par MT5)
     "TWELVEDATA_API_KEY", "ALPHAVANTAGE_API_KEY", "FOREX_DATA_PROVIDER",
     "FOREX_DEFAULT_LEVERAGE", "FOREX_MARGIN_CALL_LEVEL", "FOREX_STOP_OUT_LEVEL",
 
@@ -311,6 +343,7 @@ __all__ = [
     "RISK_PCT", "SL_ATR_MULT", "TP_ATR_MULT", "TRAIL_ATR_MULT", "BE_ATR_MULT",
     "SCORE_MIN", "MAX_DAILY_LOSS_PCT", "MAX_MONTHLY_LOSS_PCT", "MAX_OPEN_POSITIONS",
     "MIN_POSITION_SIZE", "MAX_POSITION_SIZE", "KELLY_FRACTION", "MIN_TRADES_FOR_KELLY",
+    "COOLDOWN_SECONDS",  # ✅ BUG FIX #5
 
     # News & Sentiment
     "NEWS_AVOIDANCE_BEFORE", "NEWS_AVOIDANCE_AFTER", "NEWS_RISK_REDUCTION_FACTOR",
@@ -328,5 +361,5 @@ __all__ = [
     "LOG_LEVEL", "LOG_DIR", "LOG_FILE", "TRADE_LOG_FILE", "ERROR_LOG_FILE",
 
     # Development
-    "ENABLE_PAPER_TRADING", "BACKTEST_MODE", "LOG_TRADES", "ENABLE_DASHBOARD"
+    "BACKTEST_MODE", "LOG_TRADES", "ENABLE_DASHBOARD"
 ]

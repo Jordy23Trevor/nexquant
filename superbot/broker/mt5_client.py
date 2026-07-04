@@ -34,51 +34,85 @@ class MT5Client(Broker):
             )
 
         # Résoudre les paramètres (SaaS transmet les clés via api_key et api_secret)
-        actual_login = int(login or api_key or MT5_LOGIN)
-        actual_password = password or api_secret or MT5_PASSWORD
-        actual_server = server or MT5_SERVER
-        actual_path = path or MT5_PATH
-
-        log.info(f"Initialisation de MetaTrader 5 (Serveur: {actual_server})...")
+        self._login = int(login or api_key or MT5_LOGIN)
+        self._password = password or api_secret or MT5_PASSWORD
+        self._server = server or MT5_SERVER
+        self._path = path or MT5_PATH
 
         # Paramètres d'initialisation
-        init_kwargs = {}
-        if actual_path:
+        self._init_kwargs = {}
+        if self._path:
             import os
-            resolved_path = actual_path
+            resolved_path = self._path
             if os.path.isdir(resolved_path):
                 resolved_path = os.path.join(resolved_path, "terminal64.exe")
-            init_kwargs["path"] = resolved_path
-        if actual_login > 0:
-            init_kwargs["login"] = actual_login
-        if actual_password:
-            init_kwargs["password"] = actual_password
-        if actual_server:
-            init_kwargs["server"] = actual_server
+            self._init_kwargs["path"] = resolved_path
+        if self._login > 0:
+            self._init_kwargs["login"] = self._login
+        if self._password:
+            self._init_kwargs["password"] = self._password
+        if self._server:
+            self._init_kwargs["server"] = self._server
 
-        # Initialiser la connexion au terminal MT5
-        if not mt5.initialize(**init_kwargs):
-            error_code = mt5.last_error()
-            log.error(f"Échec de la connexion à MT5 : {error_code}")
+        if not self._connect_terminal():
             raise RuntimeError(
-                f"Échec de l'initialisation de MT5 (code d'erreur: {error_code}).\n"
-                "Veuillez vérifier que le terminal MT5 Fusion Markets est ouvert et "
-                "que les informations de connexion (Login, Serveur) sont correctes."
+                "Impossible d'initialiser ou de se connecter au terminal MT5. "
+                "Veuillez vérifier les logs et vous assurer que le terminal Fusion Markets est ouvert."
             )
 
+    def _connect_terminal(self) -> bool:
+        """Initialise la connexion au terminal MT5 et s'authentifie."""
+        log.info(f"Initialisation de MetaTrader 5 (Serveur: {self._server})...")
+        if not mt5.initialize(**self._init_kwargs):
+            error_code = mt5.last_error()
+            log.error(f"Échec de l'initialisation de MT5 : {error_code}")
+            return False
+
         # Connexion au compte de trading
-        if actual_login > 0:
-            authorized = mt5.login(login=actual_login, password=actual_password, server=actual_server)
+        if self._login > 0:
+            authorized = mt5.login(login=self._login, password=self._password, server=self._server)
             if not authorized:
                 error_code = mt5.last_error()
-                log.error(f"Échec de l'authentification MT5 pour le compte {actual_login} : {error_code}")
-                raise RuntimeError(f"Échec de l'authentification MT5 (compte: {actual_login}, code d'erreur: {error_code})")
+                log.error(f"Échec de l'authentification MT5 pour le compte {self._login} : {error_code}")
+                return False
 
         acc_info = mt5.account_info()
         if acc_info:
             log.info(f"Connecté avec succès à MT5. Compte: {acc_info.login} | Solde: {acc_info.balance} {acc_info.currency}")
+            return True
         else:
             log.warning("Connecté à MT5, mais impossible de récupérer les informations du compte.")
+            return True
+
+    def _call_api(self, api_func, default_val, *args, **kwargs):
+        """
+        Wrapper unifié pour les appels de fonctions MT5 avec gestion des retries et reconnexion.
+        """
+        max_retries = 3
+        backoff = 0.5
+        for attempt in range(1, max_retries + 1):
+            try:
+                res = api_func(*args, **kwargs)
+                if res is None or res is False:
+                    error_code = mt5.last_error()
+                    log.warning(f"⚠️ Appel MT5 retourné {res} (code d'erreur: {error_code}). Tentative {attempt}/{max_retries}...")
+                    if attempt < max_retries:
+                        log.info("Tentative de reconnexion au terminal MT5...")
+                        self._connect_terminal()
+                        time.sleep(backoff)
+                        backoff *= 2.0
+                        continue
+                return res
+            except Exception as e:
+                if attempt == max_retries:
+                    log.error(f"Échec critique de l'appel MT5 après {max_retries} tentatives : {e}")
+                    return default_val
+                log.warning(f"⚠️ Exception lors de l'appel MT5 : {e}. Tentative {attempt}/{max_retries} après {backoff}s...")
+                log.info("Tentative de reconnexion au terminal MT5...")
+                self._connect_terminal()
+                time.sleep(backoff)
+                backoff *= 2.0
+        return default_val
 
     def get_default_instruments(self) -> List[str]:
         return ["EURUSD", "GBPUSD", "USDJPY"]
@@ -91,12 +125,12 @@ class MT5Client(Broker):
 
     def get_balance(self) -> float:
         """Retourne le solde disponible."""
-        acc_info = mt5.account_info()
+        acc_info = self._call_api(mt5.account_info, None)
         return acc_info.balance if acc_info else 0.0
 
     def get_account_summary(self) -> Dict[str, Any]:
         """Résumé complet du compte."""
-        acc_info = mt5.account_info()
+        acc_info = self._call_api(mt5.account_info, None)
         if not acc_info:
             return {
                 "balance": 0.0,
@@ -110,7 +144,7 @@ class MT5Client(Broker):
                 "account_type": "MT5_FUSION_MARKETS",
             }
 
-        positions = mt5.positions_get()
+        positions = self._call_api(mt5.positions_get, [])
         open_positions_count = len(positions) if positions else 0
 
         # Margin level calculation (equity / margin * 100)
@@ -137,17 +171,13 @@ class MT5Client(Broker):
             log.error("Module MetaTrader5 non disponible")
             return []
 
-        if not mt5.initialize():
-            log.error("Échec d'initialisation de MT5 dans get_trade_history")
-            return []
-
         try:
             from_date = datetime.now() - timedelta(days=days)
             to_date = datetime.now()
 
-            deals = mt5.history_deals_get(from_date, to_date)
+            deals = self._call_api(lambda: mt5.history_deals_get(from_date, to_date), None)
             if deals is None:
-                log.warning(f"Aucun deal d'historique trouvé ou erreur: {mt5.last_error()}")
+                log.warning("Aucun deal d'historique trouvé ou erreur.")
                 return []
 
             trades = []
@@ -208,11 +238,11 @@ class MT5Client(Broker):
         mt5_tf = self._get_mt5_timeframe(timeframe)
 
         # S'assurer que le symbole est visible/sélectionné dans le Market Watch de MT5
-        mt5.symbol_select(symbol, True)
+        self._call_api(lambda: mt5.symbol_select(symbol, True), False)
 
-        rates = mt5.copy_rates_from_pos(symbol, mt5_tf, 0, limit)
+        rates = self._call_api(lambda: mt5.copy_rates_from_pos(symbol, mt5_tf, 0, limit), None)
         if rates is None or len(rates) == 0:
-            log.warning(f"Impossible de récupérer les bougies de {symbol} depuis MT5 (erreur: {mt5.last_error()})")
+            log.warning(f"Impossible de récupérer les bougies de {symbol} depuis MT5")
             return pd.DataFrame()
 
         # Convertir en DataFrame pandas
@@ -239,8 +269,8 @@ class MT5Client(Broker):
                 "tick_value": 1.0,
             }
         symbol = self.normalize_symbol(symbol)
-        mt5.symbol_select(symbol, True)
-        info = mt5.symbol_info(symbol)
+        self._call_api(lambda: mt5.symbol_select(symbol, True), False)
+        info = self._call_api(lambda: mt5.symbol_info(symbol), None)
         if not info:
             return {
                 "contract_size": 100000.0,
@@ -259,7 +289,7 @@ class MT5Client(Broker):
         S'il y a plusieurs positions (Hedging), nous les combinons/aggrégons.
         """
         symbol = self.normalize_symbol(symbol)
-        positions = mt5.positions_get(symbol=symbol)
+        positions = self._call_api(lambda: mt5.positions_get(symbol=symbol), [])
 
         if not positions or len(positions) == 0:
             return {}
@@ -294,11 +324,11 @@ class MT5Client(Broker):
 
         avg_entry = abs(weighted_entry / total_volume) if total_volume > 0 else 0.0
 
-        tick = mt5.symbol_info_tick(symbol)
+        tick = self._call_api(lambda: mt5.symbol_info_tick(symbol), None)
         mark_price = (tick.bid + tick.ask) / 2 if tick else avg_entry
 
         # Convertir la taille de lots en unités de base currency pour être cohérent avec les autres brokers
-        info = mt5.symbol_info(symbol)
+        info = self._call_api(lambda: mt5.symbol_info(symbol), None)
         contract_size = info.trade_contract_size if info and info.trade_contract_size > 0 else 100000.0
         total_volume_units = total_volume * contract_size
 
@@ -318,7 +348,7 @@ class MT5Client(Broker):
     def close_position(self, symbol: str, reason: str = "") -> bool:
         """Ferme toutes les positions ouvertes sur un symbole."""
         symbol = self.normalize_symbol(symbol)
-        positions = mt5.positions_get(symbol=symbol)
+        positions = self._call_api(lambda: mt5.positions_get(symbol=symbol), [])
         if not positions or len(positions) == 0:
             log.info(f"Aucune position ouverte à fermer pour {symbol} sur MT5.")
             return False
@@ -331,7 +361,7 @@ class MT5Client(Broker):
 
             # Déterminer le type d'ordre opposé pour fermer la position
             order_type = mt5.ORDER_TYPE_SELL if side == "LONG" else mt5.ORDER_TYPE_BUY
-            tick = mt5.symbol_info_tick(symbol)
+            tick = self._call_api(lambda: mt5.symbol_info_tick(symbol), None)
             if tick is None:
                 log.error(f"Impossible d'obtenir les prix tick pour fermer la position #{ticket}")
                 success = False
@@ -354,7 +384,7 @@ class MT5Client(Broker):
             }
 
             log.info(f"Fermeture position MT5 #{ticket} sur {symbol} (Taille: {volume}, Type: {side})...")
-            result = mt5.order_send(request)
+            result = self._call_api(lambda: mt5.order_send(request), None)
 
             if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
                 error_code = mt5.last_error()
@@ -380,10 +410,10 @@ class MT5Client(Broker):
                 return False
 
         # Vérifier si le symbole est sélectionné
-        mt5.symbol_select(symbol, True)
+        self._call_api(lambda: mt5.symbol_select(symbol, True), False)
 
         # Déterminer les prix d'entrée
-        tick = mt5.symbol_info_tick(symbol)
+        tick = self._call_api(lambda: mt5.symbol_info_tick(symbol), None)
         if tick is None:
             log.error(f"Impossible d'obtenir le prix tick actuel pour {symbol}.")
             return False
@@ -405,7 +435,7 @@ class MT5Client(Broker):
         amount = round(amount / step_units) * step_units
 
         # Convertir en lots pour MT5
-        info = mt5.symbol_info(symbol)
+        info = self._call_api(lambda: mt5.symbol_info(symbol), None)
         contract_size = info.trade_contract_size if info and info.trade_contract_size > 0 else 100000.0
         amount_lots = amount / contract_size
 
@@ -417,27 +447,20 @@ class MT5Client(Broker):
         amount_lots = round(amount_lots, 4)
 
         # Nettoyer le commentaire pour nous assurer qu'il contient des caractères sûrs pour MT5
-        # Générer la chaîne de commentaire de base
         base_comment = comment or f"SuperBot order - {side_upper}"
-        # Remplacer tout caractère non ASCII ou non imprimable par un souligné, puis garder uniquement
-        # lettres, chiffres, espaces, tirets et soulignés (caractères sûrs pour MT5)
         cleaned_chars = []
         for c in str(base_comment):
             if ord(c) >= 128 or not c.isprintable():
                 cleaned_chars.append('_')
             else:
-                # Autoriser lettres, chiffres, espace, tiret, souligné, point
                 if c.isalnum() or c in (' ', '-', '_', '.'):
                     cleaned_chars.append(c)
                 else:
                     cleaned_chars.append('_')
         cleaned = ''.join(cleaned_chars)
-        # Fournir un retour si le nettoyage résulte en une chaîne vide
         if not cleaned:
             cleaned = f"SBOT-{side_upper}"
-        # Tronquer à la limite de 29 caractères acceptée par le wrapper python MT5
         final_comment = cleaned[:29]
-        # Journaliser le commentaire final pour le débogage (optionnel)
         log.debug(f"Commentaire MT5 final : '{final_comment}' (original: '{base_comment}')")
 
         request = {
@@ -456,7 +479,7 @@ class MT5Client(Broker):
         }
 
         log.info(f"Envoi de l'ordre MT5 : {side_upper} {amount_lots} {symbol} @ {price:.5f} (SL: {sl:.5f}, TP: {tp:.5f})")
-        result = mt5.order_send(request)
+        result = self._call_api(lambda: mt5.order_send(request), None)
 
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             error_code = mt5.last_error()
@@ -470,7 +493,7 @@ class MT5Client(Broker):
     def modify_sl_tp(self, symbol: str, sl: float, tp: float) -> bool:
         """Modifie le SL/TP de toutes les positions existantes sur un symbole."""
         symbol = self.normalize_symbol(symbol)
-        positions = mt5.positions_get(symbol=symbol)
+        positions = self._call_api(lambda: mt5.positions_get(symbol=symbol), [])
         if not positions or len(positions) == 0:
             log.warning(f"Impossible de modifier le SL/TP: aucune position sur {symbol}")
             return False
@@ -487,7 +510,7 @@ class MT5Client(Broker):
             }
 
             log.info(f"Modification SL/TP position MT5 #{ticket} ({symbol}) -> SL: {sl:.5f}, TP: {tp:.5f}")
-            result = mt5.order_send(request)
+            result = self._call_api(lambda: mt5.order_send(request), None)
 
             if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
                 error_code = mt5.last_error()
@@ -501,15 +524,15 @@ class MT5Client(Broker):
     def get_current_price(self, symbol: str) -> float:
         """Retourne le dernier prix (mid price)."""
         symbol = self.normalize_symbol(symbol)
-        mt5.symbol_select(symbol, True)
-        tick = mt5.symbol_info_tick(symbol)
+        self._call_api(lambda: mt5.symbol_select(symbol, True), False)
+        tick = self._call_api(lambda: mt5.symbol_info_tick(symbol), None)
         if tick is None:
             return 0.0
         return (tick.bid + tick.ask) / 2
 
     def get_min_order_size(self, symbol: str) -> float:
         symbol = self.normalize_symbol(symbol)
-        info = mt5.symbol_info(symbol)
+        info = self._call_api(lambda: mt5.symbol_info(symbol), None)
         if info:
             contract_size = info.trade_contract_size if info.trade_contract_size > 0 else 100000.0
             return info.volume_min * contract_size
@@ -517,7 +540,7 @@ class MT5Client(Broker):
 
     def get_step_size(self, symbol: str) -> float:
         symbol = self.normalize_symbol(symbol)
-        info = mt5.symbol_info(symbol)
+        info = self._call_api(lambda: mt5.symbol_info(symbol), None)
         if info:
             contract_size = info.trade_contract_size if info.trade_contract_size > 0 else 100000.0
             return info.volume_step * contract_size

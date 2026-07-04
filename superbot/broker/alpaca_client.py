@@ -3,6 +3,7 @@ Alpaca Markets Client.
 """
 import logging
 import math
+import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 import pandas as pd
@@ -67,11 +68,26 @@ class AlpacaClient(Broker):
             raise
 
     def _call_api(self, api_func, default_val, *args, **kwargs):
-        try:
-            return api_func(*args, **kwargs)
-        except Exception as e:
-            log.error(f"Erreur lors de l'appel API Alpaca : {e}")
-            return default_val
+        max_retries = 3
+        backoff = 1.0
+        for attempt in range(1, max_retries + 1):
+            try:
+                return api_func(*args, **kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = "429" in err_str or "rate limit" in err_str or "too many requests" in err_str
+                
+                if attempt == max_retries:
+                    log.error(f"Critical Alpaca API failure after {max_retries} attempts: {e}")
+                    return default_val
+                    
+                sleep_duration = backoff * 2.0 if is_rate_limit else backoff
+                log.warning(
+                    f"⚠️ Alpaca API call failed ({e}). "
+                    f"Attempt {attempt}/{max_retries}. Retrying in {sleep_duration:.2f}s..."
+                )
+                time.sleep(sleep_duration)
+                backoff *= 2.0
 
     def _normalize_symbol(self, symbol: str) -> str:
         """
@@ -81,15 +97,17 @@ class AlpacaClient(Broker):
 
     def _get_min_size(self, symbol: str) -> float:
         """Retourne la taille minimale d'ordre pour Alpaca."""
-        return 0.000001
+        # Pour les actions/ETFs, la taille minimale est de 1 share pour les bracket/stop/limit orders
+        return 1.0
 
     def _get_step_size(self, symbol: str) -> float:
         """Retourne le pas de taille d'ordre pour Alpaca (précision)."""
-        return 0.000001
+        # Précision d'une action entière pour éviter le rejet des bracket orders
+        return 1.0
 
     def _round_qty(self, symbol: str, qty: float) -> float:
-        """Arrondit la quantité selon la précision Alpaca."""
-        return round(qty, 6)
+        """Arrondit la quantité selon la précision Alpaca (actions entières)."""
+        return float(math.floor(qty))
 
     def _round_price(self, symbol: str, price: float) -> float:
         """Arrondit le prix selon la précision Alpaca."""
@@ -142,19 +160,25 @@ class AlpacaClient(Broker):
         """
         timeframe_map = {
             "1m": "1Min", "5m": "5Min", "15m": "15Min", "30m": "30Min",
-            "1h": "1H", "2h": "2H", "4h": "4H", "6h": "6H",
-            "1d": "1D", "1w": "1W", "1M": "1D"
+            "1h": "1Hour", "2h": "2Hour", "4h": "4Hour", "6h": "6Hour",
+            "1d": "1Day", "1w": "1Week", "1M": "1Day"
         }
         alpaca_timeframe = timeframe_map.get(timeframe, timeframe)
         alpaca_symbol = self._normalize_symbol(symbol)
 
         from datetime import datetime, timedelta
-        # Calculer un start date de sécurité basé sur la granularité et la limite
-        days_needed = limit
-        if "Min" in alpaca_timeframe:
-            days_needed = max(1, int(limit / 100))
-        elif "H" in alpaca_timeframe:
-            days_needed = max(1, int(limit / 5))
+        # Calculer un start date de sécurité basé sur la granularité et la limite (marché US fermé le week-end et ouvert 6.5h/jour)
+        tf_lower = timeframe.lower()
+        if tf_lower.endswith("m"):
+            mins_per_bar = int(tf_lower[:-1])
+            days_needed = max(7, int((limit * mins_per_bar) / 390 * 2.0))
+        elif tf_lower.endswith("h"):
+            hours_per_bar = int(tf_lower[:-1])
+            days_needed = max(10, int((limit * hours_per_bar) / 6.5 * 2.0))
+        elif tf_lower.endswith("d"):
+            days_needed = max(30, int(limit * 1.5))
+        elif tf_lower.endswith("w"):
+            days_needed = max(90, int(limit * 7 * 1.5))
         else:
             days_needed = limit * 2
             
@@ -196,7 +220,9 @@ class AlpacaClient(Broker):
         except Exception as e:
             log.warning(f"️  Impossible d'obtenir le prix actuel pour {symbol} : {e}")
             try:
-                bars = self._api.get_bars(alpaca_symbol, "1Min", limit=1).df
+                from datetime import datetime, timedelta
+                start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+                bars = self._api.get_bars(alpaca_symbol, "1Min", start=start_date, limit=1).df
                 if not bars.empty:
                     return float(bars['close'].iloc[-1])
             except:
@@ -239,6 +265,9 @@ class AlpacaClient(Broker):
 
         def run():
             try:
+                # Annuler d'abord tous les ordres en cours sur ce symbole pour éviter les ordres fantômes
+                self.cancel_all_orders(symbol)
+                
                 self._api.submit_order(
                     symbol=alpaca_symbol,
                     qty=size,
@@ -288,7 +317,14 @@ class AlpacaClient(Broker):
         """
         alpaca_symbol = self._normalize_symbol(symbol)
         side_alpaca = "buy" if side.lower() == "buy" else "sell"
-        amount = self._round_qty(symbol, amount)
+        amount_rounded = self._round_qty(symbol, amount)
+        if amount_rounded <= 0:
+            log.warning(
+                f"⚠️ Quantité d'ordre nulle ou insuffisante pour {symbol} "
+                f"(demandé: {amount}, arrondi: {amount_rounded}). L'ordre est ignoré."
+            )
+            return False
+        amount = amount_rounded
         sl = self._round_price(symbol, sl) if sl > 0 else None
         tp = self._round_price(symbol, tp) if tp > 0 else None
 
@@ -309,7 +345,7 @@ class AlpacaClient(Broker):
                     if tp is not None:
                         order_params["take_profit"] = {"limit_price": tp}
 
-                if reduce_only:
+                if reduce_only and self.get_asset_type() == "crypto":
                     order_params["reduce_only"] = True
 
                 order = self._api.submit_order(**order_params)

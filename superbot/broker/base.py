@@ -196,7 +196,7 @@ def create_broker(broker_type: str = None, **kwargs) -> Broker:
     Factory function pour créer une instance de courtier selon le type configuré.
 
     Args:
-        broker_type: Type de courtier ('binance', 'alpaca', 'paper_forex', etc.)
+        broker_type: Type de courtier ('binance', 'alpaca', 'mt5')
                     Si None, lit la variable d'environnement BROKER_TYPE
         **kwargs: Arguments supplémentaires passés au constructeur du courtier
 
@@ -217,14 +217,11 @@ def create_broker(broker_type: str = None, **kwargs) -> Broker:
     elif broker_type == "alpaca":
         from superbot.broker.alpaca_client import AlpacaClient
         return AlpacaClient(**kwargs)
-    elif broker_type == "paper_forex":
-        from superbot.broker.paper_forex_client import PaperForexClient
-        return PaperForexClient(**kwargs)
     elif broker_type == "mt5":
         from superbot.broker.mt5_client import MT5Client
         return MT5Client(**kwargs)
     else:
-        supported = ["binance", "alpaca", "paper_forex", "mt5"]
+        supported = ["binance", "alpaca", "mt5"]
         raise ValueError(
             f"Broker '{broker_type}' non supporté.\n"
             f"Brokers disponibles : {', '.join(supported)}\n"
