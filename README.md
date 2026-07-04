@@ -1,4 +1,4 @@
-# 📈 NexQuant (v2) — Intelligence de Trading Quantitative Unifiée
+# 📈 NexQuant — Intelligence de Trading Quantitative Unifiée
 
 **NexQuant** est un écosystème de trading algorithmique modulaire, distribué et automatisé conçu pour les marchés financiers modernes (**Cryptomonnaies, Actions/ETFs US et Forex**). 
 
@@ -41,7 +41,7 @@ NexQuant utilise une architecture décentralisée pour garantir la confidentiali
 
 ---
 
-## 🚀 Fonctionnalités Clés & Filtres de Risque Avancés (v2)
+## 🚀 Fonctionnalités Clés & Filtres de Risque Avancés
 
 Pour stabiliser le bot Forex & Crypto et viser un **winrate cible de 50-55%**, plusieurs filtres quantitatifs et de gestion de capital ont été intégrés :
 
