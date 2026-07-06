@@ -48,4 +48,12 @@ dist-ssr/
 *.pdf
 *.epub
 
+# Caches de backtest et fichiers temporaires
+superbot/backtest/cache/
+superbot/backtest/results/
+NexQuant_Web_App/supabase/.temp/
+scratch/
+_fix_train.py
+
+
 

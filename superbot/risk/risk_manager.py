@@ -486,12 +486,14 @@ class RiskManager:
             elif isinstance(trade_record['timestamp'], datetime):
                 trade_record['timestamp'] = trade_record['timestamp'].isoformat()
 
-            # Ajouter à l'historique
-            self.trade_history.append(trade_record)
+            # Ajouter à l'historique uniquement si le trade est clôturé
+            is_closed = trade_record.get('status') == 'closed' or trade_record.get('pnl') is not None
+            if is_closed:
+                self.trade_history.append(trade_record)
 
-            # Garder seulement les 100 derniers trades pour éviter l'accumulation illimitée
-            if len(self.trade_history) > 100:
-                self.trade_history = self.trade_history[-100:]
+                # Garder seulement les 100 derniers trades pour éviter l'accumulation illimitée
+                if len(self.trade_history) > 100:
+                    self.trade_history = self.trade_history[-100:]
 
             # Mise à jour des pertes consécutives
             symbol = trade_record.get('symbol')

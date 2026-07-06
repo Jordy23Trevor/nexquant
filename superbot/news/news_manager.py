@@ -397,34 +397,38 @@ class NewsManager:
 
     def _update_social_sentiment(self):
         """
-        Met à jour le sentiment des réseaux sociaux.
-        Dans une implémentation complète, ceci utiliserait les API de Twitter, Reddit, etc.
-        Pour l'instant, on utilise une approximation basée sur le prix et le volume.
+        Met à jour le sentiment via RSS et NLP (VADER/FinBERT).
         """
         try:
             cache_key = "social_sentiment"
             if self._is_cached_valid(cache_key, minutes=10):  # Cache de 10 minutes
                 return
 
-            # Dans une implémentation réelle, on appellerait les API de Twitter/Reddit ici
-            # Pour ce prototype, on utilise une valeur neutre avec une légère variation aléatoire
-            # basée sur l'heure du jour pour simuler du mouvement
-            hour = datetime.now().hour
-            base_sentiment = 0.0
-            # Variation quotidienne simulée (plus positif en matinée, plus négatif en soirée)
-            daily_variation = 0.2 * np.sin((hour - 6) * np.pi / 12)  # Cycle de 24h centré sur midi
-            random_variation = 0.1 * (np.random.random() - 0.5)  # Variation aléatoire ±0.05
-            social_sentiment = base_sentiment + daily_variation + random_variation
-            social_sentiment = max(-1.0, min(1.0, social_sentiment))  # Limiter à [-1, 1]
+            # Initialiser le scraper RSS et l'analyseur NLP si pas encore fait
+            if not hasattr(self, '_rss_scraper'):
+                from superbot.news.rss_scraper import RssScraper
+                from superbot.news.sentiment_analyzer import SentimentAnalyzer
+                self._rss_scraper = RssScraper()
+                # On désactive FinBERT par défaut pour le scraping rapide (utiliser VADER)
+                self._sentiment_analyzer = SentimentAnalyzer(use_finbert=False)
+
+            # Récupérer les articles récents (toutes catégories confondues)
+            articles = self._rss_scraper.fetch_all()
+            
+            if articles:
+                # Calculer le score de sentiment via NLP sur les titres/résumés
+                social_sentiment = self._sentiment_analyzer.analyze_rss_items(articles)
+            else:
+                social_sentiment = 0.0
 
             self._cache[cache_key] = {
                 'sentiment': social_sentiment,
                 'timestamp': datetime.now()
             }
             self._cache_timestamps[cache_key] = datetime.now()
-            log.debug(f"Social sentiment mis à jour: {social_sentiment:.3f}")
+            log.debug(f"Sentiment NLP mis à jour (sur {len(articles) if articles else 0} articles): {social_sentiment:.3f}")
         except Exception as e:
-            log.error(f"Erreur lors de la mise à jour du sentiment social: {e}")
+            log.error(f"Erreur lors de la mise à jour du sentiment NLP: {e}")
 
     def _calculate_global_sentiment(self):
         """
@@ -670,7 +674,7 @@ class NewsManager:
         with self.news_lock:
             return [
                 event for event in self.latest_news
-                if event.timestamp > cutoff_time and event.is_high_impact()
+                if event.timestamp > cutoff_time
             ]
 
     def get_fear_greed_level(self) -> Tuple[Optional[int], Optional[str]]:

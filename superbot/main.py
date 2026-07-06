@@ -572,7 +572,8 @@ class SuperBot:
                             'pnl': pnl,
                             'timestamp': datetime.now(timezone.utc).isoformat(),
                             'status': 'closed',
-                            'market_regime': market_regime_at_open
+                            'market_regime': market_regime_at_open,
+                            'broker': BROKER_TYPE
                         }
                         self.risk_manager.record_trade(trade_record)
 
@@ -1027,12 +1028,25 @@ class SuperBot:
                         except Exception as _e:
                             log.debug(f"[P1-1] Impossible de calculer la variation BTC 24h: {_e}")
 
+                # Récupérer les facteurs NLP et filtres depuis le NewsManager
+                _sentiment_factor = 1.0
+                _news_filter_passed = True
+                if self.news_manager:
+                    try:
+                        _sentiment_factor = self.news_manager.get_risk_factor()
+                        _should_avoid, _ = self.news_manager.should_avoid_trading_due_to_news(symbol)
+                        _news_filter_passed = not _should_avoid
+                    except Exception as e:
+                        log.debug(f"Erreur NewsManager: {e}")
+
                 signal_data = self.strategy.analyze_market(
                     df_with_indicators,
                     account_balance=_real_balance,
                     real_win_rate=_real_win_rate,
                     symbol=symbol,
-                    btc_change_24h=_btc_change_24h
+                    btc_change_24h=_btc_change_24h,
+                    sentiment_factor=_sentiment_factor,
+                    news_filter_passed=_news_filter_passed
                 )
                 self._strategy_cache[symbol] = signal_data
             signal_data['symbol'] = symbol  # Ajouter le symbole au signal
@@ -1362,7 +1376,8 @@ class SuperBot:
                 'take_profit': tp_price,
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'signal_score': signal_data['total_score'],
-                'market_regime': signal_data['market_regime']
+                'market_regime': signal_data['market_regime'],
+                'broker': BROKER_TYPE
             }
             self.risk_manager.record_trade(trade_record)
 
@@ -1744,7 +1759,8 @@ class SuperBot:
                     'take_profit': tp_price,
                     'timestamp': datetime.now(timezone.utc).isoformat(),
                     'signal_score': data.get('strength', 1.0) * 10,
-                    'market_regime': 'Webhook Alert'
+                    'market_regime': 'Webhook Alert',
+                    'broker': BROKER_TYPE
                 }
                 self.risk_manager.record_trade(trade_record)
 

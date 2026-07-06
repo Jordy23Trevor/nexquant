@@ -100,7 +100,9 @@ class TradingStrategy:
                        account_balance: float = 0.0,
                        real_win_rate: Optional[float] = None,
                        symbol: str = "",
-                       btc_change_24h: Optional[float] = None) -> Dict[str, Any]:
+                       btc_change_24h: Optional[float] = None,
+                       sentiment_factor: float = 1.0,
+                       news_filter_passed: bool = True) -> Dict[str, Any]:
         """
         Analyse complète du marché pour générer un signal de trading.
 
@@ -110,6 +112,8 @@ class TradingStrategy:
             real_win_rate: Win rate réel calculé par le RiskManager (None = estimation 0.55)
             symbol: Symbole de l'actif analysé (utilisé pour les filtres crypto)
             btc_change_24h: Variation BTC sur 24h en % (négatif = baisse, None = non disponible)
+            sentiment_factor: Ajustement NLP du NewsManager (1.0 = neutre, >1 = positif)
+            news_filter_passed: False si les nouvelles récentes interdisent de trader
 
         Returns:
             Dictionnaire contenant l'analyse complète et le signal de trading
@@ -130,9 +134,16 @@ class TradingStrategy:
         latest = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else current_candle
         prev = df_with_indicators.iloc[-3] if len(df_with_indicators) >= 3 else latest
 
-        # Déterminer le régime de marché
-        market_regime = self.indicators.get_market_regime(df_with_indicators)
+        # Déterminer le régime de marché (HMM Phase 2 si modèle disponible, sinon ADX)
+        market_regime, ml_confidence, hmm_state = self.indicators.get_market_regime_with_confidence(df_with_indicators)
         is_trending = market_regime == 'TRENDING'
+
+        # Logguer le régime détecté avec la source de détection
+        if hmm_state >= 0:
+            hmm_label = self.indicators._regime_detector.get_state_label(hmm_state) if self.indicators._regime_detector else 'HMM'
+            log.debug(f"[Regime] HMM: {market_regime} (etat={hmm_label}, confiance={ml_confidence:.1%})")
+        else:
+            log.debug(f"[Regime] ADX fallback: {market_regime} (confiance={ml_confidence:.1%})")
 
         # ── Détecter si l'actif est une crypto ───────────────────────────
         sym_upper = symbol.upper().replace("/", "").replace("-", "")
@@ -195,11 +206,10 @@ class TradingStrategy:
                 sl_price = current_price + (atr * self.config.get('SL_ATR_MULT', 1.5))
                 tp_price = current_price - (atr * self.config.get('TP_ATR_MULT', 3.0))
 
-        # Appliquer les filtres de sentiment et de nouvelles (à venir dans la phase 4)
-        sentiment_factor = 1.0  # À implémenter avec le news manager
-        news_filter_passed = True  # À implémenter avec le news manager
-
-        # Ajuster le score avec le facteur de sentiment
+        # Le sentiment_factor est passé depuis le NewsManager dans main.py
+        # news_filter_passed est également propagé
+        
+        # Ajuster le score avec le facteur de sentiment (Phase 3)
         adjusted_score = total_score * sentiment_factor
 
         # Valeurs par défaut ajustables dynamiquement par les règles
@@ -217,7 +227,9 @@ class TradingStrategy:
                 'total_score': total_score,
                 'trigger_long': trigger_long,
                 'trigger_short': trigger_short,
-                'latest_bar': latest
+                'latest_bar': latest,
+                'ml_confidence': ml_confidence,   # Phase 2 : confiance HMM
+                'hmm_state': hmm_state,            # Phase 2 : état brut HMM
             }
         )
 
