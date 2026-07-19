@@ -17,33 +17,66 @@ log = logging.getLogger("dashboard")
 
 
 def load_global_trades():
-    paths_to_try = [
-        "superbot/logs/trades.jsonl",
-        "../logs/trades.jsonl",
-        os.path.join(os.path.dirname(__file__), "..", "logs", "trades.jsonl"),
-        os.path.join(os.path.dirname(__file__), "logs", "trades.jsonl")
+    import glob
+    folders_to_try = [
+        "superbot/logs",
+        "../logs",
+        os.path.join(os.path.dirname(__file__), "..", "logs"),
+        os.path.join(os.path.dirname(__file__), "logs")
     ]
-    trades_file = None
-    for p in paths_to_try:
-        if os.path.exists(p):
-            trades_file = p
-            break
-            
-    if not trades_file:
+    
+    trades_files = []
+    # Scanner trades_*.jsonl
+    for folder in folders_to_try:
+        if os.path.exists(folder):
+            pattern = os.path.join(folder, "trades_*.jsonl")
+            for f in glob.glob(pattern):
+                if f not in trades_files:
+                    trades_files.append(f)
+            # Ajouter trades.jsonl historique
+            h_file = os.path.join(folder, "trades.jsonl")
+            if os.path.exists(h_file) and h_file not in trades_files:
+                trades_files.append(h_file)
+
+    if not trades_files:
         return [], []
 
     raw_trades = []
-    try:
-        with open(trades_file, 'r', encoding='utf-8', errors='replace') as f:
-            for line in f:
-                if line.strip():
-                    try:
-                        raw_trades.append(json.loads(line))
-                    except Exception:
-                        continue
-    except Exception as e:
-        log.error(f"Erreur lors de la lecture de trades.jsonl : {e}")
-        return [], []
+    for trades_file in trades_files:
+        try:
+            with open(trades_file, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            trade_data = json.loads(line)
+                            # Si le broker n'est pas spécifié, l'inférer du nom du fichier
+                            if 'broker' not in trade_data:
+                                basename = os.path.basename(trades_file)
+                                if basename.startswith("trades_") and basename.endswith(".jsonl"):
+                                    broker_name = basename[7:-6]
+                                    trade_data['broker'] = broker_name
+                            raw_trades.append(trade_data)
+                        except Exception:
+                            continue
+        except Exception as e:
+            log.error(f"Erreur lors de la lecture de {trades_file} : {e}")
+
+    # Trier par timestamp pour reconstruire l'état correctement
+    from datetime import timezone as _tz
+    def parse_time(t):
+        ts = t.get('timestamp')
+        if not ts:
+            return datetime.min.replace(tzinfo=_tz.utc)
+        try:
+            import dateutil.parser
+            dt = dateutil.parser.parse(str(ts))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_tz.utc)
+            return dt
+        except Exception:
+            return datetime.min.replace(tzinfo=_tz.utc)
+
+    raw_trades.sort(key=parse_time)
 
     active_positions = {}
     closed_history = []

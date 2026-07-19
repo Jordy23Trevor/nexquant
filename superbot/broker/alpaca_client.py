@@ -68,26 +68,17 @@ class AlpacaClient(Broker):
             raise
 
     def _call_api(self, api_func, default_val, *args, **kwargs):
-        max_retries = 3
-        backoff = 1.0
-        for attempt in range(1, max_retries + 1):
-            try:
-                return api_func(*args, **kwargs)
-            except Exception as e:
-                err_str = str(e).lower()
-                is_rate_limit = "429" in err_str or "rate limit" in err_str or "too many requests" in err_str
-                
-                if attempt == max_retries:
-                    log.error(f"Critical Alpaca API failure after {max_retries} attempts: {e}")
-                    return default_val
-                    
-                sleep_duration = backoff * 2.0 if is_rate_limit else backoff
-                log.warning(
-                    f"⚠️ Alpaca API call failed ({e}). "
-                    f"Attempt {attempt}/{max_retries}. Retrying in {sleep_duration:.2f}s..."
-                )
-                time.sleep(sleep_duration)
-                backoff *= 2.0
+        from superbot.utils.rate_limiter import with_exponential_backoff
+        
+        @with_exponential_backoff(max_retries=5, base_delay=1.0, max_delay=60.0)
+        def _retrying_func():
+            return api_func(*args, **kwargs)
+            
+        try:
+            return _retrying_func()
+        except Exception as e:
+            log.error(f"Critical Alpaca API failure after retries: {e}")
+            return default_val
 
     def _normalize_symbol(self, symbol: str) -> str:
         """

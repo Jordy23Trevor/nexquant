@@ -13,6 +13,7 @@ load_dotenv(dotenv_path=env_path)
 # BROKER CONFIGURATION
 # =============================================================================
 BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, mt5
+ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "false").lower() == "true"
 
 # =============================================================================
 # METATRADER 5 (MT5) CONFIGURATION (associated with Fusion Markets)
@@ -41,9 +42,8 @@ ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", _default_alpaca_url)
 ALPACA_API_VERSION = os.getenv("ALPACA_API_VERSION", "v2")
 
 # =============================================================================
-# PAPER FOREX ENGINE CONFIGURATION
+# FOREX DATA PROVIDERS (utilisé par MT5)
 # =============================================================================
-# Paper trading parameters for forex simulation
 FOREX_DEFAULT_LEVERAGE = int(os.getenv("FOREX_DEFAULT_LEVERAGE", "30"))  # Typical forex leverage
 FOREX_MARGIN_CALL_LEVEL = float(os.getenv("FOREX_MARGIN_CALL_LEVEL", "0.5"))  # 50% margin used triggers call
 FOREX_STOP_OUT_LEVEL = float(os.getenv("FOREX_STOP_OUT_LEVEL", "0.2"))  # 20% margin used triggers stop out
@@ -57,7 +57,7 @@ FOREX_DATA_PROVIDER = os.getenv("FOREX_DATA_PROVIDER", "twelvedata")
 # Instruments to trade - format depends on broker
 # For Binance: "BTC/USDT", "ETH/USDT"
 # For Alpaca: "SPY", "QQQ", "AAPL"
-# For Paper Forex: "EUR/USD", "GBP/USD", "USD/JPY"
+# For MT5: "EURUSD", "GBPUSD", "USDJPY"
 INSTRUMENTS_STR = os.getenv("INSTRUMENTS", "BTC/USDT")
 INSTRUMENTS = [s.strip() for s in INSTRUMENTS_STR.split(",")]
 
@@ -83,6 +83,12 @@ CRYPTO_BUY_BLOCK_BTC_DROP = float(os.getenv("CRYPTO_BUY_BLOCK_BTC_DROP", "2.0"))
 #         Réduit l'overtrading en période de range directionnel faible.
 CRYPTO_BNB_VOLUME_FACTOR = float(os.getenv("CRYPTO_BNB_VOLUME_FACTOR", "1.5"))
 
+# =============================================================================
+# TRANSACTION COSTS (Phase 2 - Realism Modeling)
+# =============================================================================
+COMMISSION_PCT = float(os.getenv("COMMISSION_PCT", "0.1"))
+SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.05"))
+
 # Timeframes for analysis
 GRANULARITY = os.getenv("GRANULARITY", "1h")  # Main trading timeframe
 HTF_GRANULARITY = os.getenv("HTF_GRANULARITY", "4h")  # Higher timeframe for trend confirmation
@@ -93,13 +99,53 @@ N_CANDLES = int(os.getenv("N_CANDLES", "500"))  # Number of candles to fetch
 # =============================================================================
 # TECHNICAL INDICATOR PARAMETERS
 # =============================================================================
-# Moving Averages
+# Moving Averages (paramètres globaux — utilisés si aucun paramètre spécifique n'est défini)
 EMA_FAST = int(os.getenv("EMA_FAST", "9"))
 EMA_SLOW = int(os.getenv("EMA_SLOW", "21"))
 EMA_TREND = int(os.getenv("EMA_TREND", "200"))  # Long-term trend
 HTF_EMA = int(os.getenv("HTF_EMA", "50"))  # Higher timeframe EMA
 D1_EMA = int(os.getenv("D1_EMA", "50"))  # Daily EMA
 W1_EMA = int(os.getenv("W1_EMA", "20"))  # Weekly EMA (Elder)
+
+# =============================================================================
+# PARAMÈTRES PAR CLASSE D'ACTIFS (override des paramètres globaux)
+# =============================================================================
+# --- CRYPTO (Binance Futures) ---
+# EMA(21,55) : moins de bruit sur H1 crypto vs EMA(9,21) trop rapides
+# ADX 25     : seuil plus élevé car la crypto est volatile même en range
+# SCORE_MIN 7 : confirmation supplémentaire nécessaire sur marchés manipulables
+EMA_FAST_CRYPTO = int(os.getenv("EMA_FAST_CRYPTO", "21"))
+EMA_SLOW_CRYPTO = int(os.getenv("EMA_SLOW_CRYPTO", "55"))
+ADX_TREND_CRYPTO = int(os.getenv("ADX_TREND_CRYPTO", "25"))
+SCORE_MIN_CRYPTO = int(os.getenv("SCORE_MIN_CRYPTO", "7"))
+SL_ATR_MULT_CRYPTO = float(os.getenv("SL_ATR_MULT_CRYPTO", "2.0"))  # SL plus large (crypto volatile)
+TP_ATR_MULT_CRYPTO = float(os.getenv("TP_ATR_MULT_CRYPTO", "4.0"))  # TP plus ambitieux
+
+# --- FOREX (MetaTrader 5 — marchés institutionnels) ---
+# EMA(14,50) : Plus réactif pour capter les tendances de moyen terme
+# ADX 18     : Abaissé pour permettre plus de signaux en tendance faible
+# SCORE_MIN 5 : Permet plus d'opportunités de trades
+EMA_FAST_FOREX = int(os.getenv("EMA_FAST_FOREX", "14"))
+EMA_SLOW_FOREX = int(os.getenv("EMA_SLOW_FOREX", "50"))
+ADX_TREND_FOREX = int(os.getenv("ADX_TREND_FOREX", "18"))
+SCORE_MIN_FOREX = int(os.getenv("SCORE_MIN_FOREX", "5"))
+SL_ATR_MULT_FOREX = float(os.getenv("SL_ATR_MULT_FOREX", "1.5"))   # SL standard
+TP_ATR_MULT_FOREX = float(os.getenv("TP_ATR_MULT_FOREX", "3.0"))   # TP standard
+# News économiques maçjeures à éviter (nombres en minutes avant/après)
+FOREX_NEWS_AVOID_MINUTES = int(os.getenv("FOREX_NEWS_AVOID_MINUTES", "30"))
+
+# --- ETF/STOCKS (Alpaca US Markets) ---
+# EMA(20,50) : références institutionnelles US (EMA20 = SMA20 standard, EMA50 clé)
+# ADX 20     : ETF trend est stable, seuil standard
+# SCORE_MIN 5 : ETF moins volatils, moins de signal à filtrer
+# ALLOW_SHORT_STOCK false : éviter les shorts sur ETF (PDT rule, margin costs)
+EMA_FAST_STOCK = int(os.getenv("EMA_FAST_STOCK", "20"))
+EMA_SLOW_STOCK = int(os.getenv("EMA_SLOW_STOCK", "50"))
+ADX_TREND_STOCK = int(os.getenv("ADX_TREND_STOCK", "20"))
+SCORE_MIN_STOCK = int(os.getenv("SCORE_MIN_STOCK", "5"))
+SL_ATR_MULT_STOCK = float(os.getenv("SL_ATR_MULT_STOCK", "1.5"))   # SL standard
+TP_ATR_MULT_STOCK = float(os.getenv("TP_ATR_MULT_STOCK", "3.0"))   # TP standard
+ALLOW_SHORT_STOCK = os.getenv("ALLOW_SHORT_STOCK", "false").lower() == "true"  # Désactivé par défaut
 
 # RSI
 RSI_LEN = int(os.getenv("RSI_LEN", "14"))
@@ -238,9 +284,9 @@ HIGH_LIQUIDITY_HOURS_UTC = [
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-LOG_FILE = LOG_DIR / "superbot.log"
-TRADE_LOG_FILE = LOG_DIR / "trades.jsonl"  # Structured trade logs for analysis
-ERROR_LOG_FILE = LOG_DIR / "errors.log"
+LOG_FILE = LOG_DIR / f"superbot_{BROKER_TYPE}.log"
+TRADE_LOG_FILE = LOG_DIR / f"trades_{BROKER_TYPE}.jsonl"  # Structured trade logs for analysis
+ERROR_LOG_FILE = LOG_DIR / f"errors_{BROKER_TYPE}.log"
 
 # =============================================================================
 # DEVELOPMENT & TESTING

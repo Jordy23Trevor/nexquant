@@ -178,10 +178,13 @@ class NewsManager:
                     log.debug(f"Fear & Greed mis à jour: {value} ({classification})")
                 else:
                     log.warning("Réponse Fear & Greed vide ou mal formée")
+                    self._cache_timestamps[cache_key] = datetime.now()
             else:
                 log.warning(f"API Fear & Greed retourné le code {response.status_code}")
+                self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour du Fear & Greed: {e}")
+            self._cache_timestamps[cache_key] = datetime.now()
 
     def _update_forex_factory_news(self):
         """Met à jour les nouvelles de Forex Factory."""
@@ -265,8 +268,10 @@ class NewsManager:
                 log.debug(f"Forex Factory news mis à jour: {len(news_events)} événements")
             else:
                 log.warning(f"API Forex Factory retourné le code {response.status_code}")
+                self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour des nouvelles Forex Factory: {e}")
+            self._cache_timestamps[cache_key] = datetime.now()
 
     def _update_crypto_news(self):
         """Met à jour les nouvelles crypto depuis CoinGecko et CryptoCompare."""
@@ -301,8 +306,10 @@ class NewsManager:
                 log.debug("CoinGecko trends mis à jour")
             else:
                 log.warning(f"API CoinGecko trends retourné le code {response.status_code}")
+                self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour des tendances CoinGecko: {e}")
+            self._cache_timestamps[cache_key] = datetime.now()
 
     def _update_cryptocompare_news(self):
         """Met à jour les nouvelles depuis CryptoCompare (nécessite une clé API)."""
@@ -390,10 +397,13 @@ class NewsManager:
                     log.debug(f"CryptoCompare news mis à jour: {len(news_events)} événements")
                 else:
                     log.warning("Réponse CryptoCompare news vide ou mal formée")
+                    self._cache_timestamps[cache_key] = datetime.now()
             else:
                 log.warning(f"API CryptoCompare news retourné le code {response.status_code}")
+                self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour des nouvelles CryptoCompare: {e}")
+            self._cache_timestamps[cache_key] = datetime.now()
 
     def _update_social_sentiment(self):
         """

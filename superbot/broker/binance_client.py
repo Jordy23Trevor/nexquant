@@ -174,34 +174,27 @@ class BinanceClient(Broker):
             log.warning(f"️  Impossible de synchroniser le temps : {e}")
 
     def _call_api(self, api_func, default_val, *args, **kwargs):
-        max_retries = 3
-        backoff = 1.0
-        for attempt in range(1, max_retries + 1):
+        from superbot.utils.rate_limiter import with_exponential_backoff
+        
+        @with_exponential_backoff(max_retries=5, base_delay=1.0, max_delay=60.0)
+        def _retrying_func():
             try:
                 return api_func(*args, **kwargs)
             except BinanceAPIException as e:
                 if e.code in (-1021, -1022) or "ahead" in str(e.message).lower() or "recvwindow" in str(e.message).lower():
                     log.warning(f"⏰ Erreur de synchronisation temporelle détectée ({e.message}). Réalignement...")
                     self._sync_time()
-                    try:
-                        return api_func(*args, **kwargs)
-                    except Exception as ex:
-                        log.error(f"Échec persistant après re-synchronisation : {ex}")
-                        return default_val
-                elif e.code == -1003:
-                    log.warning(f"⚠️ Limite de taux Binance API atteinte (IP bloquée). Tentative {attempt}/{max_retries} après {backoff}s...")
-                    time.sleep(backoff)
-                    backoff *= 2.0
-                else:
-                    log.error(f"Erreur Binance API : {e.message} (code {e.code})")
-                    return default_val
-            except Exception as e:
-                log.warning(f"⚠️ Erreur réseau/inattendue lors de l'appel API ({e}). Tentative {attempt}/{max_retries} après {backoff}s...")
-                if attempt == max_retries:
-                    log.error(f"Échec critique après {max_retries} tentatives : {e}")
-                    return default_val
-                time.sleep(backoff)
-                backoff *= 2.0
+                    return api_func(*args, **kwargs)
+                if e.code == -1003 or e.code >= 500:
+                    raise e
+                log.error(f"Erreur Binance API (Non-retriable) : {e.message} (code {e.code})")
+                return default_val
+            
+        try:
+            return _retrying_func()
+        except Exception as e:
+            log.error(f"Échec critique après retries : {e}")
+            return default_val
 
     def _init_client(self, api_key=None, api_secret=None, testnet=None):
         """Initialise le client Binance avec gestion du testnet."""
@@ -424,6 +417,29 @@ class BinanceClient(Broker):
         if self._positions_cache is not None and binance_symbol in self._positions_cache:
             return self._positions_cache[binance_symbol]
         return {}
+
+    def get_open_positions(self) -> Dict[str, Any]:
+        """
+        Retourne toutes les positions ouvertes sous la forme {symbol_normalise: position_dict}.
+        Le symbole est normalisé avec '/' pour être compatible avec le reste du bot (ex: 'BTC/USDT').
+        """
+        self._refresh_positions_cache()
+        if not self._positions_cache:
+            return {}
+        # Re-normaliser les clés Binance (ex: 'BTCUSDT') → format interne ('BTC/USDT')
+        normalized = {}
+        for raw_sym, pos in self._positions_cache.items():
+            # Essayer de retrouver la clé originale dans le format /
+            # On insère simplement le '/' avant 'USDT', 'BUSD', 'BTC', 'ETH'
+            display = raw_sym
+            for quote in ["USDT", "BUSD", "USDC", "BTC", "ETH", "BNB"]:
+                if raw_sym.endswith(quote) and raw_sym != quote:
+                    base = raw_sym[:-len(quote)]
+                    display = f"{base}/{quote}"
+                    break
+            normalized[display] = {**pos, 'symbol': display}
+        return normalized
+
 
     def close_position(self, symbol: str, reason: str = "") -> bool:
         """Ferme la position ouverte au prix du marché."""

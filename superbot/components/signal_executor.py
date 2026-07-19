@@ -1,0 +1,285 @@
+import logging
+import time
+from datetime import datetime, timezone
+from superbot.config import MAX_SPREAD_PIPS, MAX_FOREX_CURRENCY_EXPOSURE, BROKER_TYPE
+
+log = logging.getLogger("signal_executor")
+
+def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators):
+    """
+    Valide les filtres macro, calcule la taille de position de manière sécurisée et exécute l'ordre.
+    """
+    bot.stats['signals_generated'] += 1
+    log.info(
+        f"Signal pour {symbol} : {signal_data['market_regime']} | "
+        f"Score: {signal_data['total_score']:.1f} | "
+        f"Long: {signal_data['should_long']} | Short: {signal_data['should_short']} | "
+        f"RR: {signal_data['rr_ratio']:.2f}"
+    )
+
+    # 0. Vérifier le cooldown de l'actif suite à un échec d'exécution
+    with bot._state_lock:
+        in_cooldown = symbol in bot.failed_execution_cooldowns
+        time_since_failure = time.time() - bot.failed_execution_cooldowns.get(symbol, 0) if in_cooldown else 0
+
+    if in_cooldown:
+        if time_since_failure < 900:  # 15 minutes cooldown
+            log.info(f"🚫 Trade {symbol} rejeté : Cooldown d'échec actif (reste {int(900 - time_since_failure)}s)")
+            return
+        else:
+            with bot._state_lock:
+                del bot.failed_execution_cooldowns[symbol]
+            bot._save_cooldowns()
+            
+    # QW-3: Bloquer le pyramidage (Spam BTC) si une position existe déjà
+    if bot.positions.get(symbol, {}).get('size', 0) > 0:
+        log.info(f"🚫 Trade {symbol} rejeté : Position déjà ouverte (pyramidage bloqué).")
+        return
+
+    # 1. Vérifier les filtres de nouvelles et de sentiment
+    should_avoid, news_event = bot.news_manager.should_avoid_trading_due_to_news(symbol)
+    if should_avoid:
+        log.info(f"Trading évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
+        return
+
+    # 2. Récupérer le solde et le prix d'entrée
+    account_balance = float(bot.broker.get_balance())
+    bot._cached_balance = account_balance
+    entry_price = float(signal_data['entry_price'])
+
+    # 2d. Filtres avancés Forex (Session, Spread, Corrélation, Pivots Obstacles, News)
+    if bot.broker.get_asset_type() == 'forex':
+        from superbot.components.forex_filters import (
+            is_london_session, check_spread,
+            check_currency_correlation, check_pivot_obstacle,
+            check_major_news_window
+        )
+
+        # A. Session horaire
+        if not is_london_session():
+            return
+
+        # B. Garde-fou Spread
+        if not check_spread(bot.broker, symbol, MAX_SPREAD_PIPS):
+            return
+
+        # C. Corrélation de devises
+        cand_side = 'LONG' if signal_data.get('should_long') else 'SHORT'
+        if not check_currency_correlation(symbol, bot.positions, MAX_FOREX_CURRENCY_EXPOSURE, cand_side):
+            return
+
+        # D. Obstacle pivot
+        atr_value = df_with_indicators.iloc[-1].get('atr', 0)
+        sl_price, _ = bot.risk_manager.calculate_sl_tp_levels(
+            entry_price, atr_value,
+            "LONG" if signal_data.get('should_long') else "SHORT",
+            asset_type="forex", symbol=symbol
+        )
+        if not check_pivot_obstacle(entry_price, sl_price, df_with_indicators, signal_data.get('should_long', False), symbol):
+            return
+
+        # E. Filtre news économiques majeures (NFP, BCE, FOMC) — NOUVEAU
+        avoid_minutes = bot.config.get('FOREX_NEWS_AVOID_MINUTES', 30) if hasattr(bot, 'config') else 30
+        news_events = bot.news_manager.get_high_impact_events() if bot.news_manager and hasattr(bot.news_manager, 'get_high_impact_events') else None
+        if not check_major_news_window(symbol, avoid_minutes=avoid_minutes, news_events=news_events):
+            return
+
+
+    # 2b. Filtre volume minimum (protection contre le slippage sur actifs illiquides)
+    if bot.broker.get_asset_type() == "crypto":
+        from superbot.components.crypto_filters import check_crypto_volume
+        if not check_crypto_volume(symbol, df_with_indicators):
+            return
+
+    # 2c. Filtre de dominance BTC pour les altcoins
+    # Ne pas ouvrir un SHORT sur un altcoin si BTC est en tendance haussière forte
+    if bot.broker.get_asset_type() == "crypto" and 'BTC' not in symbol.upper():
+        btc_symbol = 'BTC/USDT'
+        if btc_symbol in bot.market_data and not bot.market_data[btc_symbol].empty:
+            btc_df = bot.market_data[btc_symbol]
+            btc_last = btc_df.iloc[-1]
+            btc_ema_fast = btc_last.get('ema_21', btc_last.get('ema_fast', 0))
+            btc_ema_slow = btc_last.get('ema_55', btc_last.get('ema_slow', 0))
+            btc_adx = btc_last.get('adx', 0)
+            btc_bullish_trend = btc_ema_fast > btc_ema_slow and btc_adx > 25
+            btc_bearish_trend = btc_ema_fast < btc_ema_slow and btc_adx > 25
+
+            if signal_data['should_short'] and btc_bullish_trend:
+                log.info(f"🚨 Filtre dominance BTC : SHORT {symbol} rejeté — BTC est en tendance haussière forte (ADX={btc_adx:.1f})")
+                return
+            if signal_data['should_long'] and btc_bearish_trend:
+                log.info(f"🚨 Filtre dominance BTC : LONG {symbol} rejeté — BTC est en tendance baissière forte (ADX={btc_adx:.1f})")
+                return
+
+    # 2e. Blocage double-filet des SHORTs sur ETF/Stocks (Alpaca)
+    # Même si la stratégie laisse passer un SHORT, l'executor bloque en dernière ligne
+    if bot.broker.get_asset_type() in ('stock', 'alpaca', 'equity'):
+        allow_short = getattr(bot, 'config', {}).get('ALLOW_SHORT_STOCK', False)
+        if signal_data.get('should_short') and not allow_short:
+            log.info(f"🚫 SHORT {symbol} bloqué au niveau executor (ETF/Stock — ALLOW_SHORT_STOCK=false)")
+            return
+
+    # 3. Déterminer le stop loss et take profit via le Risk Manager
+    atr_value = float(df_with_indicators.iloc[-1].get('atr', 0))
+    if atr_value > 0 and bot.risk_manager:
+        position_side = "LONG" if signal_data['should_long'] else "SHORT"
+        # ── Phase 3 §2 — Passer le régime HMM pour les multiplicateurs adaptatifs
+        # hmm_label est le label HMM détaillé (ex: 'HIGH_VOL_RANGE') stocké dans signal_data
+        hmm_label = signal_data.get('hmm_label', signal_data.get('market_regime', ''))
+        sl_price, tp_price = bot.risk_manager.calculate_sl_tp_levels(
+            entry_price, atr_value, position_side,
+            asset_type=bot.broker.get_asset_type(),
+            symbol=symbol,
+            hmm_regime=hmm_label
+        )
+    else:
+        # Fallback : utiliser les valeurs calculées par la stratégie
+        sl_price = signal_data.get('sl_price') or (entry_price * 0.98 if signal_data['should_long'] else entry_price * 1.02)
+        tp_price = signal_data.get('tp_price') or (entry_price * 1.04 if signal_data['should_long'] else entry_price * 0.96)
+
+    # ── Phase 3 §4 : Corrélation dynamique avancée ──
+    # Bloquer ou réduire la taille si corrélation > 70% avec une position ouverte
+    max_open_corr = 0.0
+    corr_data = None
+    try:
+        import pandas as pd
+        if len(df_with_indicators) >= 50:
+            current_close = df_with_indicators['close'].tail(50)
+            current_returns = current_close.pct_change().dropna()
+            
+            for open_sym, pos in bot.positions.items():
+                if open_sym != symbol and pos.get('size', 0) > 0:
+                    open_df = bot.market_data.get(open_sym)
+                    if open_df is not None and len(open_df) >= 50:
+                        open_close = open_df['close'].tail(50)
+                        open_returns = open_close.pct_change().dropna()
+                        
+                        min_len = min(len(current_returns), len(open_returns))
+                        if min_len >= 30:
+                            corr = current_returns.tail(min_len).corr(open_returns.tail(min_len))
+                            
+                            # Si sens opposé, corrélation effective inversée
+                            prop_side = "LONG" if signal_data.get('should_long') else "SHORT"
+                            open_side = pos.get('side', 'LONG').upper()
+                            effective_corr = corr if prop_side == open_side else -corr
+                            
+                            if pd.notna(effective_corr) and effective_corr > max_open_corr:
+                                max_open_corr = effective_corr
+    except Exception as e:
+        log.warning(f"Erreur lors du calcul de corrélation avancée pour {symbol} : {e}")
+
+    if max_open_corr >= 0.90:
+        log.info(f"🚫 Trade {symbol} rejeté : Corrélation extrême ({max_open_corr:.2f} >= 0.90) avec une position ouverte.")
+        return
+    elif max_open_corr > 0.70:
+        corr_data = {'average_correlation': max_open_corr}
+        log.info(f"⚠️ Corrélation élevée ({max_open_corr:.2f} > 0.70) détectée pour {symbol} : taille sera réduite.")
+
+    # 3. Calculer la taille de position avec le Risk Manager
+    position_size, size_details = bot.risk_manager.calculate_position_size(
+        account_balance=account_balance,
+        entry_price=entry_price,
+        stop_loss=sl_price,
+        symbol=symbol,
+        sentiment_factor=bot.news_manager.get_risk_factor() if bot.news_manager else 1.0,
+        correlation_data=corr_data,
+        broker=bot.broker,
+        hmm_regime=hmm_label  # Phase 3 §1 — dimensionnement selon le régime HMM
+    )
+
+    log.info(f"Risk sizing {symbol}: size={position_size:.6f} | details={size_details}")
+
+    if position_size <= 0:
+        log.debug(f"Taille de position nulle ou rejetée pour {symbol}, pas d'action")
+        return
+
+    log.info(f"Taille de position calculée pour {symbol} : {position_size:.6f} | Risque : {size_details.get('actual_risk_pct', 0.0):.2f}% du compte")
+
+    # 4. Vérifier les limites de risque globales avant d'envoyer l'ordre
+    if not bot.risk_manager._can_take_new_trade(account_balance, symbol):
+        log.info(f"Limites de risque ou limite par symbole atteintes, pas de nouvel ordre pour {symbol}")
+        return
+
+    # 5. Exécuter le trade chez le courtier
+    side = "buy" if signal_data['should_long'] else "sell"
+    log.info(f"Exécution du trade : {side.upper()} {position_size:.6f} {symbol} @ {entry_price:.4f} | SL: {sl_price:.4f} | TP: {tp_price:.4f}")
+
+    # Placer l'ordre
+    try:
+        order_result = bot.broker.place_order(
+            symbol=symbol,
+            side=side,
+            amount=position_size,
+            sl=sl_price,
+            tp=tp_price,
+            comment=f"SuperBot signal - {signal_data['market_regime']} - Score:{signal_data['total_score']:.1f}"
+        )
+    except Exception as e:
+        log.error(f"⚠️ Chaos intercepté : Exception lors du placement d'ordre pour {symbol} : {e}")
+        order_result = None
+
+    if order_result:
+        bot.stats['trades_executed'] += 1
+        log.info(f"Trade exécuté avec succès pour {symbol}")
+        
+        # ── Phase 3.3 : Alimentation Prometheus ──────────────────────────────
+        if getattr(bot, 'prometheus', None):
+            try:
+                bot.prometheus.bot_trades_executed_total.labels(
+                    symbol=symbol,
+                    side=side.upper()
+                ).inc()
+            except Exception as e:
+                log.debug(f"Erreur incrémentation métrique trades_executed: {e}")
+
+        # Collecter les features techniques pour l'entraînement ultérieur du ML
+        latest_row = df_with_indicators.iloc[-1]
+        close = latest_row.get('close', 1)
+        bb_upper = latest_row.get('bb_upper', close * 1.01)
+        bb_lower = latest_row.get('bb_lower', close * 0.99)
+        bb_pos = (close - bb_lower) / (bb_upper - bb_lower) if (bb_upper - bb_lower) > 0 else 0.5
+        atr_pct = (latest_row.get('atr', 0) / close) * 100 if close > 0 else 0
+
+        features_dict = {
+            'rsi': float(latest_row.get('rsi', 50)),
+            # ── Fix P4 — La colonne s'appelle 'macd_histogram' dans TechnicalIndicators,
+            # mais le trade log utilisait 'macd_hist' (toujours 0).
+            'macd_hist': float(latest_row.get('macd_histogram', latest_row.get('macd_hist', 0))),
+            'adx': float(latest_row.get('adx', 20)),
+            'bb_pos': float(bb_pos),
+            'atr_pct': float(atr_pct)
+        }
+
+        # Enregistrer le trade pour le suivi du risque
+        trade_record = {
+            'symbol': symbol,
+            'side': side,
+            'entry_price': entry_price,
+            'position_size': position_size,
+            'stop_loss': sl_price,
+            'take_profit': tp_price,
+            'initial_risk_amount': abs(entry_price - sl_price) * position_size,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'signal_score': signal_data['total_score'],
+            'market_regime': signal_data['market_regime'],
+            'broker': BROKER_TYPE
+        }
+        # Inclure les indicateurs pour le Walk-Forward et la traçabilité des paramètres
+        trade_record.update(features_dict)
+        # Log les paramètres actifs de la stratégie
+        trade_record['score_min'] = float(bot.strategy.config.get('SCORE_MIN', 6))
+        trade_record['RSI_OB'] = float(bot.strategy.config.get('RSI_OB', 70))
+        trade_record['ADX_TREND'] = float(bot.strategy.config.get('ADX_TREND', 25))
+
+        bot.risk_manager.record_trade(trade_record)
+
+        # Mettre à jour la position suivie
+        bot._update_position_tracking(symbol, side, position_size, entry_price, sl_price, tp_price,
+                                        market_regime=signal_data.get('market_regime', 'UNKNOWN'),
+                                        features=features_dict)
+
+    else:
+        log.error(f"Échec de l'exécution du trade pour {symbol}. Activation du cooldown de 15 minutes.")
+        with bot._state_lock:
+            bot.failed_execution_cooldowns[symbol] = time.time()
+        bot._save_cooldowns()

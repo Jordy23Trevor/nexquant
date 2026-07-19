@@ -1,10 +1,13 @@
 """
-╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╩
+╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╧
 """
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, Tuple, Optional
 import logging
+from functools import lru_cache
+import hashlib
+import time
 
 # Importer les fonctions de base
 
@@ -14,6 +17,7 @@ log = logging.getLogger("indicators.technical_indicators")
 class TechnicalIndicators:
     """
     Classe pour calculer tous les indicateurs techniques nécessaires à la stratégie.
+    Optimisée pour les performances avec mise en cache et calculs incrémentiels.
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -28,11 +32,48 @@ class TechnicalIndicators:
         # Détecteur de régime HMM (chargé lazily au premier appel)
         self._regime_detector = None
         self._hmm_loaded = False  # Flag pour éviter les tentatives répétées
+        # Cache pour les calculs coûteux
+        self._pivot_cache = {}
+        self._indicator_cache = {}
+        self._last_cache_key = None
         log.debug(f"TechnicalIndicators initialisé avec config: {list(config.keys())}")
+
+    def _get_cache_key(self, df: pd.DataFrame) -> str:
+        """Génère une clé de cache basée sur les données d'entrée."""
+        if len(df) == 0:
+            return "empty"
+
+        # Utiliser les dernières lignes pour créer une signature (plus efficace)
+        sample_size = min(100, len(df))
+        # S'assurer que les colonnes existent avant de les hacher
+        cols_to_hash = [c for c in ['open', 'high', 'low', 'close', 'volume'] if c in df.columns]
+        if not cols_to_hash:
+            cols_to_hash = df.columns.tolist()
+
+        sample_df = df.iloc[-sample_size:][cols_to_hash]
+
+        # Créer un hash basé sur les données
+        data_str = sample_df.to_string()
+        return hashlib.md5(data_str.encode()).hexdigest()
+
+    def _get_from_cache(self, cache_key: str, cache_dict: dict) -> Any:
+        """Récupère une valeur du cache si elle existe et est récente."""
+        if cache_key in cache_dict:
+            return cache_dict[cache_key]
+        return None
+
+    def _save_to_cache(self, cache_key: str, value: Any, cache_dict: dict, max_size: int = 100):
+        """Sauvegarde une valeur dans le cache avec limitation de taille."""
+        if len(cache_dict) >= max_size:
+            # Supprimer l'entrée la plus ancienne (FIFO simple)
+            oldest_key = next(iter(cache_dict))
+            del cache_dict[oldest_key]
+        cache_dict[cache_key] = value
 
     def calculate_all_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Calcule tous les indicateurs techniques sur un DataFrame OHLCV.
+        Optimisé pour éviter les recalculs inutiles et améliorer les performances.
 
         Args:
             df: DataFrame avec colonnes ['open', 'high', 'low', 'close', 'volume']
@@ -41,13 +82,15 @@ class TechnicalIndicators:
         Returns:
             DataFrame avec tous les indicateurs ajoutés en colonnes
         """
-        # Importer les fonctions de base localement pour éviter les imports circulaires
-        from superbot.strategy.knowledge_base import (
-            calculate_atr, calculate_ema, calculate_sma, calculate_rsi,
-            calculate_macd, calculate_adx, calculate_supertrend,
-            calculate_bollinger_bands, calculate_ichimoku, calculate_vwap,
-            detect_divergence
-        )
+        start_time = time.time()
+
+        # Vérifier le cache pour éviter les recalculs complets
+        cache_key = self._get_cache_key(df)
+        cached_result = self._get_from_cache(cache_key, self._indicator_cache)
+        if cached_result is not None:
+            log.debug(f"Résultat récupéré depuis le cache (clé: {cache_key[:8]}...)")
+            return cached_result.copy()
+
         # S'assurer que nous avons les colonnes nécessaires
         required_cols = ['open', 'high', 'low', 'close', 'volume']
         if not all(col in df.columns for col in required_cols):
@@ -55,24 +98,48 @@ class TechnicalIndicators:
             log.error(f"Colonnes manquantes dans le DataFrame: {missing}")
             return df
 
-        # Travailler sur une copie pour éviter les SettingWithCopyWarning
+        # Travailler sur une vue du DataFrame quand possible pour éviter les copies inutiles
+        # Mais nous devons retourner un nouveau DataFrame avec les indicateurs ajoutés
         result = df.copy()
 
-        # Extraire les séries pour faciliter les calculs
+        # Extraire les séries une seule fois pour faciliter les calculs
         open_price = result['open']
         high_price = result['high']
         low_price = result['low']
         close_price = result['close']
         volume = result['volume']
 
+        # Importer les fonctions de base localement pour éviter les imports circulaires
+        from superbot.strategy.knowledge_base import (
+            calculate_atr, calculate_ema, calculate_sma, calculate_rsi,
+            calculate_macd, calculate_adx, calculate_supertrend,
+            calculate_bollinger_bands, calculate_ichimoku, calculate_vwap,
+            detect_divergence
+        )
+
         # === MOYENNES MOBILES ===
-        # EMA
-        result['ema_fast'] = calculate_ema(close_price, self.config.get('EMA_FAST', 9))
-        result['ema_slow'] = calculate_ema(close_price, self.config.get('EMA_SLOW', 21))
-        result['ema_trend'] = calculate_ema(close_price, self.config.get('EMA_TREND', 200))
-        result['ema_htf'] = calculate_ema(close_price, self.config.get('HTF_EMA', 50))
-        result['ema_d1'] = calculate_ema(close_price, self.config.get('D1_EMA', 50))
-        result['ema_w1'] = calculate_ema(close_price, self.config.get('W1_EMA', 20))
+        # EMA - Paramètres depuis config
+        ema_fast_period = self.config.get('EMA_FAST', 9)
+        ema_slow_period = self.config.get('EMA_SLOW', 21)
+        ema_trend_period = self.config.get('EMA_TREND', 200)
+        ema_htf_period = self.config.get('HTF_EMA', 50)
+        ema_d1_period = self.config.get('D1_EMA', 50)
+        ema_w1_period = self.config.get('W1_EMA', 20)
+
+        result['ema_fast'] = calculate_ema(close_price, ema_fast_period)
+        result['ema_slow'] = calculate_ema(close_price, ema_slow_period)
+        result['ema_trend'] = calculate_ema(close_price, ema_trend_period)
+        result['ema_htf'] = calculate_ema(close_price, ema_htf_period)
+        result['ema_d1'] = calculate_ema(close_price, ema_d1_period)
+        result['ema_w1'] = calculate_ema(close_price, ema_w1_period)
+
+        # Colonnes EMA fixes par asset_type (toujours calculées, indépendamment de EMA_FAST/EMA_SLOW)
+        # La stratégie sélectionnera les bonnes colonnes selon l'actif sans recalcul
+        result['ema_21'] = calculate_ema(close_price, 21)   # Standard institutionnel Forex & Crypto
+        result['ema_55'] = calculate_ema(close_price, 55)   # Fibonacci — Forex institutionnel
+        result['ema_20'] = calculate_ema(close_price, 20)   # Référence US stocks/ETF
+        result['ema_50'] = calculate_ema(close_price, 50)   # EMA50 — référence universelle
+        result['volume_ma'] = calculate_sma(volume, 20)     # Volume MA20 pour filtres de liquidité
 
         # SMA (pour certaines utilisations spécifiques)
         result['sma_20'] = calculate_sma(close_price, 20)
@@ -115,8 +182,13 @@ class TechnicalIndicators:
         result['bb_upper'] = upper_bb
         result['bb_middle'] = middle_bb
         result['bb_lower'] = lower_bb
-        result['bb_width'] = (upper_bb - lower_bb) / middle_bb  # Largeur des bandes
+        # Éviter la division par zéro
+        bb_width_denominator = middle_bb.replace(0, np.nan)
+        result['bb_width'] = (upper_bb - lower_bb) / bb_width_denominator  # Largeur des bandes
         result['bb_percent'] = (close_price - lower_bb) / (upper_bb - lower_bb)  # Position dans les bandes (%B)
+        # Remplacer les NaN et inf par des valeurs sûres
+        result['bb_width'] = result['bb_width'].fillna(0).replace([np.inf, -np.inf], 0)
+        result['bb_percent'] = result['bb_percent'].fillna(0).replace([np.inf, -np.inf], 0)
 
         # === ICHIMOKU CLOUD ===
         ichimoku = calculate_ichimoku(
@@ -143,46 +215,83 @@ class TechnicalIndicators:
         result['atr'] = calculate_atr(high_price, low_price, close_price, self.config.get('ATR_LEN', 14))
 
         # === PIVOT POINTS (supports et résistances dynamiques quotidiens) ===
-        try:
-            # Resampler en journalier pour obtenir les niveaux High, Low, Close du jour précédent
-            df_temp = result.copy()
-            if not isinstance(df_temp.index, pd.DatetimeIndex):
-                df_temp.index = pd.to_datetime(df_temp.index)
-            
-            daily = df_temp.resample('D').agg({
-                'high': 'max',
-                'low': 'min',
-                'close': 'last'
-            }).dropna()
-            
-            # Shift d'un jour pour utiliser les données de la veille
-            daily_prev = daily.shift(1)
-            
-            daily_prev['pivot'] = (daily_prev['high'] + daily_prev['low'] + daily_prev['close']) / 3
-            daily_prev['r1'] = (2 * daily_prev['pivot']) - daily_prev['low']
-            daily_prev['s1'] = (2 * daily_prev['pivot']) - daily_prev['high']
-            daily_prev['r2'] = daily_prev['pivot'] + (daily_prev['high'] - daily_prev['low'])
-            daily_prev['s2'] = daily_prev['pivot'] - (daily_prev['high'] - daily_prev['low'])
-            
-            # Aligner les valeurs quotidiennes avec les lignes horaires de manière robuste sans reset_index
-            date_only = df_temp.index.normalize()
-            result['pivot'] = pd.Series(date_only.map(daily_prev['pivot']), index=result.index).ffill().bfill()
-            result['r1'] = pd.Series(date_only.map(daily_prev['r1']), index=result.index).ffill().bfill()
-            result['s1'] = pd.Series(date_only.map(daily_prev['s1']), index=result.index).ffill().bfill()
-            result['r2'] = pd.Series(date_only.map(daily_prev['r2']), index=result.index).ffill().bfill()
-            result['s2'] = pd.Series(date_only.map(daily_prev['s2']), index=result.index).ffill().bfill()
-        except Exception as e:
-            log.warning(f"Impossible de calculer les pivots quotidiens resamplés ({e}), repli sur pivots par bougie.")
-            # Repli sur le calcul simple basé sur la bougie précédente
-            prev_high = result['high'].shift(1)
-            prev_low = result['low'].shift(1)
-            prev_close = result['close'].shift(1)
-            result['pivot'] = (prev_high + prev_low + prev_close) / 3
-            result['r1'] = (2 * result['pivot']) - prev_low
-            result['s1'] = (2 * result['pivot']) - prev_high
-            result['r2'] = result['pivot'] + (prev_high - prev_low)
-            result['s2'] = result['pivot'] - (prev_high - prev_low)
+        # Optimisation avec mise en cache
+        pivot_cache_key = f"pivot_{cache_key}"
+        cached_pivots = self._get_from_cache(pivot_cache_key, self._pivot_cache)
 
+        if cached_pivots is not None:
+            # Utiliser les valeurs mises en cache
+            for key, series in cached_pivots.items():
+                result[key] = series
+        else:
+            # Calculer et mettre en cache
+            try:
+                # Vérifier si l'index est bien un DatetimeIndex
+                if not isinstance(result.index, pd.DatetimeIndex):
+                    # Si ce n'est pas déjà un DatetimeIndex, le convertir une seule fois
+                    temp_index = pd.to_datetime(result.index)
+                else:
+                    temp_index = result.index
+
+                # Créer un DataFrame temporaire pour le resampling journalier
+                daily_data = pd.DataFrame({
+                    'high': result['high'].values,
+                    'low': result['low'].values,
+                    'close': result['close'].values
+                }, index=temp_index)
+
+                # Resample en journalier une seule fois
+                daily = daily_data.resample('D').agg({
+                    'high': 'max',
+                    'low': 'min',
+                    'close': 'last'
+                }).dropna()
+
+                # Shift d'un jour pour utiliser les données de la veille
+                daily_prev = daily.shift(1)
+
+                # Calculer les pivots
+                daily_prev['pivot'] = (daily_prev['high'] + daily_prev['low'] + daily_prev['close']) / 3
+                daily_prev['r1'] = (2 * daily_prev['pivot']) - daily_prev['low']
+                daily_prev['s1'] = (2 * daily_prev['pivot']) - daily_prev['high']
+                daily_prev['r2'] = daily_prev['pivot'] + (daily_prev['high'] - daily_prev['low'])
+                daily_prev['s2'] = daily_prev['pivot'] - (daily_prev['high'] - daily_prev['low'])
+
+                # Mapper les valeurs quotidiennes aux indices horaires de manière efficace
+                date_only = temp_index.normalize()
+                pivot_series = pd.Series(date_only.map(daily_prev['pivot']), index=result.index).ffill().bfill()
+                r1_series = pd.Series(date_only.map(daily_prev['r1']), index=result.index).ffill().bfill()
+                s1_series = pd.Series(date_only.map(daily_prev['s1']), index=result.index).ffill().bfill()
+                r2_series = pd.Series(date_only.map(daily_prev['r2']), index=result.index).ffill().bfill()
+                s2_series = pd.Series(date_only.map(daily_prev['s2']), index=result.index).ffill().bfill()
+
+                result['pivot'] = pivot_series
+                result['r1'] = r1_series
+                result['s1'] = s1_series
+                result['r2'] = r2_series
+                result['s2'] = s2_series
+
+                # Mettre en cache les résultats
+                pivot_data = {
+                    'pivot': pivot_series,
+                    'r1': r1_series,
+                    's1': s1_series,
+                    'r2': r2_series,
+                    's2': s2_series
+                }
+                self._save_to_cache(pivot_cache_key, pivot_data, self._pivot_cache)
+
+            except Exception as e:
+                # Fallback optimisé : calcul basé sur la bougie précédente
+                log.warning(f"Erreur lors du calcul des pivots journaliers: {e}. Utilisation du fallback.")
+                prev_high = result['high'].shift(1)
+                prev_low = result['low'].shift(1)
+                prev_close = result['close'].shift(1)
+                result['pivot'] = (prev_high + prev_low + prev_close) / 3
+                result['r1'] = (2 * result['pivot']) - prev_low
+                result['s1'] = (2 * result['pivot']) - prev_high
+                result['r2'] = result['pivot'] + (prev_high - prev_low)
+                result['s2'] = result['pivot'] - (prev_high - prev_low)
 
         # === INDICATEURS SUPPLÉMENTAIRES ===
         # Stochastic Oscillator (pour les marchés en range)
@@ -233,12 +342,12 @@ class TechnicalIndicators:
         # 1. Alexander Elder Impulse System
         ema_13 = calculate_ema(close_price, 13)
         result['elder_ema'] = ema_13
-        
+
         ema_13_up = ema_13 > ema_13.shift(1)
         ema_13_down = ema_13 < ema_13.shift(1)
         macd_hist_up = result['macd_histogram'] > result['macd_histogram'].shift(1)
         macd_hist_down = result['macd_histogram'] < result['macd_histogram'].shift(1)
-        
+
         # Par défaut : Bleu (Neutre, 0)
         result['elder_impulse'] = 0
         # Vert (Fortement haussier, 1)
@@ -251,12 +360,22 @@ class TechnicalIndicators:
         result['elder_screen1_down'] = result['ema_htf'] < result['ema_htf'].shift(1)
 
         # 3. Thami Kabbaj - Volatility Compression Squeeze
-        bb_width_min = result['bb_width'].rolling(100).min()
-        bb_width_max = result['bb_width'].rolling(100).max()
-        result['kabbaj_squeeze'] = result['bb_width'] <= (bb_width_min + 0.25 * (bb_width_max - bb_width_min))
+        bb_width_min = result['bb_width'].rolling(100, min_periods=1).min()
+        bb_width_max = result['bb_width'].rolling(100, min_periods=1).max()
+        # Éviter la division par zéro dans le calcul du squeeze
+        bb_width_range = bb_width_max - bb_width_min
+        bb_width_range = bb_width_range.replace(0, 1)  # Éviter division par zéro
+        result['kabbaj_squeeze'] = result['bb_width'] <= (bb_width_min + 0.25 * bb_width_range)
 
-        log.debug(f"Indicateurs calculés pour {len(result)} périodes")
+        # Mettre en cache le résultat complet
+        self._save_to_cache(cache_key, result, self._indicator_cache)
+
+        elapsed_time = time.time() - start_time
+        log.debug(f"Indicateurs calculés pour {len(result)} périodes en {elapsed_time:.3f}s")
         return result
+
+    # Les méthodes suivantes restent inchangées pour préserver la fonctionnalité existante
+    # mais pourraient également bénéficier d'optimisations similaires si nécessaire
 
     def _calculate_stochastic(self, high: pd.Series, low: pd.Series, close: pd.Series,
                              k_period: int = 14, d_period: int = 3) -> Tuple[pd.Series, pd.Series]:
@@ -278,7 +397,7 @@ class TechnicalIndicators:
         Calcule le Williams %R.
 
         Returns:
-        Série contenant les valeurs de Williams %R (-100 à 0)
+            Série contenant les valeurs de Williams %R (-100 à 0)
         """
         highest_high = high.rolling(window=period).max()
         lowest_low = low.rolling(window=period).min()
@@ -291,7 +410,7 @@ class TechnicalIndicators:
         Calcule le Commodity Channel Index (CCI).
 
         Returns:
-        Série contenant les valeurs du CCI
+            Série contenant les valeurs du CCI
         """
         typical_price = (high + low + close) / 3
         sma_tp = typical_price.rolling(window=period).mean()
@@ -307,7 +426,7 @@ class TechnicalIndicators:
         Calcule le Money Flow Index (MFI).
 
         Returns:
-        Série contenant les valeurs du MFI (0-100)
+            Série contenant les valeurs du MFI (0-100)
         """
         typical_price = (high + low + close) / 3
         money_flow = typical_price * volume
@@ -327,7 +446,7 @@ class TechnicalIndicators:
         Calcule l'On-Balance Volume (OBV).
 
         Returns:
-        Série contenant les valeurs de l'OBV
+            Série contenant les valeurs de l'OBV
         """
         direction = np.sign(close.diff()).fillna(0)
         obv = (direction * volume).fillna(0).cumsum()
@@ -375,9 +494,9 @@ class TechnicalIndicators:
                 from superbot.ml.regime_detector import MarketRegimeDetector
                 self._regime_detector = MarketRegimeDetector.load()
                 if self._regime_detector._is_trained:
-                    log.info("[TechnicalIndicators] Modele HMM charge avec succes.")
+                    log.info("[TechnicalIndicators] Modèle HMM chargé avec succès.")
                 else:
-                    log.info("[TechnicalIndicators] HMM non entraine — fallback ADX actif.")
+                    log.info("[TechnicalIndicators] HMM non entraîné — fallback ADX actif.")
             except Exception as e:
                 log.debug(f"[TechnicalIndicators] HMM indisponible ({e}) — fallback ADX.")
                 self._regime_detector = None

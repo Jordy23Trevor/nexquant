@@ -119,7 +119,7 @@ nexquant/
 
 | Variable | Description | Valeur Recommandée |
 |---|---|---|
-| `BROKER_TYPE` | Courtier actif (`binance`, `mt5`, `alpaca`, `paper_forex`) | `mt5` (Forex Live) / `paper_forex` (Test) |
+| `BROKER_TYPE` | Courtier actif (`binance`, `mt5`, `alpaca`) | `mt5` (Forex Live) / `alpaca` (Test ETFs) |
 | `RISK_PCT` | Capital risqué par transaction | `1.0` % (conservateur) |
 | `MAX_FOREX_CURRENCY_EXPOSURE` | Nombre maximal de positions exposées à une même devise | `1` |
 | `MAX_SPREAD_PIPS` | Spread maximum en pips toléré pour entrer en position | `1.5` ou `2.0` |

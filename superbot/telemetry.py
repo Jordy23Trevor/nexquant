@@ -250,5 +250,46 @@ class TelemetryLoggingHandler(logging.Handler):
             pass
 
 
+from prometheus_client import start_http_server, Gauge, Counter, Histogram
+
+class PrometheusExporter:
+    """
+    Phase 3.3 : Exportateur de métriques Prometheus.
+    Expose le endpoint /metrics pour le scraping par un serveur Prometheus.
+    """
+    _instance = None
+    
+    def __new__(cls, port=8000):
+        if cls._instance is None:
+            cls._instance = super(PrometheusExporter, cls).__new__(cls)
+            cls._instance.port = port
+            cls._instance.is_running = False
+            cls._instance._init_metrics()
+        return cls._instance
+        
+    def _init_metrics(self):
+        # Gauges (Valeurs qui montent et descendent)
+        self.bot_balance = Gauge('bot_balance', 'Solde actuel du compte de trading')
+        self.bot_pnl_session = Gauge('bot_pnl_session', 'PnL de la session en cours')
+        self.bot_drawdown_pct = Gauge('bot_drawdown_pct', 'Drawdown maximum actuel en pourcentage')
+        self.bot_open_positions = Gauge('bot_open_positions', 'Nombre de positions actuellement ouvertes')
+        
+        # Counters (Valeurs qui ne font qu'augmenter)
+        self.bot_api_errors_total = Counter('bot_api_errors_total', 'Nombre total derreurs API', ['broker', 'error_code'])
+        self.bot_trades_executed_total = Counter('bot_trades_executed_total', 'Nombre total de trades executes', ['symbol', 'side'])
+        
+        # Histograms
+        self.bot_cycle_duration_seconds = Histogram('bot_cycle_duration_seconds', 'Duree dun cycle dexecution complet en secondes')
+        
+    def start(self):
+        if not self.is_running:
+            try:
+                start_http_server(self.port)
+                self.is_running = True
+                log.info(f"🚀 Prometheus Exporter demarre sur le port {self.port} (endpoint /metrics)")
+            except Exception as e:
+                log.error(f"Erreur au demarrage de Prometheus Exporter: {e}")
+
+
 # Export des classes publiques
-__all__ = ['TelemetryClient', 'TelemetryLoggingHandler']
+__all__ = ['TelemetryClient', 'TelemetryLoggingHandler', 'PrometheusExporter']

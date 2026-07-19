@@ -23,3 +23,6 @@ vaderSentiment>=3.3.2     # Analyse de sentiment rapide (CPU, sans GPU)
 feedparser>=6.0.0         # Scraping des flux RSS financiers (Reuters, Yahoo, etc.)
 # transformers>=4.40.0    # FinBERT avancé — décommenter si GPU disponible
 # torch>=2.2.0            # PyTorch pour FinBERT — décommenter si GPU disponible
+
+pytest
+pytest-mock

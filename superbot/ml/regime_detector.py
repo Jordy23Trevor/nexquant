@@ -5,7 +5,7 @@ Classifie le régime de marché en 3 états cachés via un modèle HMM
 (Hidden Markov Model à émissions gaussiennes).
 
 Architecture :
-  - 3 états cachés : BULLISH_STABLE, BEARISH_VOLATILE, RANGING_QUIET
+  - 4 états cachés : BULLISH_TREND, BEARISH_TREND, LOW_VOL_RANGE, HIGH_VOL_RANGE
   - 5 features extraites des bougies OHLCV
   - Entraînement hors-ligne via train_regime.py
   - Prédiction en temps réel avec score de confiance (probabilité de l'état)
@@ -19,9 +19,10 @@ Features utilisées (toutes normalisées via StandardScaler) :
   5. adx_delta_5       : Variation de l'ADX sur 5 périodes (accélération de tendance)
 
 Mapping des états vers les régimes NexQuant :
-  - BULLISH_STABLE    -> 'TRENDING'  (haussier stable, faible vol, momentum positif)
-  - BEARISH_VOLATILE  -> 'RANGING'   (baissier volatil, bloque les achats)
-  - RANGING_QUIET     -> 'RANGING'   (consolidation calme, pas de direction claire)
+  - BULLISH_TREND    -> 'TRENDING'
+  - BEARISH_TREND    -> 'TRENDING'
+  - LOW_VOL_RANGE    -> 'RANGING'
+  - HIGH_VOL_RANGE   -> 'RANGING'
 
 Utilisation :
     detector = MarketRegimeDetector()
@@ -48,25 +49,26 @@ MODEL_DIR = Path(__file__).parent.parent / "resources"
 DEFAULT_MODEL_PATH = MODEL_DIR / "hmm_regime_model.pkl"
 
 # Noms des états (ordre déterminé post-entraînement par caractéristiques)
-STATE_NAMES = {0: "BULLISH_STABLE", 1: "BEARISH_VOLATILE", 2: "RANGING_QUIET"}
+STATE_NAMES = {0: "BULLISH_TREND", 1: "BEARISH_TREND", 2: "LOW_VOL_RANGE", 3: "HIGH_VOL_RANGE"}
 
 # Mapping état -> régime NexQuant
 REGIME_MAP = {
-    "BULLISH_STABLE":   "TRENDING",
-    "BEARISH_VOLATILE": "RANGING",
-    "RANGING_QUIET":    "RANGING",
+    "BULLISH_TREND":   "TRENDING",
+    "BEARISH_TREND":   "TRENDING",
+    "LOW_VOL_RANGE":   "RANGING",
+    "HIGH_VOL_RANGE":  "RANGING",
 }
 
 
 class MarketRegimeDetector:
     """
-    Détecteur de régime de marché basé sur un HMM gaussien à 3 états.
+    Détecteur de régime de marché basé sur un HMM gaussien à 4 états.
 
-    Le modèle identifie automatiquement 3 phases de marché distinctes
+    Le modèle identifie automatiquement 4 phases de marché distinctes
     à partir de l'historique OHLCV, sans supervision humaine.
     """
 
-    N_STATES = 3
+    N_STATES = 4
     N_ITER = 200           # Itérations EM pour la convergence
     N_FEATURES = 5         # Nombre de features extraites
     MIN_BARS_FOR_FIT = 200 # Minimum de bougies pour entraîner
@@ -378,15 +380,7 @@ class MarketRegimeDetector:
     # ─── Labellisation automatique des états ──────────────────────────────────
 
     def _label_states(self, X: np.ndarray, states: np.ndarray, df_valid: pd.DataFrame):
-        """
-        Assigne automatiquement un label sémantique à chaque état HMM
-        en fonction des caractéristiques statistiques observées dans cet état.
-
-        Logique :
-          - Rendement log moyen > 0 ET volatilité faible → BULLISH_STABLE
-          - Rendement log moyen < 0 ET volatilité élevée → BEARISH_VOLATILE
-          - Reste → RANGING_QUIET
-        """
+        # Assigne automatiquement un label sémantique à 4 états
         state_stats = {}
         for s in range(self.N_STATES):
             mask = states == s
@@ -399,18 +393,33 @@ class MarketRegimeDetector:
                 "count": int(mask.sum()),
             }
 
-        # Trier pour labelliser
-        # Meilleur rendement + faible volatilité = BULLISH_STABLE
-        scores = {
-            s: stats["mean_ret"] - stats["mean_vol"]  # Ratio Sharpe simplifié
-            for s, stats in state_stats.items()
-        }
-        sorted_states = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-
         self._state_labels = {}
-        label_options = ["BULLISH_STABLE", "RANGING_QUIET", "BEARISH_VOLATILE"]
-        for rank, (state_id, _) in enumerate(sorted_states):
-            self._state_labels[state_id] = label_options[rank]
+        
+        if len(state_stats) < 4:
+            # Fallback en cas de non convergence sur 4 états (ex: peu de données)
+            for s in state_stats:
+                self._state_labels[s] = f"STATE_{s}"
+            return
+            
+        # 1. Trier par volatilité pour identifier LOW_VOL_RANGE et HIGH_VOL_RANGE
+        sorted_by_vol = sorted(state_stats.items(), key=lambda x: x[1]["mean_vol"])
+        low_vol_state = sorted_by_vol[0][0]      # La plus faible vol
+        high_vol_state = sorted_by_vol[-1][0]    # La plus forte vol
+        
+        self._state_labels[low_vol_state] = "LOW_VOL_RANGE"
+        self._state_labels[high_vol_state] = "HIGH_VOL_RANGE"
+        
+        # 2. Les deux états restants sont classés par rendement pour BULLISH/BEARISH
+        remaining_states = [s[0] for s in sorted_by_vol[1:-1]]
+        if state_stats[remaining_states[0]]["mean_ret"] > state_stats[remaining_states[1]]["mean_ret"]:
+            bullish_state = remaining_states[0]
+            bearish_state = remaining_states[1]
+        else:
+            bullish_state = remaining_states[1]
+            bearish_state = remaining_states[0]
+            
+        self._state_labels[bullish_state] = "BULLISH_TREND"
+        self._state_labels[bearish_state] = "BEARISH_TREND"
 
         log.info(f"[HMM] Labels assignés automatiquement : {self._state_labels}")
         for s, stats in state_stats.items():
