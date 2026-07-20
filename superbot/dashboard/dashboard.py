@@ -61,6 +61,37 @@ def load_global_trades():
         except Exception as e:
             log.error(f"Erreur lors de la lecture de {trades_file} : {e}")
 
+    # Dédupliquer les trades pour éviter d'afficher le même trade en double (ex: s'il est présent dans trades.jsonl et trades_*.jsonl)
+    seen_trades = set()
+    deduped_trades = []
+    for t in raw_trades:
+        ts = t.get('timestamp', '')
+        if isinstance(ts, str) and 'T' in ts:
+            ts = ts.split('.')[0]
+        
+        pnl = t.get('pnl')
+        pnl_val = round(float(pnl), 4) if pnl is not None else None
+        
+        entry = t.get('entry_price')
+        entry_val = round(float(entry), 4) if entry is not None else None
+        
+        qty = t.get('qty') or t.get('size')
+        qty_val = round(float(qty), 6) if qty is not None else None
+        
+        key = (
+            t.get('symbol'),
+            t.get('side'),
+            t.get('status'),
+            ts,
+            pnl_val,
+            entry_val,
+            qty_val
+        )
+        if key not in seen_trades:
+            seen_trades.add(key)
+            deduped_trades.append(t)
+    raw_trades = deduped_trades
+
     # Trier par timestamp pour reconstruire l'état correctement
     from datetime import timezone as _tz
     def parse_time(t):

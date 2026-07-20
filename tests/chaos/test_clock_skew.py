@@ -10,11 +10,15 @@ class FakeBroker:
         self.account_type = "PAPER"
     def get_balance(self): return 10000.0
     def get_asset_type(self): return "crypto"
-    def get_symbol_limits(self, symbol): return {}
+    def get_symbol_limits(self, symbol): return {'min_qty': 0.001, 'step_size': 0.001, 'max_qty': 1000.0, 'max_nominal': float('inf')}
     def get_leverage(self, symbol=None): return 1.0
     def get_free_margin(self): return 10000.0
-    def get_symbol_info(self, symbol): return {}
+    def get_symbol_info(self, symbol): return {'tick_size': 1.0, 'contract_size': 1.0}
+    def get_min_order_size(self, symbol): return 0.001
     def get_account_summary(self): return {"equity": 10000.0}
+    def get_position(self, symbol): return None
+    def cancel_all_orders(self, symbol): pass
+    def get_trade_history(self, days=1): return []
     def __getattr__(self, name):
         if "size" in name or "min" in name or "max" in name or "step" in name:
             return lambda *a, **k: 0.001
@@ -23,11 +27,13 @@ class FakeBroker:
 @pytest.fixture
 def mock_bot(monkeypatch):
     monkeypatch.setenv("BROKER_TYPE", "paper")
-    bot = SuperBot()
-    bot.broker = FakeBroker()
-    if bot.risk_manager:
-        bot.risk_manager.broker = bot.broker
-    return bot
+    fake = FakeBroker()
+    with patch('superbot.orchestrator.create_broker', return_value=fake):
+        bot = SuperBot()
+        bot.broker = fake
+        if bot.risk_manager:
+            bot.risk_manager.broker = bot.broker
+        return bot
 
 def test_daily_reset_on_clock_skew(mock_bot):
     """

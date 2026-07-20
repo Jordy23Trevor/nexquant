@@ -238,13 +238,13 @@ class RiskManager:
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour de la position {symbol}: {e}")
 
-    def _check_trailing_stop(self, pos: dict, current_price: float):
+    def _check_trailing_stop(self, symbol: str, pos: dict, current_price: float):
         from superbot.risk.modules.stop_manager import _check_trailing_stop
-        return _check_trailing_stop(self, pos, current_price)
+        return _check_trailing_stop(self, symbol, pos, current_price)
 
-    def _check_break_even(self, pos: dict, current_price: float):
+    def _check_break_even(self, symbol: str, pos: dict, current_price: float):
         from superbot.risk.modules.stop_manager import _check_break_even
-        return _check_break_even(self, pos, current_price)
+        return _check_break_even(self, symbol, pos, current_price)
 
     def get_risk_metrics(self, account_balance: float) -> Dict[str, Any]:
         from superbot.risk.modules.risk_monitor import get_risk_metrics

@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 import time
 from superbot.orchestrator import SuperBot
 
@@ -25,6 +25,12 @@ class FakeBroker:
         raise Exception("API Timeout (Simulé Chaos Engineering)")
     def get_account_summary(self):
         return {"equity": 10000.0}
+    def get_position(self, symbol):
+        return None
+    def cancel_all_orders(self, symbol):
+        pass
+    def get_trade_history(self, days=1):
+        return []
     def __getattr__(self, name):
         # Pour intercepter n'importe quel autre appel et renvoyer une valeur dummy
         if "size" in name or "min" in name or "max" in name or "step" in name:
@@ -34,14 +40,16 @@ class FakeBroker:
 @pytest.fixture
 def mock_bot(monkeypatch):
     monkeypatch.setenv("BROKER_TYPE", "paper")
-    bot = SuperBot()
-    bot.broker = FakeBroker()
-    
-    # Synchroniser le mock avec le risk manager
-    if bot.risk_manager:
-        bot.risk_manager.broker = bot.broker
-    
-    return bot
+    fake = FakeBroker()
+    with patch('superbot.orchestrator.create_broker', return_value=fake):
+        bot = SuperBot()
+        bot.broker = fake
+        
+        # Synchroniser le mock avec le risk manager
+        if bot.risk_manager:
+            bot.risk_manager.broker = bot.broker
+        
+        return bot
 
 def test_broker_network_failure_handling(mock_bot):
     """

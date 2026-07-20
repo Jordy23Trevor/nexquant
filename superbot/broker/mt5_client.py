@@ -345,6 +345,36 @@ class MT5Client(Broker):
             "margin_used": 0.0,
         }
 
+    def get_open_positions(self) -> List[Dict[str, Any]]:
+        """
+        Retourne toutes les positions ouvertes sur le compte MT5.
+        Utilisé par GhostCleaner pour la validation cross-référence.
+        """
+        raw_positions = self._call_api(mt5.positions_get, [])
+        if not raw_positions:
+            return []
+
+        result = []
+        for pos in raw_positions:
+            try:
+                info = self._call_api(lambda: mt5.symbol_info(pos.symbol), None)
+                contract_size = info.trade_contract_size if info and info.trade_contract_size > 0 else 100000.0
+                size_units = pos.volume * contract_size
+                side = "LONG" if pos.type == mt5.POSITION_TYPE_BUY else "SHORT"
+                result.append({
+                    "symbol": pos.symbol,
+                    "ticket": pos.ticket,
+                    "side": side,
+                    "size": size_units,
+                    "entry_price": pos.price_open,
+                    "stop_loss": pos.sl,
+                    "take_profit": pos.tp,
+                    "unrealized_pnl": pos.profit,
+                })
+            except Exception as e:
+                log.warning(f"get_open_positions: erreur lors du traitement de la position {pos.symbol}: {e}")
+        return result
+
     def close_position(self, symbol: str, reason: str = "") -> bool:
         """Ferme toutes les positions ouvertes sur un symbole."""
         symbol = self.normalize_symbol(symbol)
