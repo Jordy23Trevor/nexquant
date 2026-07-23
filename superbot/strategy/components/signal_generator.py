@@ -59,6 +59,18 @@ def _check_entry_triggers(
                     latest.get('rsi', 50) < 65
                 )
 
+            # ── TRIGGER CONTINUATION (nouveau) ──────────────────────────────────
+            # Permet d'entrer sur une tendance déjà établie sans attendre un croisement EMA/MACD/ST rare.
+            # Conditions : EMA fast > slow, Supertrend haussier, prix > EMA lente, RSI entre 45-65 (momentum sain)
+            # Évite le biais de non-entry quand le bot rate le croisement initial mais la tendance continue.
+            continuation_long = (
+                ema_f_now > ema_s_now and
+                latest.get('supertrend_trend', 0) > 0 and
+                latest['close'] > ema_s_now and
+                45 <= latest.get('rsi', 50) <= 68 and
+                latest.get('macd', 0) > 0  # MACD positif = momentum haussier confirmé
+            )
+
             # --- FOREX spécifique : ajouter Inside Bar / Pin Bar comme trigger ---
             # L'Inside Bar signale une compression avant breakout haussier
             inside_bar_long = False
@@ -93,7 +105,7 @@ def _check_entry_triggers(
             _screen1_val = latest.get('elder_screen1_up', None)
             elder_screen1_ok = (_screen1_val is None) or bool(_screen1_val)
 
-            base_trigger = (ema_cross or macd_cross or supertrend_up or pullback_long)
+            base_trigger = (ema_cross or macd_cross or supertrend_up or pullback_long or continuation_long)
             forex_trigger = base_trigger or inside_bar_long or pin_bar_long
             # ETF : Elder Impulse vert peut déclencher seul OU en combo avec un signal de base
             # Cela évite de rater les trades quand l'EMA cross est déjà passé mais Elder reste vert
@@ -126,6 +138,15 @@ def _check_entry_triggers(
                 latest.get('rsi', 50) > 35
             )
 
+            # ── TRIGGER CONTINUATION SHORT (nouveau) ─────────────────────────────
+            continuation_short = (
+                ema_f_now < ema_s_now and
+                latest.get('supertrend_trend', 0) < 0 and
+                latest['close'] < ema_s_now and
+                32 <= latest.get('rsi', 50) <= 55 and
+                latest.get('macd', 0) < 0  # MACD négatif = momentum baissier confirmé
+            )
+
             # Forex : Inside Bar baissier / Shooting Star
             inside_bar_short = False
             pin_bar_short = False
@@ -151,7 +172,7 @@ def _check_entry_triggers(
             _screen1_down_val = latest.get('elder_screen1_down', None)
             elder_screen1_ok = (_screen1_down_val is None) or bool(_screen1_down_val)
 
-            base_trigger = (ema_cross or macd_cross or supertrend_down or pullback_short)
+            base_trigger = (ema_cross or macd_cross or supertrend_down or pullback_short or continuation_short)
 
             if is_forex:
                 trigger_short = (base_trigger or inside_bar_short or pin_bar_short) and elder_allow_short and elder_screen1_ok

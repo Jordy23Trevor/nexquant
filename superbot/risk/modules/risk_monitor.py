@@ -54,7 +54,7 @@ def _can_take_new_trade(rm, account_balance: float, symbol: str = "") -> bool:
 
     return True
 
-def get_risk_metrics(rm, account_balance: float) -> Dict[str, Any]:
+def get_risk_metrics(rm, account_balance: float = 0.0) -> Dict[str, Any]:
     """
     Retourne les métriques de risque actuelles.
 
@@ -65,6 +65,8 @@ def get_risk_metrics(rm, account_balance: float) -> Dict[str, Any]:
         Dictionnaire contenant les métriques de risque
     """
     try:
+        if account_balance <= 0:
+            account_balance = getattr(rm, 'starting_balance', 10000.0)
         # Calculer le drawdown
         peak_balance = max([rm.starting_balance] +
                          [t.get('balance_after', rm.starting_balance) for t in rm.trade_history if 'balance_after' in t] +

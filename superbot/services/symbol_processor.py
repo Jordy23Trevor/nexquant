@@ -145,7 +145,10 @@ def process_symbol(bot, symbol: str):
         # Afficher le score_min effectif (par asset_type) plutôt que le global
         score_min = signal_data.get('score_min', bot.strategy.score_min)
         rr = signal_data['rr_ratio']
-        should_avoid, news_event = bot.news_manager.should_avoid_trading_due_to_news(symbol)
+        if getattr(bot, 'news_manager', None):
+            should_avoid, news_event = bot.news_manager.should_avoid_trading_due_to_news(symbol)
+        else:
+            should_avoid, news_event = False, None
         news_ok = not should_avoid
         log.info(
             f"Signal DEBUG {symbol}: regime={signal_data['market_regime']} "

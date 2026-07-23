@@ -484,6 +484,31 @@ class AlpacaClient(Broker):
                 return False
         return self._call_api(run, False)
 
+    def get_open_positions(self) -> List[Dict[str, Any]]:
+        """
+        Retourne toutes les positions ouvertes chez Alpaca.
+        """
+        if not self._api:
+            return []
+        try:
+            positions = self._api.list_positions()
+            result = []
+            for p in positions:
+                qty = float(p.qty)
+                if qty != 0:
+                    side = "LONG" if qty > 0 else "SHORT"
+                    result.append({
+                        "symbol": p.symbol,
+                        "side": side,
+                        "size": abs(qty),
+                        "entry_price": float(p.avg_entry_price),
+                        "unrealized_pnl": float(p.unrealized_pl),
+                    })
+            return result
+        except Exception as e:
+            log.warning(f"Alpaca list_positions error: {e}")
+            return []
+
 
 # Export des classes publiques
 __all__ = ['AlpacaClient']

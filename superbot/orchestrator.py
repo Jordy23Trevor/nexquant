@@ -863,7 +863,10 @@ class SuperBot:
             # Afficher le score_min effectif (par asset_type) plutôt que le global
             score_min = signal_data.get('score_min', self.strategy.score_min)
             rr = signal_data['rr_ratio']
-            should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
+            if getattr(self, 'news_manager', None):
+                should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
+            else:
+                should_avoid, news_event = False, None
             news_ok = not should_avoid
             log.info(
                 f"Signal DEBUG {symbol}: regime={signal_data['market_regime']} "
@@ -1326,8 +1329,10 @@ class SuperBot:
                 if action == 'sell' and not ALLOW_SHORT_STOCK:
                     return {"status": "skipped", "reason": "short_blocked_stocks", "symbol": symbol}
 
-            # Vérifier les nouvelles si activé
-            should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
+            if getattr(self, 'news_manager', None):
+                should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
+            else:
+                should_avoid, news_event = False, None
             if should_avoid:
                 log.info(f"Signal webhook évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
                 return {"status": "skipped", "reason": "news_avoidance", "news_event": str(news_event) if news_event else None}

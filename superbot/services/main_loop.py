@@ -225,7 +225,10 @@ class MainLoopManager:
             # Show effective score_min (per asset_type) rather than global
             score_min = signal_data.get('score_min', self.bot.strategy.score_min)
             rr = signal_data['rr_ratio']
-            should_avoid, news_event = self.bot.news_manager.should_avoid_trading_due_to_news(symbol)
+            if getattr(self.bot, 'news_manager', None):
+                should_avoid, news_event = self.bot.news_manager.should_avoid_trading_due_to_news(symbol)
+            else:
+                should_avoid, news_event = False, None
             news_ok = not should_avoid
             self.log.info(
                 f"Signal DEBUG {symbol}: regime={signal_data['market_regime']} "

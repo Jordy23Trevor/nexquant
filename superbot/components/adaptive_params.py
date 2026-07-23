@@ -29,6 +29,12 @@ def update_adaptive_parameters(bot):
     if len(bot.risk_manager.trade_history) < 5:
         return  # Pas assez de données pour ajuster
 
+    # Guard : ne pas ajuster si aucun trade n'est clôturé (win_rate=0.0 par défaut serait trompeur)
+    closed_trades = [t for t in bot.risk_manager.trade_history if t.get('status') == 'closed' and t.get('pnl') is not None]
+    if len(closed_trades) < 5:
+        log.debug(f"Adaptation ignorée : seulement {len(closed_trades)} trade(s) clôturé(s), minimum 5 requis.")
+        return
+
     recent_win_rate = get_recent_win_rate(bot)
     log.debug(f"Taux de victoire récent (20 derniers trades) : {recent_win_rate:.2f}")
 

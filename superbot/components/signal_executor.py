@@ -37,7 +37,10 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         return
 
     # 1. Vérifier les filtres de nouvelles et de sentiment
-    should_avoid, news_event = bot.news_manager.should_avoid_trading_due_to_news(symbol)
+    if getattr(bot, 'news_manager', None):
+        should_avoid, news_event = bot.news_manager.should_avoid_trading_due_to_news(symbol)
+    else:
+        should_avoid, news_event = False, None
     if should_avoid:
         log.info(f"Trading évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
         return
@@ -50,13 +53,13 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     # 2d. Filtres avancés Forex (Session, Spread, Corrélation, Pivots Obstacles, News)
     if bot.broker.get_asset_type() == 'forex':
         from superbot.components.forex_filters import (
-            is_london_session, check_spread,
+            is_market_open, check_spread,
             check_currency_correlation, check_pivot_obstacle,
             check_major_news_window
         )
 
-        # A. Session horaire
-        if not is_london_session():
+        # A. Session horaire (H24 Forex : Tokyo + Londres + New York)
+        if not is_market_open():
             return
 
         # B. Garde-fou Spread
@@ -175,6 +178,36 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         corr_data = {'average_correlation': max_open_corr}
         log.info(f"⚠️ Corrélation élevée ({max_open_corr:.2f} > 0.70) détectée pour {symbol} : taille sera réduite.")
 
+    # ── CONVICTION BOOST ─────────────────────────────────────────────────────
+    # Augmente dynamiquement la taille de position quand TOUTES les conditions
+    # suivantes sont réunies, indiquant une opportunité de haute qualité :
+    #   1. Score ≥ score_min + 2 (signal très solide, pas juste au seuil)
+    #   2. ADX ≥ 30 (tendance forte confirmée)
+    #   3. Régime TRENDING (pas de range / pas de haute volatilité chaotique)
+    #   4. Corrélation avec les positions ouvertes faible (< 0.70)
+    # Le multiplicateur est plafonné à ×1.5 pour rester dans les limites
+    # du risk management (le sizing final est toujours borné par la marge dispo).
+    conviction_boost = 1.0
+    score_raw_val = signal_data.get('total_score', 0)
+    score_min_val = signal_data.get('score_min', bot.strategy.score_min)
+    adx_val = float(df_with_indicators.iloc[-1].get('adx', 0))
+    regime_val = signal_data.get('market_regime', '').upper()
+
+    high_score = score_raw_val >= (score_min_val + 2)
+    strong_trend = adx_val >= 30
+    trending_regime = 'TRENDING' in regime_val
+    low_correlation = max_open_corr < 0.70
+
+    if high_score and strong_trend and trending_regime and low_correlation:
+        # Boost progressif selon le niveau du score
+        score_excess = score_raw_val - score_min_val
+        conviction_boost = min(1.0 + (score_excess * 0.10) + ((adx_val - 30) * 0.005), 1.50)
+        log.info(
+            f"🚀 [ConvictionBoost] {symbol} — Conditions excellentes détectées "
+            f"(Score={score_raw_val:.1f}/{score_min_val}, ADX={adx_val:.1f}, Régime={regime_val}). "
+            f"Boost de taille : ×{conviction_boost:.2f}"
+        )
+
     # 3. Calculer la taille de position avec le Risk Manager
     position_size, size_details = bot.risk_manager.calculate_position_size(
         account_balance=account_balance,
@@ -186,6 +219,12 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         broker=bot.broker,
         hmm_regime=hmm_label  # Phase 3 §1 — dimensionnement selon le régime HMM
     )
+
+    # Appliquer le boost de conviction (après le calcul de base)
+    if conviction_boost > 1.0 and position_size > 0:
+        boosted_size = position_size * conviction_boost
+        log.info(f"[ConvictionBoost] Taille {symbol} : {position_size:.6f} × {conviction_boost:.2f} = {boosted_size:.6f}")
+        position_size = boosted_size
 
     log.info(f"Risk sizing {symbol}: size={position_size:.6f} | details={size_details}")
 

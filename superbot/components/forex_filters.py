@@ -1,35 +1,49 @@
+from datetime import datetime
 import logging
-from datetime import datetime, timedelta
 
 log = logging.getLogger("forex_filters")
 
+
 def is_london_session() -> bool:
-    """Vérifie si on est pendant la session de Londres (08h00 - 18h00) en évitant les week-ends."""
+    """
+    [DEPRECATED — utilisez is_market_open()] Compatibilité ascendante.
+    """
+    return is_market_open()
+
+
+def is_market_open() -> bool:
+    """
+    Vérifie si au moins une session Forex majeure est actuellement ouverte.
+
+    Sessions couvertes (UTC) :
+      - Tokyo   : 23h00 – 08h00 UTC
+      - Londres : 07h00 – 17h00 UTC
+      - New York: 12h00 – 22h00 UTC
+
+    Le bot peut ainsi trader H24 du lundi au vendredi,
+    se mettant en pause uniquement le week-end (vendredi 22h UTC → dimanche 22h UTC).
+
+    Returns:
+        True si au moins une session est ouverte et ce n'est pas le week-end.
+    """
     now_utc = datetime.utcnow()
-    is_dst = False
-    if 3 < now_utc.month < 10:
-        is_dst = True
-    elif now_utc.month == 3:
-        last_sunday = 31 - (datetime(now_utc.year, 3, 31).weekday() + 1) % 7
-        if now_utc.day >= last_sunday:
-            is_dst = True
-    elif now_utc.month == 10:
-        last_sunday = 31 - (datetime(now_utc.year, 10, 31).weekday() + 1) % 7
-        if now_utc.day < last_sunday:
-            is_dst = True
+    hour = now_utc.hour
+    weekday = now_utc.weekday()  # 0=Lundi, 5=Samedi, 6=Dimanche
 
-    london_offset = 1 if is_dst else 0
-    london_time = now_utc + timedelta(hours=london_offset)
-    london_hour = london_time.hour
-    weekday = london_time.weekday()
-
-    in_hours = (8 <= london_hour < 18)
-    is_weekend = (weekday >= 5) or (weekday == 4 and london_hour >= 17) or (weekday == 6 and london_hour < 17)
-
-    if not in_hours or is_weekend:
-        log.info(f"En dehors de la session Forex (Londres 08h-18h) ou week-end. Heure Londres : {london_time.strftime('%H:%M:%S')}")
+    # Blocage week-end : vendredi après 22h UTC, samedi tout le jour + dimanche avant 21h UTC (réouverture Sydney)
+    if weekday == 4 and hour >= 22:  # Vendredi soir après 22h UTC
+        log.debug(f"[MarketOpen] Marché fermé (Vendredi soir >22h UTC). Heure UTC: {now_utc.strftime('%H:%M')}")
         return False
+    if weekday == 5:  # Samedi
+        log.debug(f"[MarketOpen] Marché fermé (Samedi). Heure UTC: {now_utc.strftime('%H:%M')}")
+        return False
+    if weekday == 6 and hour < 21:  # Dimanche avant 21h UTC
+        log.debug(f"[MarketOpen] Marché fermé (Dimanche <21h UTC). Heure UTC: {now_utc.strftime('%H:%M')}")
+        return False
+
+    # Du dimanche 21h00 UTC au vendredi 22h00 UTC, le marché Forex est ouvert H24 (Sydney + Tokyo + Londres + NY)
     return True
+
 
 def check_spread(broker, symbol: str, max_spread: float) -> bool:
     """Vérifie si le spread de l'actif est acceptable."""

@@ -635,8 +635,22 @@ class BinanceClient(Broker):
                         quantity=size, reduceOnly=True,
                     )
                 except BinanceAPIException as e:
-                    log.error(f"Impossible de placer le nouveau SL : {e.message}")
-                    return False
+                    if "limit" in str(e.message).lower() or "max stop" in str(e.message).lower():
+                        log.warning(f"⚠️ Limite d'ordres stop atteinte sur {symbol}. Purge des ordres et réessai...")
+                        self.cancel_all_orders(symbol)
+                        time.sleep(0.2)
+                        try:
+                            self._client.futures_create_order(
+                                symbol=binance_symbol, side=close_side,
+                                type="STOP_MARKET", stopPrice=sl,
+                                quantity=size, reduceOnly=True,
+                            )
+                        except BinanceAPIException as e2:
+                            log.error(f"Impossible de placer le nouveau SL après réessai : {e2.message}")
+                            return False
+                    else:
+                        log.error(f"Impossible de placer le nouveau SL : {e.message}")
+                        return False
 
             # Mettre à jour le TP
             if tp > 0:
@@ -707,8 +721,7 @@ class BinanceClient(Broker):
                 algo_orders = self._client.futures_get_open_algo_orders(symbol=binance_symbol)
                 for o in algo_orders:
                     algo_id = o.get("algoId")
-                    if algo_id:
-                        self._client.futures_cancel_algo_order(symbol=binance_symbol, algoId=algo_id)
+                    self._client.futures_cancel_algo_order(symbol=binance_symbol, algoId=algo_id)
                 self._clear_cache()
                 log.info(f"Tous les ordres (standard & algo) annulés sur {symbol}")
                 return True
@@ -717,6 +730,29 @@ class BinanceClient(Broker):
                 return False
 
         return self._call_api(run, False)
+
+    def get_open_positions(self) -> List[Dict[str, Any]]:
+        """
+        Retourne la liste de toutes les positions ouvertes sur le compte Binance Futures.
+        Utilisé par GhostCleaner pour la validation cross-référence.
+        """
+        def run():
+            positions = self._client.futures_position_information()
+            open_pos = []
+            for p in positions:
+                amt = float(p.get("positionAmt", 0))
+                if amt != 0:
+                    symbol_raw = p.get("symbol", "")
+                    side = "LONG" if amt > 0 else "SHORT"
+                    open_pos.append({
+                        "symbol": symbol_raw,
+                        "side": side,
+                        "size": abs(amt),
+                        "entry_price": float(p.get("entryPrice", 0)),
+                        "unrealized_pnl": float(p.get("unRealizedProfit", 0)),
+                    })
+            return open_pos
+        return self._call_api(run, []) or []
 
 
 # Export des classes publiques

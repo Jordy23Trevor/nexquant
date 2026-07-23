@@ -195,6 +195,20 @@ class Broker(abc.ABC):
 
         return leveraged_size
 
+    def get_open_positions(self) -> List[Dict[str, Any]]:
+        """
+        Retourne la liste de toutes les positions ouvertes chez le broker.
+        Par défaut retourne une liste vide si non implémenté.
+        """
+        return []
+
+    def cancel_all_orders(self, symbol: str = "") -> bool:
+        """
+        Annule tous les ordres en attente / conditionnels.
+        Par défaut retourne True.
+        """
+        return True
+
 
 def create_broker(broker_type: str = None, **kwargs) -> Broker:
     """

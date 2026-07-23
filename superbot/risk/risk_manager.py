@@ -172,10 +172,15 @@ class RiskManager:
         from superbot.risk.modules.position_sizer import _calculate_kelly_fraction
         return _calculate_kelly_fraction(self)
 
-    def calculate_sl_tp_levels(self, current_price: float, atr: float, direction: str, asset_type: str, symbol: str, hmm_regime: str = "TRENDING") -> Tuple[float, float]:
+    def calculate_sl_tp_levels(self, current_price: float = 0.0, atr: float = 0.0, direction: str = "LONG",
+                               asset_type: str = "forex", symbol: str = "", hmm_regime: str = "TRENDING",
+                               entry_price: Optional[float] = None, atr_value: Optional[float] = None,
+                               position_side: Optional[str] = None, **kwargs) -> Tuple[float, float]:
+        price = entry_price if entry_price is not None else current_price
+        atr_val = atr_value if atr_value is not None else atr
+        side = position_side if position_side is not None else direction
         from superbot.risk.modules.stop_manager import calculate_sl_tp_levels
-        return calculate_sl_tp_levels(self, current_price, atr, direction, asset_type, symbol, hmm_regime)
-
+        return calculate_sl_tp_levels(self, price, atr_val, side, asset_type, symbol, hmm_regime)
 
     def record_trade(self, trade_record: Dict[str, Any]):
         from superbot.risk.modules.trade_recorder import record_trade
@@ -202,13 +207,10 @@ class RiskManager:
 
         position = self.open_positions[symbol]
 
-        # Enregistrer le stop loss initial si non présent pour les calculs de R:R
         if 'initial_sl' not in position or position['initial_sl'] == 0:
             position['initial_sl'] = position.get('stop_loss', 0.0)
 
-
         try:
-            # Calculer le P&L actuel et le pourcentage
             if position['side'] == 'LONG':
                 raw_pnl = (current_price - position['entry_price']) * position['size']
                 pnl_pct = (current_price / position['entry_price'] - 1) * 100
@@ -216,8 +218,6 @@ class RiskManager:
                 raw_pnl = (position['entry_price'] - current_price) * position['size']
                 pnl_pct = (position['entry_price'] / current_price - 1) * 100
 
-            # ✅ BUG FIX #2 — Conversion du PnL latent (unrealized) en devise du compte
-            # Même problème que pour les clôtures : les paires JPY retournent un PnL en Yen.
             sym = position.get('symbol', symbol)
             normalized_sym = sym.strip().upper().replace("/", "")
             if normalized_sym.endswith("JPY") and current_price > 0:
@@ -231,22 +231,40 @@ class RiskManager:
             position['unrealized_pnl_pct'] = pnl_pct
             position['last_update'] = datetime.now().isoformat()
 
-            # Vérifier les conditions de trailing stop et break-even
             self._check_trailing_stop(symbol, position, current_price)
             self._check_break_even(symbol, position, current_price)
 
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour de la position {symbol}: {e}")
 
-    def _check_trailing_stop(self, symbol: str, pos: dict, current_price: float):
-        from superbot.risk.modules.stop_manager import _check_trailing_stop
-        return _check_trailing_stop(self, symbol, pos, current_price)
+    def _check_trailing_stop(self, *args, **kwargs):
+        # Signature robuste pour accepter n'importe quelle variante d'arguments
+        symbol = kwargs.get('symbol')
+        pos = kwargs.get('pos') or kwargs.get('position')
+        current_price = kwargs.get('current_price')
+
+        positional = list(args)
+        if positional and hasattr(positional[0], 'open_positions'):
+            positional = positional[1:]
+
+        if len(positional) >= 3:
+            symbol, pos, current_price = positional[0], positional[1], positional[2]
+        elif len(positional) == 2:
+            symbol, current_price = positional[0], positional[1]
+            pos = self.open_positions.get(symbol)
+
+        if pos is None and symbol in self.open_positions:
+            pos = self.open_positions[symbol]
+
+        if symbol and pos and current_price is not None:
+            from superbot.risk.modules.stop_manager import _check_trailing_stop
+            return _check_trailing_stop(self, symbol, pos, current_price)
 
     def _check_break_even(self, symbol: str, pos: dict, current_price: float):
         from superbot.risk.modules.stop_manager import _check_break_even
         return _check_break_even(self, symbol, pos, current_price)
 
-    def get_risk_metrics(self, account_balance: float) -> Dict[str, Any]:
+    def get_risk_metrics(self, account_balance: float = 0.0) -> Dict[str, Any]:
         from superbot.risk.modules.risk_monitor import get_risk_metrics
         return get_risk_metrics(self, account_balance)
 
