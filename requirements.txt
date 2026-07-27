@@ -1,0 +1,28 @@
+numpy>=1.20.0
+pandas>=1.3.0
+requests>=2.25.0
+python-dotenv>=0.19.0
+python-binance>=1.0.16
+alpaca-trade-api>=3.0.0
+MetaTrader5>=5.0.33; platform_system == "Windows"
+schedule>=1.1.0
+sentence-transformers>=2.2.0
+
+# ── Phase 1 : Backtesting sur données réelles ─────────────────────────────
+yfinance>=0.2.38          # Fallback données historiques sans clé API
+matplotlib>=3.7.0         # Graphiques de courbes d'équité
+optuna>=3.5.0             # Optimisation bayésienne des paramètres
+
+# ── Phase 2 : Détection de régime ML (HMM) ───────────────────────────────
+hmmlearn>=0.3.0           # Hidden Markov Model pour la détection de régime
+scikit-learn>=1.4.0       # Preprocessing, StandardScaler, métriques
+joblib>=1.3.0             # Sérialisation et chargement rapide du modèle HMM
+
+# ── Phase 3 : Sentiment NLP ───────────────────────────────────────────────
+vaderSentiment>=3.3.2     # Analyse de sentiment rapide (CPU, sans GPU)
+feedparser>=6.0.0         # Scraping des flux RSS financiers (Reuters, Yahoo, etc.)
+# transformers>=4.40.0    # FinBERT avancé — décommenter si GPU disponible
+# torch>=2.2.0            # PyTorch pour FinBERT — décommenter si GPU disponible
+
+pytest
+pytest-mock

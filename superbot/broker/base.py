@@ -110,6 +110,11 @@ class Broker(abc.ABC):
         """Retourne le dernier prix coté (mid price) pour un instrument."""
         pass
 
+    def get_spread(self, symbol: str) -> float:
+        """Retourne le spread actuel (en pips/points) pour un instrument."""
+        return 0.0
+
+
     @abc.abstractmethod
     def get_min_order_size(self, symbol: str) -> float:
         """Retourne la taille minimale d'ordre autorisée pour un instrument."""
@@ -189,6 +194,20 @@ class Broker(abc.ABC):
         leveraged_size = base_size * leverage
 
         return leveraged_size
+
+    def get_open_positions(self) -> List[Dict[str, Any]]:
+        """
+        Retourne la liste de toutes les positions ouvertes chez le broker.
+        Par défaut retourne une liste vide si non implémenté.
+        """
+        return []
+
+    def cancel_all_orders(self, symbol: str = "") -> bool:
+        """
+        Annule tous les ordres en attente / conditionnels.
+        Par défaut retourne True.
+        """
+        return True
 
 
 def create_broker(broker_type: str = None, **kwargs) -> Broker:

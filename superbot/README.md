@@ -50,7 +50,7 @@ Lors du démarrage, le bot effectue les étapes suivantes :
 Copiez le fichier `.env.backup` sous le nom de `.env` dans le répertoire `nexquant/` et configurez les variables suivantes :
 
 ### 1. Paramètres Généraux et Brokers
-* `BROKER_TYPE` : Le courtier cible (`binance`, `mt5`, `alpaca` ou `paper_forex`).
+* `BROKER_TYPE` : Le courtier cible (`binance`, `mt5` ou `alpaca`).
 * `INSTRUMENTS` : Liste d'actifs séparés par des virgules (ex: `BTC/USDT,ETH/USDT` pour Binance, `EUR/USD,GBP/USD` pour MT5, `SPY,QQQ` pour Alpaca).
 * `GRANULARITY` : Unité de temps principale pour l'analyse (ex: `1h`, `4h`, `1d`).
 

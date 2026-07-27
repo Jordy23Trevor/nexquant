@@ -19,7 +19,7 @@ except ImportError:
 from superbot.indicators.technical_indicators import TechnicalIndicators
 from superbot.strategy.knowledge_base import (
     calculate_kelly_fraction, calculate_risk_reward_ratio,
-    calculate_position_size_from_risk, is_market_trending
+    is_market_trending
 )
 
 log = logging.getLogger("strategy")
@@ -31,19 +31,28 @@ class TradingStrategy:
     avec un régime adaptatif (TRENDING vs RANGING) et un scoring multi-indicateurs.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], indicators: Optional[TechnicalIndicators] = None):
         """
         Initialise la stratégie avec la configuration.
 
         Args:
             config: Dictionnaire contenant tous les paramètres de configuration
                    provenant de superbot.config
+            indicators: Instance optionnelle de TechnicalIndicators pour éviter les redondances
         """
         self.config = config
-        self.indicators = TechnicalIndicators(config)
+        self.indicators = indicators if indicators is not None else TechnicalIndicators(config)
 
         # Historique des scores pour analyse
         self.score_history: List[Dict[str, Any]] = []
+
+        # Phase 3.1: ML Scorer
+        try:
+            from superbot.ml.probabilistic_scorer import ProbabilisticScorer
+            self.ml_scorer = ProbabilisticScorer()
+        except ImportError:
+            self.ml_scorer = None
+            log.warning("ProbabilisticScorer non disponible, fallback sur le score linéaire.")
 
         # Seuils configurables
         self.score_min = config.get('SCORE_MIN', 6)  # Score minimum pour entrer
@@ -100,7 +109,9 @@ class TradingStrategy:
                        account_balance: float = 0.0,
                        real_win_rate: Optional[float] = None,
                        symbol: str = "",
-                       btc_change_24h: Optional[float] = None) -> Dict[str, Any]:
+                       btc_change_24h: Optional[float] = None,
+                       sentiment_factor: float = 1.0,
+                       news_filter_passed: bool = True) -> Dict[str, Any]:
         """
         Analyse complète du marché pour générer un signal de trading.
 
@@ -110,6 +121,8 @@ class TradingStrategy:
             real_win_rate: Win rate réel calculé par le RiskManager (None = estimation 0.55)
             symbol: Symbole de l'actif analysé (utilisé pour les filtres crypto)
             btc_change_24h: Variation BTC sur 24h en % (négatif = baisse, None = non disponible)
+            sentiment_factor: Ajustement NLP du NewsManager (1.0 = neutre, >1 = positif)
+            news_filter_passed: False si les nouvelles récentes interdisent de trader
 
         Returns:
             Dictionnaire contenant l'analyse complète et le signal de trading
@@ -130,19 +143,61 @@ class TradingStrategy:
         latest = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else current_candle
         prev = df_with_indicators.iloc[-3] if len(df_with_indicators) >= 3 else latest
 
-        # Déterminer le régime de marché
-        market_regime = self.indicators.get_market_regime(df_with_indicators)
+        # Déterminer le régime de marché (HMM Phase 2 si modèle disponible, sinon ADX)
+        market_regime, ml_confidence, hmm_state = self.indicators.get_market_regime_with_confidence(df_with_indicators)
         is_trending = market_regime == 'TRENDING'
 
-        # ── Détecter si l'actif est une crypto ───────────────────────────
+        # Logguer le régime détecté avec la source de détection
+        hmm_label = 'UNKNOWN'
+        if hmm_state >= 0:
+            hmm_label = self.indicators._regime_detector.get_state_label(hmm_state) if self.indicators._regime_detector else 'HMM'
+            log.debug(f"[Regime] HMM: {market_regime} (etat={hmm_label}, confiance={ml_confidence:.1%})")
+        else:
+            log.debug(f"[Regime] ADX fallback: {market_regime} (confiance={ml_confidence:.1%})")
+
+        # ── Détection de la classe d'actif ─────────────────────────────────────
         sym_upper = symbol.upper().replace("/", "").replace("-", "")
+        broker_type = self.config.get('BROKER_TYPE', '')
+
         is_crypto = (
-            self.config.get('BROKER_TYPE') == 'binance' or
+            broker_type == 'binance' or
             any(k in sym_upper for k in ["USDT", "BUSD"]) or
             (any(sym_upper.startswith(k) for k in ["BTC", "ETH", "SOL", "LTC", "XRP"]) and "USD" in sym_upper)
         )
+        is_forex = broker_type == 'mt5' or (
+            not is_crypto and
+            len(sym_upper) == 6 and
+            sym_upper[:3].isalpha() and sym_upper[3:].isalpha() and
+            sym_upper not in ('XAUUSD', 'XAGUSD')
+        )
+        is_stock = broker_type == 'alpaca' or (not is_crypto and not is_forex)
         is_btc_pair = "BTC" in sym_upper and ("USDT" in sym_upper or "USD" in sym_upper)
         is_altcoin = is_crypto and not is_btc_pair
+
+        log.debug(f"[AssetType] {symbol} → crypto={is_crypto}, forex={is_forex}, stock={is_stock}")
+
+        # ── Sélection des paramètres spécifiques à l'asset_type ────────────────
+        if is_crypto:
+            ema_fast_col  = 'ema_21'
+            ema_slow_col  = 'ema_55'
+            adx_threshold = self.config.get('ADX_TREND_CRYPTO', 25)
+            effective_score_min = self.config.get('SCORE_MIN_CRYPTO', 7)
+            sl_mult = self.config.get('SL_ATR_MULT_CRYPTO', 2.0)
+            tp_mult = self.config.get('TP_ATR_MULT_CRYPTO', 4.0)
+        elif is_forex:
+            ema_fast_col  = 'ema_21'
+            ema_slow_col  = 'ema_55'
+            adx_threshold = self.config.get('ADX_TREND_FOREX', 20)
+            effective_score_min = self.config.get('SCORE_MIN_FOREX', 6)
+            sl_mult = self.config.get('SL_ATR_MULT_FOREX', 1.5)
+            tp_mult = self.config.get('TP_ATR_MULT_FOREX', 3.0)
+        else:  # stock / ETF
+            ema_fast_col  = 'ema_20'
+            ema_slow_col  = 'ema_50'
+            adx_threshold = self.config.get('ADX_TREND_STOCK', 20)
+            effective_score_min = self.config.get('SCORE_MIN_STOCK', 5)
+            sl_mult = self.config.get('SL_ATR_MULT_STOCK', 1.5)
+            tp_mult = self.config.get('TP_ATR_MULT_STOCK', 3.0)
 
         # ── P0-2 : Vérifier la blacklist crypto ─────────────────────────────
         crypto_blacklist = self.config.get('CRYPTO_BLACKLIST', [])
@@ -153,18 +208,58 @@ class TradingStrategy:
 
         # Calculer les scores selon le régime
         if is_trending:
-            trend_score, trend_details = self._calculate_trending_score(df_with_indicators)
+            trend_score, trend_details = self._calculate_trending_score(
+                df_with_indicators, ema_fast_col, ema_slow_col, adx_threshold
+            )
             ranging_score, ranging_details = 0, {}  # Pas utilisé en tendance
             total_score = trend_score
             details = {**trend_details, 'regime': 'TRENDING'}
         else:
+            if is_crypto:
+                log.info(f"🚫 Range trading désactivé pour la crypto {symbol} (Trend Following uniquement)")
+                return self._create_neutral_signal(f"RANGING_CRYPTO_BLOCKED:{symbol}")
+            if is_stock:
+                log.info(f"🚫 Range trading désactivé pour l'ETF {symbol} (Momentum uniquement)")
+                return self._create_neutral_signal(f"RANGING_STOCK_BLOCKED:{symbol}")
+
+            # NOTE ─ Phase 3 Fix ETF : Le seuil est relevé à 0.65 pour les ETF/stocks
+            # car SPY/QQQ ont un Hurst empiriquement autour de 0.52-0.58 (légèrement
+            # supra-brownien) mais restent très mean-revertants à court terme.
+            # Avec le seuil historique de 0.50, ils étaient bloqués systématiquement.
+            hurst_block_threshold = 0.65 if is_stock else 0.50
+            try:
+                import numpy as np
+                prices = df_with_indicators['close'].values
+                if len(prices) >= 50:
+                    lags = range(2, 20)
+                    # Calcul simplifié de Hurst
+                    tau = [np.sqrt(np.std(np.subtract(prices[lag:], prices[:-lag]))) for lag in lags]
+                    poly = np.polyfit(np.log(lags), np.log(tau), 1)
+                    hurst = poly[0] * 2.0
+                    if hurst >= hurst_block_threshold:
+                        log.info(f"🚫 Range trading rejeté pour {symbol} : Marché non-stationnaire (Hurst = {hurst:.2f} >= {hurst_block_threshold:.2f})")
+                        return self._create_neutral_signal(f"RANGING_NON_STATIONARY:{symbol}")
+                    else:
+                        log.debug(f"✅ Marché stationnaire validé pour {symbol} (Hurst = {hurst:.2f} < {hurst_block_threshold:.2f})")
+            except Exception as e:
+                log.warning(f"Erreur lors du calcul de Hurst pour {symbol} : {e}")
+
             ranging_score, ranging_details = self._calculate_ranging_score(df_with_indicators)
             trend_score, trend_details = 0, {}  # Pas utilisé en range
+            
+            # Bonus Ranging Forex : +1 point car le Forex mean-revert très bien
+            if is_forex:
+                ranging_score += 1.0
+                log.debug(f"[Forex Ranging Bonus] +1.0 point au score Ranging ({symbol})")
+                
             total_score = ranging_score
             details = {**ranging_details, 'regime': 'RANGING'}
 
-        # Vérifier les triggers (conditions d'entrée)
-        trigger_long, trigger_short = self._check_entry_triggers(df_with_indicators, is_trending)
+        # Vérifier les triggers (conditions d'entrée) — avec les bons paramètres par asset_type
+        trigger_long, trigger_short = self._check_entry_triggers(
+            df_with_indicators, is_trending, ema_fast_col, ema_slow_col, adx_threshold,
+            is_crypto=is_crypto, is_forex=is_forex, is_stock=is_stock
+        )
 
         # ── P2-2 : Volume strict pour BNB/USDT ───────────────────────────────
         bnb_vol_factor = self.config.get('CRYPTO_BNB_VOLUME_FACTOR', 1.5)
@@ -180,22 +275,26 @@ class TradingStrategy:
                 trigger_long = False
                 trigger_short = False
 
-        # Calculer le ratio risque/rendement potentiel (basé sur le prix d'entrée actuel)
+        # ── Blocage des SHORTs sur ETF/Stocks ────────────────────────────────
+        # Les ETF sont des paniers long-only par nature. Les shorts nécessitent
+        # un account margin, la PDT rule, et des coûts d'emprunt non modélisés.
+        allow_short_stock = self.config.get('ALLOW_SHORT_STOCK', False)
+        if is_stock and trigger_short and not allow_short_stock:
+            log.info(f"🚫 SHORT {symbol} (ETF/Stock) bloqué — ALLOW_SHORT_STOCK=false")
+            trigger_short = False
+
+        # Calculer le ratio risque/rendement potentiel avec les multiplicateurs ATR spécifiques
         current_price = current_candle['close']
-        rr_ratio, sl_price, tp_price = self._calculate_potential_rr(latest, current_price)
+        rr_ratio, sl_price, tp_price = self._calculate_potential_rr(latest, current_price, sl_mult, tp_mult)
 
         # Ajuster les prix SL/TP si c'est un signal de vente (SHORT) pour qu'ils soient orientés correctement
         if trigger_short and not trigger_long:
             atr = latest.get('atr', 0)
             if atr > 0:
-                sl_price = current_price + (atr * self.config.get('SL_ATR_MULT', 1.5))
-                tp_price = current_price - (atr * self.config.get('TP_ATR_MULT', 3.0))
-
-        # Appliquer les filtres de sentiment et de nouvelles (à venir dans la phase 4)
-        sentiment_factor = 1.0  # À implémenter avec le news manager
-        news_filter_passed = True  # À implémenter avec le news manager
-
-        # Ajuster le score avec le facteur de sentiment
+                sl_price = current_price + (atr * sl_mult)
+                tp_price = current_price - (atr * tp_mult)
+        
+        # Ajuster le score avec le facteur de sentiment (Phase 3)
         adjusted_score = total_score * sentiment_factor
 
         # Valeurs par défaut ajustables dynamiquement par les règles
@@ -213,57 +312,90 @@ class TradingStrategy:
                 'total_score': total_score,
                 'trigger_long': trigger_long,
                 'trigger_short': trigger_short,
-                'latest_bar': latest
+                'latest_bar': latest,
+                'ml_confidence': ml_confidence,   # Phase 2 : confiance HMM
+                'hmm_state': hmm_state,            # Phase 2 : état brut HMM
             }
         )
+
+        # Phase 3.5: Modulation du risque selon les 4 régimes HMM
+        if hmm_label == 'HIGH_VOL_RANGE':
+            risk_pct = risk_pct / 2.0
+            log.debug(f"[HMM-4] HIGH_VOL_RANGE détecté : réduction du risque à {risk_pct}%")
+        elif hmm_label == 'LOW_VOL_RANGE':
+            risk_pct = risk_pct * 1.5
+            log.debug(f"[HMM-4] LOW_VOL_RANGE détecté : augmentation du risque à {risk_pct}%")
 
         # Bug#2 fix : utiliser le vrai solde si fourni, sinon 0 (le sizing réel est dans RiskManager)
         effective_balance = account_balance if account_balance > 0 else 10000.0
         risk_amount = effective_balance * (risk_pct / 100.0)
 
-        # Déterminer si on prend le trade
-        # ── P1-2 : Score minimum 7 pour crypto en ADX faible ────────────────────
-        effective_score_min = self.score_min
-        if is_crypto:
-            latest_bar = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else df_with_indicators.iloc[-1]
-            adx_val = latest_bar.get('adx', 999)
-            adx_threshold = self.config.get('ADX_TREND', 22)
-            if adx_val < adx_threshold:
-                crypto_score_min = self.config.get('CRYPTO_SCORE_MIN', 7)
-                if crypto_score_min > effective_score_min:
-                    log.debug(
-                        f"[P1-2] ADX={adx_val:.1f} < {adx_threshold} sur crypto {symbol} "
-                        f"— score_min élevé à {crypto_score_min} (vs {effective_score_min})."
-                    )
-                    effective_score_min = crypto_score_min
+        # ── Phase 3.1 : Inférence Probabiliste ML et Matrice E(R) ────────────────
+        from superbot.strategy.components.scorer import calculate_probabilistic_win_rate
+        adx_val = latest.get('adx', 20.0)
+        prob_meta = calculate_probabilistic_win_rate(adjusted_score, market_regime, adx_val, rr_ratio)
+
+        win_proba = prob_meta['win_prob']
+        if self.ml_scorer and self.ml_scorer.is_trained:
+            ml_prob = self.ml_scorer.predict_proba(latest)
+            win_proba = max(win_proba, ml_prob)
+            log.debug(f"[ML Scoring] Probabilité de gain calculée: {win_proba:.1%}")
+
+        details['win_prob'] = win_proba
+        details['expected_value'] = prob_meta['expected_value']
+
+        # Validation Probabiliste : Requis P(Win) >= 55% et score >= minimum
+        is_valid_score = (adjusted_score >= effective_score_min) and (win_proba >= 0.55)
 
         should_long = (
-                adjusted_score >= effective_score_min and
+                is_valid_score and
                 trigger_long and
-                rr_ratio >= 2.0 and  # R:R minimum de 2:1
+                rr_ratio >= 1.5 and  # R:R minimum de 1.5:1
                 news_filter_passed
         )
 
         should_short = (
-                adjusted_score >= effective_score_min and
+                is_valid_score and
                 trigger_short and
-                rr_ratio >= 2.0 and  # R:R minimum de 2:1
+                rr_ratio >= 1.5 and  # R:R minimum de 1.5:1 (abaissé de 2.0 — conditions marché réelles)
                 news_filter_passed
         )
 
-        # ── P0-1 : Bloquer les BUY crypto si tendance D1 BTC baissière ───────────
-        # Stratégie : utiliser l'EMA200 de la paire elle-même comme proxy de la tendance D1.
-        # Si le prix est sous l'EMA200 H1, la tendance de fond est baissière — bloquer les BUY.
+        # Prevent simultaneous long and short signals
+        if should_long and should_short:
+            log.warning(f"Both long and short signals for {symbol}, disabling both")
+            should_long = False
+            should_short = False
+
+        # ── P0-1 : Filtre tendance de fond via EMA200 D1 (tendance journalière) ──────
+        # NOTE : L'EMA200 est maintenant calculée sur D1 pour représenter la vraie tendance journalière.
+        # Au lieu d'un blocage dur, appliquer une pénalité progressive basée sur l'écart %.
         if is_crypto and should_long:
             latest_bar_p01 = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else df_with_indicators.iloc[-1]
             price_p01 = latest_bar_p01.get('close', 0)
-            ema200_p01 = latest_bar_p01.get('ema_trend', 0)  # EMA200
-            if ema200_p01 > 0 and price_p01 < ema200_p01:
-                log.info(
-                    f"[P0-1] {symbol} : prix ({price_p01:.4f}) < EMA200 ({ema200_p01:.4f}) "
-                    f"— tendance D1 baissière, BUY BLOQUÉ."
-                )
-                should_long = False
+            ema200_d1 = latest_bar_p01.get('ema_d1', 0)  # EMA200 D1 (EMA50 quotidien)
+
+            if ema200_d1 > 0:
+                gap_pct = (ema200_d1 - price_p01) / ema200_d1 * 100 if price_p01 < ema200_d1 else 0
+
+                if gap_pct > 0:  # Seulement si le prix est sous l'EMA200 D1
+                    # Pénalité proportionnelle à l'écart (max -3 points pour -10% ou plus)
+                    penalty = min(3.0, max(0.0, (gap_pct / 10.0) * 3.0))  # -0.3 point pour chaque 1% d'écart
+                    penalty = min(penalty, 3.0)  # Plafonner la pénalité à 3 points max
+
+                    total_score = max(0, total_score - penalty)
+                    adjusted_score = max(0, adjusted_score - penalty)
+
+                    if penalty >= 2.0:  # Log significatif seulement pour pénalités importantes
+                        log.info(
+                            f"[P0-1] {symbol} : prix ({price_p01:.4f}) < EMA200 D1 ({ema200_d1:.4f}, "
+                            f"écart={gap_pct:.1f}%) — pénalité appliquée: {-penalty:.1f} points"
+                        )
+                    else:
+                        log.debug(
+                            f"[P0-1] {symbol} : prix légèrement sous EMA200 D1 ({gap_pct:.1f}%) "
+                            f"— pénalité mineure: {-penalty:.1f} points"
+                        )
 
         # ── P1-1 : Détecteur de régime inter-sessions (variation BTC 24h) ──────
         # Si BTC a baissé de > CRYPTO_BUY_BLOCK_BTC_DROP% sur 24h,
@@ -277,28 +409,10 @@ class TradingStrategy:
                 )
                 should_long = False
 
-        # Calculer la taille de position si on prend le trade
-        position_size = 0.0
+        # Position sizing is handled by the risk manager in the signal executor
+        entry_price = 0.0
         if should_long or should_short:
             entry_price = current_price
-            sl_for_size = sl_price if sl_price > 0 else entry_price - (latest['atr'] * self.config.get('SL_ATR_MULT', 1.5))
-            tp_for_size = tp_price if tp_price > 0 else entry_price + (latest['atr'] * self.config.get('TP_ATR_MULT', 3.0))
-
-            base_size = calculate_position_size_from_risk(
-                effective_balance, risk_pct, entry_price, sl_for_size
-            )
-
-            # Bug#5 fix : utiliser le win rate réel du RiskManager si disponible
-            estimated_win_rate = real_win_rate if real_win_rate is not None else 0.55
-            avg_win = rr_ratio * abs(entry_price - sl_for_size)
-            avg_loss = abs(entry_price - sl_for_size)
-
-            if avg_loss > 0 and rr_ratio > 0:
-                kelly_fraction_raw = calculate_kelly_fraction(estimated_win_rate, avg_win, avg_loss)
-                kelly_fraction_applied = min(kelly_fraction_raw * kelly_frac, 0.02)
-                position_size = base_size * kelly_fraction_applied
-            else:
-                position_size = base_size * kelly_frac
 
         # Mettre à jour l'historique des scores
         self.score_history.append({
@@ -308,7 +422,6 @@ class TradingStrategy:
             'trigger_long': trigger_long,
             'trigger_short': trigger_short,
             'rr_ratio': rr_ratio,
-            'position_size': position_size,
             'close_price': current_price
         })
 
@@ -321,12 +434,13 @@ class TradingStrategy:
             'timestamp': latest.name if hasattr(latest.name, 'isoformat') else datetime.now(),
             'symbol': 'UNKNOWN',  # À remplir par l'appelant
             'market_regime': market_regime,
+            'hmm_label': hmm_label,  # Phase 3 §2 — Label HMM détaillé pour les multiplicateurs ATR
             'is_trending': is_trending,
             'trend_score': trend_score,
             'ranging_score': ranging_score,
             'total_score': total_score,
             'adjusted_score': adjusted_score,
-            'score_min': self.score_min,
+            'score_min': effective_score_min,  # Score min effectif par asset_type
             'should_long': should_long,
             'should_short': should_short,
             'trigger_long': trigger_long,
@@ -335,12 +449,11 @@ class TradingStrategy:
             'sl_price': sl_price,
             'tp_price': tp_price,
             'rr_ratio': rr_ratio,
-            'position_size': position_size,
             'risk_amount': risk_amount,
             'sentiment_factor': sentiment_factor,
             'news_filter_passed': news_filter_passed,
             'indicators': self._extract_key_indicators(latest),
-            'details': details
+            'details': {**details, 'hmm_label': hmm_label}  # Aussi dans details pour rétro-compat
         }
 
         log.debug(f"Signal généré: {signal['market_regime']} | Score: {signal['total_score']:.1f}/{self.score_min} | "
@@ -355,191 +468,8 @@ class TradingStrategy:
         kelly_frac: float,
         context: Dict[str, Any]
     ) -> Tuple[float, float, float]:
-        """
-        Applique les règles de la base de connaissances crescendo :
-
-        Niveau 1 (Murphy) — Filtres de lecture du marché :
-          Les règles de type filter=True sont des conditions nécessaires.
-          Elles pénalisent le score si les fondations sont absentes.
-
-        Niveau 2 (Elder) — Modificateurs de score :
-          Triple Screen, Impulse System, divergences — ajustent le score.
-
-        Niveau 3 (Chan) — Ajusteurs de sizing :
-          Kelly, volatility scaling, fat tails — ajustent le sizing mathématique.
-
-        Chaque règle porte un champ 'actions' classifié par le SemanticRuleClassifier.
-        """
-        adjusted_score = current_score
-        adjusted_risk_pct = risk_pct
-        adjusted_kelly_frac = kelly_frac
-        market_regime = context.get('market_regime', 'UNKNOWN')
-        latest_bar = context.get('latest_bar', {})
-
-        for rule_info in self.knowledge_rules:
-            rule_id = rule_info.get("id", "?")
-            rule_level = rule_info.get("level", 2)
-            actions = rule_info.get("actions", [])
-
-            for action_info in actions:
-                action = action_info.get("action", "")
-                modifier = action_info.get("modifier", 0)
-
-                # ── NIVEAU 1 & 2 — GESTION DU RISQUE ──────────────────────
-                if action == "CAP_KELLY":
-                    original = adjusted_kelly_frac
-                    adjusted_kelly_frac = min(adjusted_kelly_frac, modifier)
-                    if original != adjusted_kelly_frac:
-                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → CAP_KELLY → {adjusted_kelly_frac}")
-
-                elif action == "CAP_RISK_PCT":
-                    original = adjusted_risk_pct
-                    adjusted_risk_pct = min(adjusted_risk_pct, modifier)
-                    if original != adjusted_risk_pct:
-                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → CAP_RISK_PCT → {adjusted_risk_pct}%")
-
-                # ── NIVEAU 1 & 2 — BONUS DE SCORE PAR RÉGIME ─────────────
-                elif action == "BONUS_SCORE_RANGING":
-                    if market_regime == 'RANGING':
-                        adjusted_score += modifier
-                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → +{modifier} (RANGING, score={adjusted_score:.1f})")
-                    elif market_regime == 'TRENDING':
-                        # Pénaliser les stratégies de range en tendance
-                        adjusted_score -= modifier * 0.5
-
-                elif action == "BONUS_SCORE_TRENDING":
-                    if market_regime == 'TRENDING':
-                        adjusted_score += modifier
-                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → +{modifier} (TRENDING, score={adjusted_score:.1f})")
-
-                # ── NIVEAU 1 & 2 — EMA SQUEEZE ───────────────────────────
-                elif action == "BONUS_EMA_SQUEEZE":
-                    close = latest_bar.get('close', 0)
-                    ema_fast = latest_bar.get('ema_fast', 0)
-                    if close > 0 and ema_fast > 0:
-                        diff_pct = abs(close - ema_fast) / close
-                        if diff_pct < 0.0015:
-                            adjusted_score += modifier
-                            log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → EMA Squeeze +{modifier}")
-
-                # ── NIVEAU 1 & 2 — PÉNALITÉ CONTRE-TENDANCE ─────────────
-                elif action == "PENALTY_COUNTER_TREND":
-                    is_trending = context.get('is_trending', False)
-                    trigger_long = context.get('trigger_long', False)
-                    trigger_short = context.get('trigger_short', False)
-                    # Détecter si le signal est contre-tendance
-                    trend_up = self.indicators.is_uptrend if hasattr(self.indicators, 'is_uptrend') else lambda x: False
-                    ema_fast_v = latest_bar.get('ema_fast', 0)
-                    ema_slow_v = latest_bar.get('ema_slow', 0)
-                    if is_trending:
-                        bullish_trend = ema_fast_v > ema_slow_v
-                        if (trigger_short and bullish_trend) or (trigger_long and not bullish_trend):
-                            adjusted_score += modifier  # modifier est négatif
-                            log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → PENALTY_COUNTER_TREND {modifier}")
-
-                # ── NIVEAU 2 — CONFIRMATION VOLUME ───────────────────────
-                elif action == "REQUIRE_VOLUME_CONFIRM":
-                    # Si le volume n'est pas au-dessus de la moyenne, pénaliser légèrement
-                    volume = latest_bar.get('volume', 0)
-                    volume_ma = latest_bar.get('volume_ma', volume)  # fallback = volume actuel
-                    if volume_ma > 0 and volume < volume_ma * 1.2:
-                        adjusted_score -= 0.3
-                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → Volume insuffisant -0.3")
-
-                # ── NIVEAU 2 — MULTI-TIMEFRAME ────────────────────────────
-                elif action == "ENFORCE_MULTI_TIMEFRAME":
-                    # Vérifier l'alignement HTF si disponible
-                    ema_htf = latest_bar.get('ema_htf', 0)
-                    ema_d1 = latest_bar.get('ema_d1', 0)
-                    if ema_htf > 0 and ema_d1 > 0:
-                        ema_fast_v = latest_bar.get('ema_fast', 0)
-                        ema_slow_v = latest_bar.get('ema_slow', 0)
-                        htf_bullish = ema_htf > ema_d1
-                        trend_bullish = ema_fast_v > ema_slow_v
-                        if htf_bullish != trend_bullish:  # Misalignement HTF
-                            adjusted_score -= 1.0
-                            log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → HTF misaligned -1.0")
-
-                # ── NIVEAU 3 — REJET SANS EDGE (Kelly < 0) ───────────────
-                elif action == "REJECT_NEGATIVE_KELLY":
-                    # Calculer rapidement si Kelly est négatif
-                    total_score_val = context.get('total_score', 0)
-                    if total_score_val <= 0:
-                        adjusted_score = -99  # Force le rejet du trade
-                        log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → Pas d'edge → rejet")
-
-                # ── NIVEAU 3 — SCALING PAR VOLATILITÉ ────────────────────
-                elif action == "SCALE_SIZE_BY_VOLATILITY":
-                    atr = latest_bar.get('atr', 0)
-                    close = latest_bar.get('close', 1)
-                    if atr > 0 and close > 0:
-                        atr_pct = atr / close
-                        if atr_pct > 0.03:  # ATR > 3% du prix = haute volatilité
-                            adjusted_kelly_frac *= modifier  # Réduire de 50%
-                            log.debug(f"🧠 [Niv.{rule_level}][{rule_id}] → Vol élevée → kelly * {modifier}")
-
-                # ── FLAGS (loggues, pas de changement de parametres) ──────
-                elif action in ("ENFORCE_STRICT_SL", "PSYCHOLOGY_FLAG"):
-                    pass  # Acknowledged -- no direct parameter change
-
-                # ── NOUVELLES ACTIONS (Livres 4-11) ──────────────────────
-
-                # ── CONTRARIAN SIGNAL (Montier, Contrarian Trading) ───────
-                elif action == "CONTRARIAN_SIGNAL":
-                    # Bonus si conditions contrarian : RSI extremes + regime ranging
-                    rsi = latest_bar.get('rsi', 50)
-                    if market_regime == 'RANGING':
-                        is_extreme = rsi < 25 or rsi > 75
-                        if is_extreme:
-                            adjusted_score += modifier
-                            log.debug(f"[Niv.{rule_level}][{rule_id}] CONTRARIAN_SIGNAL RSI={rsi:.0f} +{modifier}")
-
-                # ── VOLATILITY BREAKOUT (Kabbaj, Volman) ─────────────────
-                elif action == "VOLATILITY_BREAKOUT":
-                    # Bonus si BB squeeze detecte (bb_width_pct < percentile bas)
-                    bb_width = latest_bar.get('bb_width', 0)
-                    bb_width_pct = latest_bar.get('bb_width_pct', 0.5)
-                    if bb_width > 0 and bb_width_pct < 0.20:  # dans les 20% les plus etroits
-                        adjusted_score += modifier
-                        log.debug(f"[Niv.{rule_level}][{rule_id}] VOLATILITY_BREAKOUT squeeze +{modifier}")
-
-                # ── CRYPTO FUNDAMENTAL (Burniske) ─────────────────────────
-                elif action == "CRYPTO_FUNDAMENTAL_FILTER":
-                    # Informatif : si l'instrument est crypto, appliquer le filtre
-                    symbol = context.get('symbol', '')
-                    is_crypto = any(c in symbol.upper() for c in ['BTC', 'ETH', 'BNB', 'USDT', 'SOL'])
-                    if is_crypto:
-                        adjusted_score += modifier * 0.5  # influence moderee
-                        log.debug(f"[Niv.{rule_level}][{rule_id}] CRYPTO_FUNDAMENTAL_FILTER applied")
-
-                # ── ML CONFIDENCE BOOST (Jansen, Bissette) ───────────────
-                elif action == "ML_CONFIDENCE_BOOST":
-                    # Bonus si composite score depasse le seuil de confiance
-                    ml_confidence = context.get('ml_confidence', 0)
-                    if ml_confidence > 0.65:
-                        boost = modifier * ml_confidence
-                        adjusted_score += boost
-                        log.debug(f"[Niv.{rule_level}][{rule_id}] ML_CONFIDENCE {ml_confidence:.2f} +{boost:.2f}")
-
-                # ── BEHAVIORAL BIAS PENALTY (Montier, Steenbarger) ────────
-                elif action == "BEHAVIORAL_BIAS_PENALTY":
-                    # Penalite si overconfidence detectee (win streak recente)
-                    recent_wins = context.get('recent_consecutive_wins', 0)
-                    if recent_wins >= 5:
-                        adjusted_kelly_frac *= 0.75  # Reduire de 25% (surconfiance)
-                        log.debug(f"[Niv.{rule_level}][{rule_id}] OVERCONFIDENCE {recent_wins} wins, kelly*0.75")
-                    adjusted_score += modifier  # Penalite generale pour biais detecte
-
-                # ── LOSING STREAK PROTECTION (Steenbarger) ────────────────
-                elif action == "LOSING_STREAK_PROTECTION":
-                    consecutive_losses = context.get('consecutive_losses', 0)
-                    if consecutive_losses >= 3:
-                        # Reduire la taille proportionnellement aux pertes consecutives
-                        reduction = min(modifier * (consecutive_losses / 3), modifier)
-                        adjusted_kelly_frac *= reduction
-                        log.debug(f"[Niv.{rule_level}][{rule_id}] LOSING_STREAK {consecutive_losses}x kelly*{reduction:.2f}")
-
-        return adjusted_score, adjusted_risk_pct, adjusted_kelly_frac
+        from superbot.strategy.components.rule_engine import _apply_knowledge_rules
+        return _apply_knowledge_rules(self, current_score, risk_pct, kelly_frac, context)
 
 
     def _create_neutral_signal(self, reason: str) -> Dict[str, Any]:
@@ -570,335 +500,14 @@ class TradingStrategy:
             'details': {'reason': reason}
         }
 
-    def _calculate_trending_score(self, df: pd.DataFrame) -> Tuple[float, Dict[str, Any]]:
-        """
-        Calcule le score pour un marché en tendance (basé sur les deux bots existants).
+    def _calculate_trending_score(self, df, ema_fast_col='ema_fast', ema_slow_col='ema_slow', adx_threshold=22.0):
+        from superbot.strategy.components.scorer import _calculate_trending_score
+        return _calculate_trending_score(self, df, ema_fast_col, ema_slow_col, adx_threshold)
 
-        Returns:
-            Tuple de (score, détails)
-        """
-        latest = df.iloc[-1]
-        prev = df.iloc[-2] if len(df) >= 2 else latest
+    def _calculate_ranging_score(self, df):
+        from superbot.strategy.components.scorer import _calculate_ranging_score
+        return _calculate_ranging_score(self, df)
 
-        score = 0
-        details = {}
-
-        # 1. EMA croisée (prix vs EMA50 ou EMA9/21 cross) - 1 point
-        ema_fast = latest.get('ema_fast', 0)
-        ema_slow = latest.get('ema_slow', 0)
-        price = latest['close']
-        ema_cross_bullish = ema_fast > ema_slow
-        ema_cross_bearish = ema_fast < ema_slow
-        price_above_ema = price > ema_slow
-        price_below_ema = price < ema_slow
-
-        # Dans une tendance haussière, on veut prix > EMA lente et EMA rapide > EMA lente
-        # Dans une tendance baissière, on veut prix < EMA lente et EMA rapide < EMA lente
-        if self.indicators.is_uptrend(df):
-            if price_above_ema and ema_cross_bullish:
-                score += 1
-                details['ema_cross'] = 1
-            else:
-                details['ema_cross'] = 0
-        elif self.indicators.is_downtrend(df):
-            if price_below_ema and ema_cross_bearish:
-                score += 1
-                details['ema_cross'] = 1
-            else:
-                details['ema_cross'] = 0
-        else:
-            details['ema_cross'] = 0
-
-        # 2. Prix vs EMA200 (tendance de long terme) - 1 point
-        ema_trend = latest.get('ema_trend', 0)
-        if self.indicators.is_uptrend(df):
-            if price > ema_trend:
-                score += 1
-                details['price_vs_ema200'] = 1
-            else:
-                details['price_vs_ema200'] = 0
-        elif self.indicators.is_downtrend(df):
-            if price < ema_trend:
-                score += 1
-                details['price_vs_ema200'] = 1
-            else:
-                details['price_vs_ema200'] = 0
-        else:
-            details['price_vs_ema200'] = 0
-
-        # 3. Alignement HTF (EMA50 4h > EMA50 daily) - 1 point
-        ema_htf = latest.get('ema_htf', 0)  # EMA 50 sur timeframe supérieur
-        ema_d1 = latest.get('ema_d1', 0)    # EMA 50 daily
-        if ema_htf > 0 and ema_d1 > 0:
-            htf_aligned = ema_htf > ema_d1 if self.indicators.is_uptrend(df) else ema_htf < ema_d1
-            if htf_aligned:
-                score += 1
-                details['htf_alignment'] = 1
-            else:
-                details['htf_alignment'] = 0
-        else:
-            details['htf_alignment'] = 0
-
-        # 4. MACD croisée - 1 point
-        macd = latest.get('macd', 0)
-        macd_signal = latest.get('macd_signal', 0)
-        macd_cross_bullish = macd > macd_signal and prev.get('macd', 0) <= prev.get('macd_signal', 0)
-        macd_cross_bearish = macd < macd_signal and prev.get('macd', 0) >= prev.get('macd_signal', 0)
-
-        if self.indicators.is_uptrend(df):
-            if macd_cross_bullish or (macd > 0 and macd_signal > 0):
-                score += 1
-                details['macd_cross'] = 1
-            else:
-                details['macd_cross'] = 0
-        elif self.indicators.is_downtrend(df):
-            if macd_cross_bearish or (macd < 0 and macd_signal < 0):
-                score += 1
-                details['macd_cross'] = 1
-            else:
-                details['macd_cross'] = 0
-        else:
-            details['macd_cross'] = 0
-
-        # 5. Supertrend direction - 1 point
-        supertrend_trend = latest.get('supertrend_trend', 0)
-        if self.indicators.is_uptrend(df):
-            if supertrend_trend > 0:
-                score += 1
-                details['supertrend'] = 1
-            else:
-                details['supertrend'] = 0
-        elif self.indicators.is_downtrend(df):
-            if supertrend_trend < 0:
-                score += 1
-                details['supertrend'] = 1
-            else:
-                details['supertrend'] = 0
-        else:
-            details['supertrend'] = 0
-
-        # 6. ADX strength (confirmation de tendance) - 1 point
-        adx = latest.get('adx', 0)
-        adx_threshold = self.config.get('ADX_TREND', 22.0)
-        if adx > adx_threshold:
-            score += 1
-            details['adx_strength'] = 1
-        else:
-            details['adx_strength'] = 0
-
-        # 7. DI+ > DI- (pour tendance haussière) ou DI- > DI+ (pour tendance baissière) - 1 point
-        plus_di = latest.get('plus_di', 0)
-        minus_di = latest.get('minus_di', 0)
-        if self.indicators.is_uptrend(df):
-            if plus_di > minus_di:
-                score += 1
-                details['trend_momentum'] = 1
-            else:
-                details['trend_momentum'] = 0
-        elif self.indicators.is_downtrend(df):
-            if minus_di > plus_di:
-                score += 1
-                details['trend_momentum'] = 1
-            else:
-                details['trend_momentum'] = 0
-        else:
-            details['trend_momentum'] = 0
-
-        # 8. Chaikin Money Flow ou MFI confirmation (volume) - 1 point bonus
-        mfi = latest.get('mfi', 50)
-        if self.indicators.is_uptrend(df):
-            if mfi > 50:  # Pression d'achat
-                score += 1
-                details['volume_confirmation'] = 1
-            else:
-                details['volume_confirmation'] = 0
-        elif self.indicators.is_downtrend(df):
-            if mfi < 50:  # Pression de vente
-                score += 1
-                details['volume_confirmation'] = 1
-            else:
-                details['volume_confirmation'] = 0
-        else:
-            details['volume_confirmation'] = 0
-
-        # 9. Alexander Elder Impulse System confirmation - 1 point bonus
-        elder_impulse = latest.get('elder_impulse', 0)
-        if self.indicators.is_uptrend(df):
-            if elder_impulse == 1:  # Vert (EMA13 en hausse et MACD histogramme en hausse)
-                score += 1
-                details['elder_impulse_confirm'] = 1
-            else:
-                details['elder_impulse_confirm'] = 0
-        elif self.indicators.is_downtrend(df):
-            if elder_impulse == -1:  # Rouge (EMA13 en baisse et MACD histogramme en baisse)
-                score += 1
-                details['elder_impulse_confirm'] = 1
-            else:
-                details['elder_impulse_confirm'] = 0
-        else:
-            details['elder_impulse_confirm'] = 0
-
-        # 9-10. Bonus pour divergences
-        rsi_div_bull = latest.get('rsi_divergence_bullish', False)
-        rsi_div_bear = latest.get('rsi_divergence_bearish', False)
-        macd_div_bull = latest.get('macd_divergence_bullish', False)
-        macd_div_bear = latest.get('macd_divergence_bearish', False)
-        obv_div_bull = latest.get('obv_divergence_bullish', False)
-        obv_div_bear = latest.get('obv_divergence_bearish', False)
-
-        bonus_score = 0
-        if self.indicators.is_uptrend(df):
-            if rsi_div_bull or macd_div_bull or obv_div_bull:
-                bonus_score += 1
-        elif self.indicators.is_downtrend(df):
-            if rsi_div_bear or macd_div_bear or obv_div_bear:
-                bonus_score += 1
-
-        # Deuxième bonus: tendance forte avec ADX élevé
-        if adx > 25:  # ADX très fort
-            bonus_score += 1
-
-        score += bonus_score
-        details['divergence_bonus'] = bonus_score
-
-        # S'assurer que le score ne dépasse pas 10
-        score = min(score, 10)
-
-        return score, details
-
-    def _calculate_ranging_score(self, df: pd.DataFrame) -> Tuple[float, Dict[str, Any]]:
-        """
-        Calcule le score pour un marché en range (basé sur les deux bots existants).
-
-        Returns:
-            Tuple de (score, détails)
-        """
-        latest = df.iloc[-1]
-        prev = df.iloc[-2] if len(df) >= 2 else latest
-
-        score = 0
-        details = {}
-
-        # 1. Rejet RSI (RSI < 30 pour achat, RSI > 70 pour vente)
-        rsi = latest.get('rsi', 50)
-        rsi_ob = self.config.get('RSI_OB', 70)
-        rsi_os = self.config.get('RSI_OS', 30)
-
-        rsi_oversold = rsi < rsi_os
-        rsi_overbought = rsi > rsi_ob
-
-        details['rsi_extreme'] = 1 if (rsi_oversold or rsi_overbought) else 0
-
-        # 2. Stoch RSI croisement
-        stoch_k = latest.get('stoch_k', 50)
-        stoch_d = latest.get('stoch_d', 50)
-        stoch_k_prev = prev.get('stoch_k', 50)
-        stoch_d_prev = prev.get('stoch_d', 50)
-
-        stoch_cross_up = stoch_k > stoch_d and stoch_k_prev <= stoch_d_prev
-        stoch_cross_down = stoch_k < stoch_d and stoch_k_prev >= stoch_d_prev
-
-        details['stoch_rsi_cross'] = 1 if (stoch_cross_up or stoch_cross_down) else 0
-
-        # 3. Position vs BB Middle - 1 point
-        bb_middle = latest.get('bb_middle', 0)
-        bb_upper = latest.get('bb_upper', 0)
-        bb_lower = latest.get('bb_lower', 0)
-        price = latest['close']
-
-        bb_position = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper != bb_lower else 0.5
-        if 0.2 <= bb_position <= 0.8:
-            score += 1
-            details['bb_position'] = 1
-        else:
-            details['bb_position'] = 0
-
-        # 4. Chandeliers Price Action - 1 point
-        candle_signal = self._detect_candlestick_pattern(df)
-        if candle_signal != 0:
-            score += 1
-            details['price_action'] = 1
-        else:
-            details['price_action'] = 0
-
-        # 5. Proximité S/R - 1 point
-        support, resistance = self.indicators.get_support_resistance_levels(df, lookback=20)
-        price_near_support = self.indicators.is_price_near_level(price, support, threshold_pct=0.002)
-        price_near_resistance = self.indicators.is_price_near_level(price, resistance, threshold_pct=0.002)
-
-        if price_near_support or price_near_resistance:
-            score += 1
-            details['sr_proximity'] = 1
-        else:
-            details['sr_proximity'] = 0
-
-        # 6. Croisement histogramme MACD - 1 point
-        macd_hist = latest.get('macd_histogram', 0)
-        macd_hist_prev = prev.get('macd_histogram', 0)
-        macd_hist_cross = (macd_hist > 0 and macd_hist_prev <= 0) or (macd_hist < 0 and macd_hist_prev >= 0)
-
-        if macd_hist_cross:
-            score += 1
-            details['macd_hist_cross'] = 1
-        else:
-            details['macd_hist_cross'] = 0
-
-        # 7. Épuisement volume MFI - 1 point
-        mfi = latest.get('mfi', 50)
-        mfi_exhaustion_high = mfi > 80
-        mfi_exhaustion_low = mfi < 20
-
-        if mfi_exhaustion_high or mfi_exhaustion_low:
-            score += 1
-            details['mfi_exhaustion'] = 1
-        else:
-            details['mfi_exhaustion'] = 0
-
-        # 8. Proximité pivots - 1 point
-        if len(df) >= 2:
-            prev_high = df.iloc[-2]['high']
-            prev_low = df.iloc[-2]['low']
-            prev_close = df.iloc[-2]['close']
-            pivots = self.indicators.calculate_pivot_points(prev_high, prev_low, prev_close)
-            pivot_levels = [pivots['pivot'], pivots['r1'], pivots['s1'], pivots['r2'], pivots['s2']]
-
-            near_pivot = any(self.indicators.is_price_near_level(price, level, threshold_pct=0.0015)
-                           for level in pivot_levels)
-
-            if near_pivot:
-                score += 1
-                details['pivot_proximity'] = 1
-            else:
-                details['pivot_proximity'] = 0
-        else:
-            details['pivot_proximity'] = 0
-
-        # 9-10. Bonus pour divergences
-        rsi_div_bull = latest.get('rsi_divergence_bullish', False)
-        rsi_div_bear = latest.get('rsi_divergence_bearish', False)
-        macd_div_bull = latest.get('macd_divergence_bullish', False)
-        macd_div_bear = latest.get('macd_divergence_bearish', False)
-        obv_div_bull = latest.get('obv_divergence_bullish', False)
-        obv_div_bear = latest.get('obv_divergence_bearish', False)
-
-        bonus_score = 0
-        if price_near_support and (rsi_div_bull or macd_div_bull or obv_div_bull):
-            bonus_score += 1
-        elif price_near_resistance and (rsi_div_bear or macd_div_bear or obv_div_bear):
-            bonus_score += 1
-
-        # Deuxième bonus: compression de volatilité (Bandwidth des BB faible)
-        bb_width = latest.get('bb_width', 1)
-        if bb_width < 0.02:
-            bonus_score += 1
-
-        score += bonus_score
-        details['divergence_bonus'] = bonus_score
-
-        # S'assurer que le score ne dépasse pas 10
-        score = min(score, 10)
-
-        return score, details
 
     def _detect_candlestick_pattern(self, df: pd.DataFrame, lookback: int = 5) -> int:
         """
@@ -958,128 +567,48 @@ class TradingStrategy:
 
         return 0
 
-    def _check_entry_triggers(self, df: pd.DataFrame, is_trending: bool) -> Tuple[bool, bool]:
+    def _check_entry_triggers(
+        self, df: pd.DataFrame, is_trending: bool,
+        ema_fast_col: str = 'ema_fast', ema_slow_col: str = 'ema_slow',
+        adx_threshold: float = 22.0,
+        is_crypto: bool = False, is_forex: bool = False, is_stock: bool = False
+    ) -> Tuple[bool, bool]:
+        from superbot.strategy.components.signal_generator import _check_entry_triggers
+        return _check_entry_triggers(
+            self, df, is_trending, ema_fast_col, ema_slow_col, adx_threshold,
+            is_crypto, is_forex, is_stock
+        )
+
+    def _calculate_potential_rr(
+        self, latest: pd.Series, current_price: float,
+        sl_mult: float = None, tp_mult: float = None
+    ) -> Tuple[float, float, float]:
         """
-        Vérifie les conditions de déclenchement pour entrer en position.
-        """
-        if len(df) < 2:
-            return False, False
-
-        latest = df.iloc[-1]
-        prev = df.iloc[-2]
-
-        trigger_long = False
-        trigger_short = False
-
-        if is_trending:
-            if self.indicators.is_uptrend(df):
-                ema_cross = (latest.get('ema_fast', 0) > latest.get('ema_slow', 0) and
-                           prev.get('ema_fast', 0) <= prev.get('ema_slow', 0))
-                macd_cross = (latest.get('macd', 0) > latest.get('macd_signal', 0) and
-                            prev.get('macd', 0) <= prev.get('macd_signal', 0))
-                supertrend_up = latest.get('supertrend_trend', 0) > 0 and prev.get('supertrend_trend', 0) <= 0
-
-                # Pullback event: price touched EMA_slow and closed above it, while trend is still up
-                pullback_long = (latest.get('ema_fast', 0) > latest.get('ema_slow', 0) and
-                                 prev['low'] <= prev.get('ema_slow', 0) and
-                                 latest['close'] > latest.get('ema_slow', 0) and
-                                 latest.get('supertrend_trend', 0) > 0 and
-                                 latest.get('rsi', 50) < 65)  # Avoid buying when overextended
-
-                # --- RÈGLES ALEXANDER ELDER ---
-                # Ne jamais acheter si le système d'impulsion est rouge (tendance et momentum contraires)
-                elder_allow_long = latest.get('elder_impulse', 0) != -1
-                # Bug#3 fix : elder_screen1_ok est True SEULEMENT si l'indicateur existe ET est positif
-                # Si l'indicateur est absent, on ne bloque pas mais on ne le valide pas non plus
-                _screen1_val = latest.get('elder_screen1_up', None)
-                elder_screen1_ok = (_screen1_val is None) or bool(_screen1_val)
-
-                trigger_long = (ema_cross or macd_cross or supertrend_up or pullback_long) and elder_allow_long and elder_screen1_ok
-
-            elif self.indicators.is_downtrend(df):
-                ema_cross = (latest.get('ema_fast', 0) < latest.get('ema_slow', 0) and
-                           prev.get('ema_fast', 0) >= prev.get('ema_slow', 0))
-                macd_cross = (latest.get('macd', 0) < latest.get('macd_signal', 0) and
-                            prev.get('macd', 0) <= prev.get('macd_signal', 0))
-                supertrend_down = latest.get('supertrend_trend', 0) < 0 and prev.get('supertrend_trend', 0) >= 0
-
-                # Pullback event: price touched EMA_slow and closed below it, while trend is still down
-                pullback_short = (latest.get('ema_fast', 0) < latest.get('ema_slow', 0) and
-                                  prev['high'] >= prev.get('ema_slow', 0) and
-                                  latest['close'] < latest.get('ema_slow', 0) and
-                                  latest.get('supertrend_trend', 0) < 0 and
-                                  latest.get('rsi', 50) > 35)  # Avoid selling when oversold
-
-                # --- RÈGLES ALEXANDER ELDER ---
-                # Ne jamais vendre si le système d'impulsion est vert (tendance et momentum contraires)
-                elder_allow_short = latest.get('elder_impulse', 0) != 1
-                # Bug#3 fix : même logique de sécurité pour l'écran baissier
-                _screen1_down_val = latest.get('elder_screen1_down', None)
-                elder_screen1_ok = (_screen1_down_val is None) or bool(_screen1_down_val)
-
-                trigger_short = (ema_cross or macd_cross or supertrend_down or pullback_short) and elder_allow_short and elder_screen1_ok
-        else:
-            rsi = latest.get('rsi', 50)
-            rsi_prev = prev.get('rsi', 50)
-            rsi_os = self.config.get('RSI_OS', 30)
-            rsi_ob = self.config.get('RSI_OB', 70)
-            
-            stoch_k = latest.get('stoch_k', 50)
-            stoch_k_prev = prev.get('stoch_k', 50)
-
-            # Événements de croisement pour le range (sortie de zone extrême)
-            rsi_cross_up = rsi > rsi_os and rsi_prev <= rsi_os
-            stoch_cross_up = stoch_k > 20 and stoch_k_prev <= 20
-            
-            rsi_cross_down = rsi < rsi_ob and rsi_prev >= rsi_ob
-            stoch_cross_down = stoch_k < 80 and stoch_k_prev >= 80
-
-            candle_bullish = self._detect_candlestick_pattern(df) == 1
-            candle_bearish = self._detect_candlestick_pattern(df) == -1
-
-            support, resistance = self.indicators.get_support_resistance_levels(df)
-            near_support = self.indicators.is_price_near_level(latest['close'], support, threshold_pct=0.003)
-            near_resistance = self.indicators.is_price_near_level(latest['close'], resistance, threshold_pct=0.003)
-
-            # --- RÈGLES THAMI KABBAJ (Squeeze Breakout) ---
-            kabbaj_squeeze_breakout_long = prev.get('kabbaj_squeeze', False) and latest['close'] > latest.get('bb_upper', 0)
-            kabbaj_squeeze_breakout_short = prev.get('kabbaj_squeeze', False) and latest['close'] < latest.get('bb_lower', 0)
-
-            # Bug#4 fix : parenthèses explicites + filtre volume obligatoire sur le squeeze Kabbaj
-            # Sans parenthèses, Python évaluait : (A and B) or C — le squeeze seul suffisait à entrer
-            volume = latest.get('volume', 0)
-            volume_ma = latest.get('volume_ma', volume)
-            volume_above_avg = volume >= volume_ma * 1.1 if volume_ma > 0 else True
-
-            kabbaj_squeeze_breakout_long = kabbaj_squeeze_breakout_long and volume_above_avg
-            kabbaj_squeeze_breakout_short = kabbaj_squeeze_breakout_short and volume_above_avg
-
-            if ((rsi_cross_up or stoch_cross_up) and (candle_bullish or near_support)) or kabbaj_squeeze_breakout_long:
-                trigger_long = True
-
-            if ((rsi_cross_down or stoch_cross_down) and (candle_bearish or near_resistance)) or kabbaj_squeeze_breakout_short:
-                trigger_short = True
-
-        return trigger_long, trigger_short
-
-    def _calculate_potential_rr(self, latest: pd.Series, current_price: float) -> Tuple[float, float, float]:
-        """
-        Calcule le ratio risque/rendement potentiel basé sur les niveaux ATR.
+        Calcule le ratio risque/rendement potentiel brut (sans déduire les frais).
+        Les multiplicateurs SL/TP peuvent être passés en paramètre pour s'adapter
+        à chaque classe d'actif (crypto sl=2.0, forex sl=1.5, stock sl=1.5).
         """
         atr = latest.get('atr', 0)
-        if atr == 0:
+        if atr == 0 or pd.isna(atr):
             return 0.0, 0.0, 0.0
 
-        sl_mult = self.config.get('SL_ATR_MULT', 1.5)
-        tp_mult = self.config.get('TP_ATR_MULT', 3.0)
+        # Utiliser les paramètres passés, sinon fallback sur le config global
+        if sl_mult is None:
+            sl_mult = self.config.get('SL_ATR_MULT', 1.5)
+        if tp_mult is None:
+            tp_mult = self.config.get('TP_ATR_MULT', 3.0)
 
         sl_price = current_price - (atr * sl_mult)
         tp_price = current_price + (atr * tp_mult)
 
-        risk = current_price - sl_price
-        reward = tp_price - current_price
+        risk = current_price - sl_price    # = atr * sl_mult
+        reward = tp_price - current_price  # = atr * tp_mult
 
-        if risk <= 0:
+        # NOTE: Le R:R est calculé BRUT (sans déduire les frais) pour la décision d'entrée.
+        # Les coûts de transaction sont déjà pris en compte dans le sizing du RiskManager.
+        # Déduire les coûts ici dégradait artificiellement un R:R théorique de 2.0 → ~1.3
+        # et bloquait tous les trades sur crypto/stock en conditions de marché normales.
+        if risk <= 0 or reward <= 0:
             return 0.0, sl_price, tp_price
 
         rr_ratio = round(reward / risk, 4)

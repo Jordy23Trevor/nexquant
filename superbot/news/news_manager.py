@@ -115,36 +115,69 @@ class NewsManager:
         log.info("NewsManager arrêté")
 
     def _update_loop(self):
-        """Boucle principale de mise à jour des nouvelles."""
+        """Boucle principale de mise à jour des nouvelles.
+
+        ⚠️ ROBUSTESSE (fix freeze 6h26 du 24/07/2026) :
+        Chaque source est lancée dans un thread isolé avec timeout.
+        Si une source freeze (DNS, SSL), le cycle ne bloque pas.
+        """
         while self.running:
             try:
-                self._update_all_sources()
+                self._update_all_sources_non_blocking()
                 time.sleep(self.update_interval)
             except Exception as e:
                 log.error(f"Erreur dans la boucle de mise à jour des nouvelles: {e}")
-                time.sleep(min(self.update_interval, 60))  # Attendre au moins 1 minute en cas d'erreur
+                time.sleep(min(self.update_interval, 60))
+
+    def _run_source_with_timeout(self, fn, name: str, timeout: float = 15.0):
+        """
+        Exécute une fonction de mise à jour dans un thread isolé avec timeout strict.
+        Si le thread ne se termine pas dans le délai imparti, on l'abandonne et
+        on continue — la source reste en cache jusqu'à la prochaine tentative.
+
+        Args:
+            fn: Callable à exécuter (ex: self._update_fear_greed)
+            name: Nom lisible de la source (pour les logs)
+            timeout: Délai max en secondes (défaut 15s)
+        """
+        t = threading.Thread(target=fn, name=f"news_{name}", daemon=True)
+        t.start()
+        t.join(timeout=timeout)
+        if t.is_alive():
+            log.warning(
+                f"⚠️ [NewsManager] Source '{name}' a dépassé le timeout de {timeout}s — "
+                f"poursuite avec les données en cache. Le thread continuera en arrière-plan."
+            )
+
+    def _update_all_sources_non_blocking(self):
+        """
+        Met à jour toutes les sources de nouvelles de manière non-bloquante.
+
+        Chaque source est isolée dans son propre thread avec un timeout de 15s.
+        Même si une source est injoignable (DNS, SSL, timeout réseau), le cycle
+        de trading ne sera jamais bloqué.
+        """
+        sources = [
+            (self._update_fear_greed,       "fear_greed"),
+            (self._update_forex_factory_news, "forex_factory"),
+            (self._update_crypto_news,       "crypto"),
+            (self._update_social_sentiment,  "social_sentiment"),
+        ]
+
+        for fn, name in sources:
+            self._run_source_with_timeout(fn, name, timeout=15.0)
+
+        # Calculer le sentiment global après les mises à jour
+        try:
+            self._calculate_global_sentiment()
+        except Exception as e:
+            log.warning(f"[NewsManager] Erreur calcul sentiment global (non-bloquant): {e}")
+
+        log.debug("Mise à jour des nouvelles terminée (non-bloquant)")
 
     def _update_all_sources(self):
-        """Met à jour toutes les sources de nouvelles disponibles."""
-        try:
-            # Mettre à jour le Fear & Greed Index
-            self._update_fear_greed()
-
-            # Mettre à jour les nouvelles Forex Factory (pour forex)
-            self._update_forex_factory_news()
-
-            # Mettre à jour les nouvelles crypto (CoinGecko, CryptoCompare)
-            self._update_crypto_news()
-
-            # Mettre à jour les données des réseaux sociaux (simplifié)
-            self._update_social_sentiment()
-
-            # Calculer le score de sentiment global
-            self._calculate_global_sentiment()
-
-            log.debug("Mise à jour des nouvelles terminée")
-        except Exception as e:
-            log.error(f"Erreur lors de la mise à jour des sources: {e}")
+        """Alias de compatibilité → délègue au mode non-bloquant."""
+        self._update_all_sources_non_blocking()
 
     def _update_fear_greed(self):
         """Met à jour l'indice Fear & Greed."""
@@ -178,10 +211,14 @@ class NewsManager:
                     log.debug(f"Fear & Greed mis à jour: {value} ({classification})")
                 else:
                     log.warning("Réponse Fear & Greed vide ou mal formée")
+                    self._cache_timestamps[cache_key] = datetime.now()
             else:
                 log.warning(f"API Fear & Greed retourné le code {response.status_code}")
+                self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour du Fear & Greed: {e}")
+            # Étendre le cache pour éviter les retry en boucle rapide
+            self._cache_timestamps[cache_key] = datetime.now() - timedelta(minutes=self.update_interval / 60 - 60)
 
     def _update_forex_factory_news(self):
         """Met à jour les nouvelles de Forex Factory."""
@@ -265,8 +302,12 @@ class NewsManager:
                 log.debug(f"Forex Factory news mis à jour: {len(news_events)} événements")
             else:
                 log.warning(f"API Forex Factory retourné le code {response.status_code}")
+                self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour des nouvelles Forex Factory: {e}")
+            # ⚠️ En cas d'erreur réseau, étendre le cache à 60min pour éviter les
+            # retry frénétiques qui peuvent bloquer le cycle (fix freeze 24/07/2026)
+            self._cache_timestamps[cache_key] = datetime.now() - timedelta(minutes=self.update_interval / 60 - 60)
 
     def _update_crypto_news(self):
         """Met à jour les nouvelles crypto depuis CoinGecko et CryptoCompare."""
@@ -301,8 +342,10 @@ class NewsManager:
                 log.debug("CoinGecko trends mis à jour")
             else:
                 log.warning(f"API CoinGecko trends retourné le code {response.status_code}")
+                self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour des tendances CoinGecko: {e}")
+            self._cache_timestamps[cache_key] = datetime.now()
 
     def _update_cryptocompare_news(self):
         """Met à jour les nouvelles depuis CryptoCompare (nécessite une clé API)."""
@@ -390,41 +433,48 @@ class NewsManager:
                     log.debug(f"CryptoCompare news mis à jour: {len(news_events)} événements")
                 else:
                     log.warning("Réponse CryptoCompare news vide ou mal formée")
+                    self._cache_timestamps[cache_key] = datetime.now()
             else:
                 log.warning(f"API CryptoCompare news retourné le code {response.status_code}")
+                self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour des nouvelles CryptoCompare: {e}")
+            self._cache_timestamps[cache_key] = datetime.now()
 
     def _update_social_sentiment(self):
         """
-        Met à jour le sentiment des réseaux sociaux.
-        Dans une implémentation complète, ceci utiliserait les API de Twitter, Reddit, etc.
-        Pour l'instant, on utilise une approximation basée sur le prix et le volume.
+        Met à jour le sentiment via RSS et NLP (VADER/FinBERT).
         """
         try:
             cache_key = "social_sentiment"
             if self._is_cached_valid(cache_key, minutes=10):  # Cache de 10 minutes
                 return
 
-            # Dans une implémentation réelle, on appellerait les API de Twitter/Reddit ici
-            # Pour ce prototype, on utilise une valeur neutre avec une légère variation aléatoire
-            # basée sur l'heure du jour pour simuler du mouvement
-            hour = datetime.now().hour
-            base_sentiment = 0.0
-            # Variation quotidienne simulée (plus positif en matinée, plus négatif en soirée)
-            daily_variation = 0.2 * np.sin((hour - 6) * np.pi / 12)  # Cycle de 24h centré sur midi
-            random_variation = 0.1 * (np.random.random() - 0.5)  # Variation aléatoire ±0.05
-            social_sentiment = base_sentiment + daily_variation + random_variation
-            social_sentiment = max(-1.0, min(1.0, social_sentiment))  # Limiter à [-1, 1]
+            # Initialiser le scraper RSS et l'analyseur NLP si pas encore fait
+            if not hasattr(self, '_rss_scraper'):
+                from superbot.news.rss_scraper import RssScraper
+                from superbot.news.sentiment_analyzer import SentimentAnalyzer
+                self._rss_scraper = RssScraper()
+                # On désactive FinBERT par défaut pour le scraping rapide (utiliser VADER)
+                self._sentiment_analyzer = SentimentAnalyzer(use_finbert=False)
+
+            # Récupérer les articles récents (toutes catégories confondues)
+            articles = self._rss_scraper.fetch_all()
+            
+            if articles:
+                # Calculer le score de sentiment via NLP sur les titres/résumés
+                social_sentiment = self._sentiment_analyzer.analyze_rss_items(articles)
+            else:
+                social_sentiment = 0.0
 
             self._cache[cache_key] = {
                 'sentiment': social_sentiment,
                 'timestamp': datetime.now()
             }
             self._cache_timestamps[cache_key] = datetime.now()
-            log.debug(f"Social sentiment mis à jour: {social_sentiment:.3f}")
+            log.debug(f"Sentiment NLP mis à jour (sur {len(articles) if articles else 0} articles): {social_sentiment:.3f}")
         except Exception as e:
-            log.error(f"Erreur lors de la mise à jour du sentiment social: {e}")
+            log.error(f"Erreur lors de la mise à jour du sentiment NLP: {e}")
 
     def _calculate_global_sentiment(self):
         """
@@ -670,7 +720,7 @@ class NewsManager:
         with self.news_lock:
             return [
                 event for event in self.latest_news
-                if event.timestamp > cutoff_time and event.is_high_impact()
+                if event.timestamp > cutoff_time
             ]
 
     def get_fear_greed_level(self) -> Tuple[Optional[int], Optional[str]]:
@@ -710,7 +760,19 @@ class NewsManager:
             'on_chain': self.latest_sentiment.on_chain,
             'timestamp': self.latest_sentiment.timestamp.isoformat(),
             'recent_high_impact_count': len(self.get_recent_high_impact_news(hours=6)),
-            'avoidance_active': self.should_avoid_trading_due_to_news()[0]
+            'avoidance_active': self.should_avoid_trading_due_to_news()[0],
+            'recent_events': [
+                {
+                    'title': event.title,
+                    'source': event.source,
+                    'timestamp': event.timestamp.isoformat(),
+                    'impact': event.impact,
+                    'currency': event.currency,
+                    'description': event.description,
+                    'url': event.url
+                }
+                for event in self.get_recent_high_impact_news(hours=24)
+            ]
         }
 
     def _is_cached_valid(self, key: str, minutes: int = 10) -> bool:

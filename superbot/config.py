@@ -13,6 +13,7 @@ load_dotenv(dotenv_path=env_path)
 # BROKER CONFIGURATION
 # =============================================================================
 BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, mt5
+ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "false").lower() == "true"
 
 # =============================================================================
 # METATRADER 5 (MT5) CONFIGURATION (associated with Fusion Markets)
@@ -41,9 +42,8 @@ ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", _default_alpaca_url)
 ALPACA_API_VERSION = os.getenv("ALPACA_API_VERSION", "v2")
 
 # =============================================================================
-# PAPER FOREX ENGINE CONFIGURATION
+# FOREX DATA PROVIDERS (utilisé par MT5)
 # =============================================================================
-# Paper trading parameters for forex simulation
 FOREX_DEFAULT_LEVERAGE = int(os.getenv("FOREX_DEFAULT_LEVERAGE", "30"))  # Typical forex leverage
 FOREX_MARGIN_CALL_LEVEL = float(os.getenv("FOREX_MARGIN_CALL_LEVEL", "0.5"))  # 50% margin used triggers call
 FOREX_STOP_OUT_LEVEL = float(os.getenv("FOREX_STOP_OUT_LEVEL", "0.2"))  # 20% margin used triggers stop out
@@ -57,7 +57,7 @@ FOREX_DATA_PROVIDER = os.getenv("FOREX_DATA_PROVIDER", "twelvedata")
 # Instruments to trade - format depends on broker
 # For Binance: "BTC/USDT", "ETH/USDT"
 # For Alpaca: "SPY", "QQQ", "AAPL"
-# For Paper Forex: "EUR/USD", "GBP/USD", "USD/JPY"
+# For MT5: "EURUSD", "GBPUSD", "USDJPY"
 INSTRUMENTS_STR = os.getenv("INSTRUMENTS", "BTC/USDT")
 INSTRUMENTS = [s.strip() for s in INSTRUMENTS_STR.split(",")]
 
@@ -83,6 +83,12 @@ CRYPTO_BUY_BLOCK_BTC_DROP = float(os.getenv("CRYPTO_BUY_BLOCK_BTC_DROP", "2.0"))
 #         Réduit l'overtrading en période de range directionnel faible.
 CRYPTO_BNB_VOLUME_FACTOR = float(os.getenv("CRYPTO_BNB_VOLUME_FACTOR", "1.5"))
 
+# =============================================================================
+# TRANSACTION COSTS (Phase 2 - Realism Modeling)
+# =============================================================================
+COMMISSION_PCT = float(os.getenv("COMMISSION_PCT", "0.1"))
+SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.05"))
+
 # Timeframes for analysis
 GRANULARITY = os.getenv("GRANULARITY", "1h")  # Main trading timeframe
 HTF_GRANULARITY = os.getenv("HTF_GRANULARITY", "4h")  # Higher timeframe for trend confirmation
@@ -93,13 +99,53 @@ N_CANDLES = int(os.getenv("N_CANDLES", "500"))  # Number of candles to fetch
 # =============================================================================
 # TECHNICAL INDICATOR PARAMETERS
 # =============================================================================
-# Moving Averages
+# Moving Averages (paramètres globaux — utilisés si aucun paramètre spécifique n'est défini)
 EMA_FAST = int(os.getenv("EMA_FAST", "9"))
 EMA_SLOW = int(os.getenv("EMA_SLOW", "21"))
 EMA_TREND = int(os.getenv("EMA_TREND", "200"))  # Long-term trend
 HTF_EMA = int(os.getenv("HTF_EMA", "50"))  # Higher timeframe EMA
 D1_EMA = int(os.getenv("D1_EMA", "50"))  # Daily EMA
 W1_EMA = int(os.getenv("W1_EMA", "20"))  # Weekly EMA (Elder)
+
+# =============================================================================
+# PARAMÈTRES PAR CLASSE D'ACTIFS (override des paramètres globaux)
+# =============================================================================
+# --- CRYPTO (Binance Futures) ---
+# EMA(21,55) : moins de bruit sur H1 crypto vs EMA(9,21) trop rapides
+# ADX 25     : seuil plus élevé car la crypto est volatile même en range
+# SCORE_MIN 7 : confirmation supplémentaire nécessaire sur marchés manipulables
+EMA_FAST_CRYPTO = int(os.getenv("EMA_FAST_CRYPTO", "21"))
+EMA_SLOW_CRYPTO = int(os.getenv("EMA_SLOW_CRYPTO", "55"))
+ADX_TREND_CRYPTO = int(os.getenv("ADX_TREND_CRYPTO", "25"))
+SCORE_MIN_CRYPTO = int(os.getenv("SCORE_MIN_CRYPTO", "7"))
+SL_ATR_MULT_CRYPTO = float(os.getenv("SL_ATR_MULT_CRYPTO", "2.0"))  # SL plus large (crypto volatile)
+TP_ATR_MULT_CRYPTO = float(os.getenv("TP_ATR_MULT_CRYPTO", "4.0"))  # TP plus ambitieux
+
+# --- FOREX (MetaTrader 5 — marchés institutionnels) ---
+# EMA(14,50) : Plus réactif pour capter les tendances de moyen terme
+# ADX 18     : Abaissé pour permettre plus de signaux en tendance faible
+# SCORE_MIN 5 : Permet plus d'opportunités de trades
+EMA_FAST_FOREX = int(os.getenv("EMA_FAST_FOREX", "14"))
+EMA_SLOW_FOREX = int(os.getenv("EMA_SLOW_FOREX", "50"))
+ADX_TREND_FOREX = int(os.getenv("ADX_TREND_FOREX", "18"))
+SCORE_MIN_FOREX = int(os.getenv("SCORE_MIN_FOREX", "5"))
+SL_ATR_MULT_FOREX = float(os.getenv("SL_ATR_MULT_FOREX", "1.5"))   # SL standard
+TP_ATR_MULT_FOREX = float(os.getenv("TP_ATR_MULT_FOREX", "3.0"))   # TP standard
+# News économiques maçjeures à éviter (nombres en minutes avant/après)
+FOREX_NEWS_AVOID_MINUTES = int(os.getenv("FOREX_NEWS_AVOID_MINUTES", "30"))
+
+# --- ETF/STOCKS (Alpaca US Markets) ---
+# EMA(20,50) : références institutionnelles US (EMA20 = SMA20 standard, EMA50 clé)
+# ADX 20     : ETF trend est stable, seuil standard
+# SCORE_MIN 5 : ETF moins volatils, moins de signal à filtrer
+# ALLOW_SHORT_STOCK false : éviter les shorts sur ETF (PDT rule, margin costs)
+EMA_FAST_STOCK = int(os.getenv("EMA_FAST_STOCK", "20"))
+EMA_SLOW_STOCK = int(os.getenv("EMA_SLOW_STOCK", "50"))
+ADX_TREND_STOCK = int(os.getenv("ADX_TREND_STOCK", "20"))
+SCORE_MIN_STOCK = int(os.getenv("SCORE_MIN_STOCK", "5"))
+SL_ATR_MULT_STOCK = float(os.getenv("SL_ATR_MULT_STOCK", "1.5"))   # SL standard
+TP_ATR_MULT_STOCK = float(os.getenv("TP_ATR_MULT_STOCK", "3.0"))   # TP standard
+ALLOW_SHORT_STOCK = os.getenv("ALLOW_SHORT_STOCK", "false").lower() == "true"  # Désactivé par défaut
 
 # RSI
 RSI_LEN = int(os.getenv("RSI_LEN", "14"))
@@ -139,42 +185,71 @@ VWAP_WINDOW = int(os.getenv("VWAP_WINDOW", "14"))
 # ️ RISK MANAGEMENT PARAMETERS
 # =============================================================================
 # Risk per trade (account currency %)
-RISK_PCT = float(os.getenv("RISK_PCT", "1.0"))
+RISK_PCT = float(os.getenv("RISK_PCT", "1.5"))
 
 # Stop Loss and Take Profit multiples of ATR
 SL_ATR_MULT = float(os.getenv("SL_ATR_MULT", "1.5"))  # Stop Loss = 1.5 × ATR
-TP_ATR_MULT = float(os.getenv("TP_ATR_MULT", "3.0"))  # Take Profit = 3.0 × ATR (1:2 RR)
+TP_ATR_MULT = float(os.getenv("TP_ATR_MULT", "3.5"))  # Take Profit = 3.5 × ATR (Asymmetric R:R > 2.3:1)
 TRAIL_ATR_MULT = float(os.getenv("TRAIL_ATR_MULT", "1.0"))  # Trailing stop distance
 BE_ATR_MULT = float(os.getenv("BE_ATR_MULT", "1.0"))  # Breakeven activation threshold
 
+# Forex filters
+MAX_FOREX_CURRENCY_EXPOSURE = int(os.getenv("MAX_FOREX_CURRENCY_EXPOSURE", "2"))
+MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))
+BE_DYN_RR = os.getenv("BE_DYN_RR", "true").lower() == "true"
+BE_DYN_RR_RATIO = float(os.getenv("BE_DYN_RR_RATIO", "1.0"))
+
+
 # Score thresholds
 SCORE_MIN = int(os.getenv("SCORE_MIN", "6"))  # Minimum score to enter (out of 10 max base score)
-# Note : CRYPTO_SCORE_MIN (défini dans la section instruments) remplace ce seuil pour la crypto
 
-# Drawdown limits (Elder's rules)
+# Drawdown limits (Elder's rules & Hard Daily Cap)
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))  # Max daily drawdown %
+MAX_DAILY_LOSS_AMOUNT = float(os.getenv("MAX_DAILY_LOSS_AMOUNT", "100.0"))  # Hard cap absolu 100€ max de perte jour
 MAX_MONTHLY_LOSS_PCT = float(os.getenv("MAX_MONTHLY_LOSS_PCT", "6.0"))  # Max monthly drawdown %
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))  # Max concurrent positions
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "6"))  # Max concurrent positions across fleet
 
-# Position sizing limits (will be adjusted by broker-specific min/max)
+# =============================================================================
+# 🌙 PROTECTION NOCTURNE (Recommandation #3 — post-analyse Mer-Ven 22-24/07)
+# =============================================================================
+# Limite de positions ouvertes en session nocturne (heure UTC)
+# Evite l'over-exposition sur des positions corrélées pendant les heures creuses
+MAX_OPEN_POSITIONS_NIGHT = int(os.getenv("MAX_OPEN_POSITIONS_NIGHT", "3"))
+# Score minimum relevé la nuit pour filtrer les signaux de qualité marginale
+SCORE_MIN_NIGHT = int(os.getenv("SCORE_MIN_NIGHT", "8"))
+# Fenêtre nocturne en UTC : 20h00 → 06h00 (= 22h → 08h CET en hiver)
+NIGHT_SESSION_START_UTC = int(os.getenv("NIGHT_SESSION_START_UTC", "20"))
+NIGHT_SESSION_END_UTC = int(os.getenv("NIGHT_SESSION_END_UTC", "6"))
+
+# =============================================================================
+# ⏱️ WATCHDOG & PROTECTION POST-FREEZE (Recommandations #2 & #4)
+# =============================================================================
+# Délai max entre deux heartbeats de cycle avant déclenchement de l'alerte critique (secondes)
+CYCLE_WATCHDOG_TIMEOUT = int(os.getenv("CYCLE_WATCHDOG_TIMEOUT", "300"))
+# Si un cycle a duré plus longtemps que ce seuil, activer le mode audit post-freeze
+# Le bot attendra N cycles d'observation avant d'ouvrir de nouveaux trades
+POST_FREEZE_THRESHOLD_SECONDS = int(os.getenv("POST_FREEZE_THRESHOLD_SECONDS", "120"))
+# Nombre de cycles d'observation après un freeze avant de reprendre les trades
+POST_FREEZE_COOLDOWN_CYCLES = int(os.getenv("POST_FREEZE_COOLDOWN_CYCLES", "2"))
+
+# Position sizing limits
 MIN_POSITION_SIZE = float(os.getenv("MIN_POSITION_SIZE", "0.001"))
 MAX_POSITION_SIZE = float(os.getenv("MAX_POSITION_SIZE", "1000.0"))
 
-# ✅ BUG FIX #5 — Cooldown minimum entre deux trades consécutifs sur le même symbole (en secondes)
-# Valeur par défaut : 3600s (1 heure = au moins 1 bougie H1 complète pour renouveler le contexte)
-# Peut être ajusté via .env : COOLDOWN_SECONDS=1800 (30min) pour des stratégies plus actives
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "3600"))
+# Cooldown minimum entre deux trades consécutifs sur le même symbole (en secondes)
+# 300s (5 minutes) pour réactivité optimale en tendance forte
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "300"))
 
-# Kelly fraction parameters
-KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.25"))  # Use 25% of Kelly optimum (conservative)
-MIN_TRADES_FOR_KELLY = int(os.getenv("MIN_TRADES_FOR_KELLY", "20"))  # Min trades before using Kelly
+# Kelly fraction parameters (Industrial standard)
+KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.45"))  # 45% Kelly optimum pour compounding rapide
+MIN_TRADES_FOR_KELLY = int(os.getenv("MIN_TRADES_FOR_KELLY", "15"))  # Min trades before using Kelly
 
 # =============================================================================
 # NEWS & SENTIMENT CONFIGURATION
 # =============================================================================
 # News avoidance windows (minutes)
 NEWS_AVOIDANCE_BEFORE = int(os.getenv("NEWS_AVOIDANCE_BEFORE", "30"))  # Block entry X min before news
-NEWS_AVOIDANCE_AFTER = int(os.getenv("NEWS_AVOIDANCE_AFTER", "15"))   # Block entry X min after news
+NEWS_AVOIDANCE_AFTER = int(os.getenv("NEWS_AVOIDANCE_AFTER", "30"))   # Block entry X min after news
 
 # News impact on position sizing
 NEWS_RISK_REDUCTION_FACTOR = float(os.getenv("NEWS_RISK_REDUCTION_FACTOR", "0.5"))  # Reduce risk by this factor if news today
@@ -231,9 +306,33 @@ HIGH_LIQUIDITY_HOURS_UTC = [
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-LOG_FILE = LOG_DIR / "superbot.log"
-TRADE_LOG_FILE = LOG_DIR / "trades.jsonl"  # Structured trade logs for analysis
-ERROR_LOG_FILE = LOG_DIR / "errors.log"
+LOG_FILE = LOG_DIR / f"superbot_{BROKER_TYPE}.log"
+TRADE_LOG_FILE = LOG_DIR / f"trades_{BROKER_TYPE}.jsonl"  # Structured trade logs for analysis
+ERROR_LOG_FILE = LOG_DIR / f"errors_{BROKER_TYPE}.log"
+BUG_LOG_FILE   = LOG_DIR / "bug_log.md"                   # Bug Watchdog journal (Formulation 2)
+
+# =============================================================================
+# 🐛 BUG WATCHDOG CONFIGURATION (Formulation 2 — agent de supervision technique)
+# =============================================================================
+# Intervalle de vérification du watchdog (secondes)
+BUG_WATCHDOG_INTERVAL = int(os.getenv("BUG_WATCHDOG_INTERVAL", "60"))
+# Activer/désactiver le Bug Watchdog
+BUG_WATCHDOG_ENABLED  = os.getenv("BUG_WATCHDOG_ENABLED", "true").lower() == "true"
+# Latence d'exécution maximale acceptée (secondes) avant d'émettre une alerte Medium
+BUG_WATCHDOG_MAX_LATENCY = float(os.getenv("BUG_WATCHDOG_MAX_LATENCY", "5.0"))
+
+# =============================================================================
+# 📈 TRAILING PROFIT CIRCUIT BREAKER (Formulation 2 — protection des gains en série)
+# =============================================================================
+# Profit minimal (€) à partir duquel le circuit breaker est actif
+PROFIT_CB_TRIGGER_EUR      = float(os.getenv("PROFIT_CB_TRIGGER_EUR",      "200.0"))
+# Retracement (fraction) du pic qui déclenche la pause (ex: 0.25 = -25%)
+PROFIT_CB_RETRACEMENT      = float(os.getenv("PROFIT_CB_RETRACEMENT",      "0.25"))
+# Durée de la pause de trading en heures (Règle 1)
+PROFIT_CB_PAUSE_HOURS      = float(os.getenv("PROFIT_CB_PAUSE_HOURS",      "3.0"))
+# Retracement après reprise qui déclenche l'arrêt définitif (Règle 2)
+PROFIT_CB_STOP_RETRACEMENT = float(os.getenv("PROFIT_CB_STOP_RETRACEMENT", "0.25"))
+
 
 # =============================================================================
 # DEVELOPMENT & TESTING
@@ -344,6 +443,8 @@ __all__ = [
     "SCORE_MIN", "MAX_DAILY_LOSS_PCT", "MAX_MONTHLY_LOSS_PCT", "MAX_OPEN_POSITIONS",
     "MIN_POSITION_SIZE", "MAX_POSITION_SIZE", "KELLY_FRACTION", "MIN_TRADES_FOR_KELLY",
     "COOLDOWN_SECONDS",  # ✅ BUG FIX #5
+    "MAX_FOREX_CURRENCY_EXPOSURE", "MAX_SPREAD_PIPS", "BE_DYN_RR", "BE_DYN_RR_RATIO",
+
 
     # News & Sentiment
     "NEWS_AVOIDANCE_BEFORE", "NEWS_AVOIDANCE_AFTER", "NEWS_RISK_REDUCTION_FACTOR",

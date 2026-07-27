@@ -1,0 +1,177 @@
+import logging
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone
+import math
+from typing import Dict, Any, Tuple, Optional
+log = logging.getLogger(__name__)
+
+def calculate_sl_tp_levels(rm, entry_price: float, atr_value: float,
+                              position_side: str, asset_type: str = "forex",
+                              symbol: str = "",
+                              hmm_regime: str = "") -> Tuple[float, float]:
+    """
+    Calcule les niveaux de stop loss et take profit basés sur l'ATR, avec multiplicateurs selon l'actif.
+
+    ✅ BUG FIX #4 — Le paramètre `symbol` permet de détecter automatiquement les paires JPY
+    et d'appliquer des multiplicateurs ATR plus larges (2.0×SL / 4.0×TP) pour compenser
+    leur plus grande amplitude intra-journalière.
+
+    ── Phase 3 §2 — SL/TP adaptatifs par régime HMM ──────────────────────
+    Le paramètre `hmm_regime` (ex: 'HIGH_VOL_RANGE', 'LOW_VOL_RANGE', 'TRENDING',
+    'LOW_VOL_TREND') ajuste les multiplicateurs pour éviter les sorties prématurées
+    en régime haute volatilité, ou pour serrer les stops en régime calme.
+
+    Règles :
+      - HIGH_VOL_RANGE  : +40% SL, +40% TP (évite les whipsaws)
+      - LOW_VOL_RANGE   : -15% SL, -15% TP (marché calme, cibles plus proches)
+      - TRENDING        : multiplicateurs standards
+      - LOW_VOL_TREND   : -10% SL (tendance propre, moins de bruit)
+    """
+    # Détecter si la paire est une paire JPY — appliquer des multiplicateurs adaptés
+    effective_asset_type = asset_type
+    if symbol:
+        normalized = symbol.strip().upper().replace("/", "")
+        if normalized.endswith("JPY") and asset_type == "forex":
+            effective_asset_type = "forex_jpy"
+            log.debug(f"Multiplicateurs ATR élargis appliqués pour paire JPY {symbol}: SL=2.0×ATR, TP=4.0×ATR")
+
+    if atr_value <= 0:
+        risk_pct = 0.02
+        if position_side == "LONG":
+            sl_price = entry_price * (1 - risk_pct)
+            tp_price = entry_price * (1 + risk_pct * 2)
+        else:
+            sl_price = entry_price * (1 + risk_pct)
+            tp_price = entry_price * (1 - risk_pct * 2)
+        return sl_price, tp_price
+
+    mults = rm.ATR_MULTIPLIERS.get(effective_asset_type, rm.ATR_MULTIPLIERS['forex'])
+    sl_mult, tp_mult = mults['sl'], mults['tp']
+
+    # ── Phase 3 §2 — Modulation des multiplicateurs par régime HMM ──────
+    regime_upper = hmm_regime.upper() if hmm_regime else ""
+    if regime_upper == "HIGH_VOL_RANGE":
+        # Haute volatilité : écarter SL et TP pour éviter les whipsaws
+        sl_mult *= 1.40
+        tp_mult *= 1.40
+        log.debug(f"[Régime HMM] HIGH_VOL_RANGE → SL×1.4={sl_mult:.2f}, TP×1.4={tp_mult:.2f} pour {symbol}")
+    elif regime_upper == "LOW_VOL_RANGE":
+        # Marché calme : objectifs plus proches, moins de bruit
+        sl_mult *= 0.85
+        tp_mult *= 0.85
+        log.debug(f"[Régime HMM] LOW_VOL_RANGE → SL×0.85={sl_mult:.2f}, TP×0.85={tp_mult:.2f} pour {symbol}")
+    elif regime_upper == "LOW_VOL_TREND":
+        # Tendance propre et calme : SL légèrement plus serré (moins de bruit)
+        sl_mult *= 0.90
+        log.debug(f"[Régime HMM] LOW_VOL_TREND → SL×0.90={sl_mult:.2f} pour {symbol}")
+    # TRENDING et cas inconnus : multiplicateurs standards (pas de modification)
+
+    if position_side == "LONG":
+        sl_price = entry_price - (sl_mult * atr_value)
+        tp_price = entry_price + (tp_mult * atr_value)
+    else:
+        sl_price = entry_price + (sl_mult * atr_value)
+        tp_price = entry_price - (tp_mult * atr_value)
+
+    return max(0.0001, sl_price), max(0.0001, tp_price)
+
+def _check_trailing_stop(rm, symbol: str, position: Dict[str, Any], current_price: float):
+    """
+    Vérifie et met à jour le stop loss suiveur si les conditions sont remplies.
+
+    Args:
+        symbol: Symbole de la position
+        position: Dictionnaire de la position
+        current_price: Prix actuel du marché
+    """
+    # Vérifier si le trailing stop est activé pour cette position
+    if not position.get('trailing_stop_enabled', True):
+        return
+
+    try:
+        atr_value = position.get('atr_value', 0)
+        if atr_value <= 0:
+            return
+
+        if position['side'] == 'LONG':
+            # Pour une position longue, le trailing stop monte quand le prix monte
+            new_sl = current_price - (rm.TRAIL_ATR_MULT * atr_value)
+            # Ne jamais descendre le stop loss pour une position longue
+            if new_sl > position.get('stop_loss', 0):
+                old_sl = position.get('stop_loss', 0)
+                position['stop_loss'] = new_sl
+                log.info(f"Trailing stop mis à jour pour {symbol} (LONG): {old_sl:.4f} -> {new_sl:.4f}")
+        else:  # SHORT
+            # Pour une position courte, le trailing stop descend quand le prix descend
+            new_sl = current_price + (rm.TRAIL_ATR_MULT * atr_value)
+            # Ne jamais monter le stop loss pour une position courte
+            if new_sl < position.get('stop_loss', float('inf')) or position.get('stop_loss', 0) == 0:
+                old_sl = position.get('stop_loss', 0)
+                position['stop_loss'] = new_sl
+                log.info(f"Trailing stop mis à jour pour {symbol} (SHORT): {old_sl:.4f} -> {new_sl:.4f}")
+
+    except Exception as e:
+        log.error(f"Erreur lors de la vérification du trailing stop pour {symbol}: {e}")
+
+def _check_break_even(rm, symbol: str, position: Dict[str, Any], current_price: float):
+    """
+    Vérifie et déplace le stop loss au point d'entrée si les conditions sont remplies.
+
+    Args:
+        symbol: Symbole de la position
+        position: Dictionnaire de la position
+        current_price: Prix actuel du marché
+    """
+    # Vérifier si le break-even est activé et pas déjà activé
+    if position.get('break_even_activated', False):
+        return
+
+    try:
+        atr_value = position.get('atr_value', 0)
+        if atr_value <= 0:
+            return
+
+        # Déterminer si le break-even doit se déclencher
+        should_trigger = False
+        if rm.BE_DYN_RR:
+            initial_sl = position.get('initial_sl', 0.0)
+            if position['side'] == 'LONG':
+                initial_risk = position['entry_price'] - initial_sl
+                current_profit = current_price - position['entry_price']
+                should_trigger = (initial_risk > 0 and current_profit >= initial_risk * rm.BE_DYN_RR_RATIO)
+            else: # SHORT
+                initial_risk = initial_sl - position['entry_price']
+                current_profit = position['entry_price'] - current_price
+                should_trigger = (initial_risk > 0 and current_profit >= initial_risk * rm.BE_DYN_RR_RATIO)
+        else:
+            if position['side'] == 'LONG':
+                profit_in_atr = (current_price - position['entry_price']) / atr_value
+                should_trigger = (profit_in_atr >= rm.BE_ATR_MULT)
+            else: # SHORT
+                profit_in_atr = (position['entry_price'] - current_price) / atr_value
+                should_trigger = (profit_in_atr >= rm.BE_ATR_MULT)
+
+        if should_trigger:
+            position['break_even_activated'] = True
+            if position['side'] == 'LONG':
+                old_sl = position.get('stop_loss', 0)
+                new_sl = position['entry_price'] * 1.0005  # Légèrement au-dessus pour couvrir les frais
+                if new_sl > old_sl:
+                    position['stop_loss'] = new_sl
+                    log.info(f"Break-even activé pour {symbol} (LONG): SL moved to {new_sl:.4f}")
+                else:
+                    log.info(f"Break-even activé pour {symbol} (LONG) mais le trailing stop actuel ({old_sl:.4f}) est meilleur que BE ({new_sl:.4f})")
+            else:  # SHORT
+                old_sl = position.get('stop_loss', float('inf'))
+                new_sl = position['entry_price'] * 0.9995  # Légèrement en-dessous pour couvrir les frais
+                if new_sl < old_sl or old_sl == 0:
+                    position['stop_loss'] = new_sl
+                    log.info(f"Break-even activé pour {symbol} (SHORT): SL moved to {new_sl:.4f}")
+                else:
+                    log.info(f"Break-even activé pour {symbol} (SHORT) mais le trailing stop actuel ({old_sl:.4f}) est meilleur que BE ({new_sl:.4f})")
+
+
+
+    except Exception as e:
+        log.error(f"Erreur lors de la vérification du break-even pour {symbol}: {e}")

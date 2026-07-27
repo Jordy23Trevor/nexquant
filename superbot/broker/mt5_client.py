@@ -345,6 +345,36 @@ class MT5Client(Broker):
             "margin_used": 0.0,
         }
 
+    def get_open_positions(self) -> List[Dict[str, Any]]:
+        """
+        Retourne toutes les positions ouvertes sur le compte MT5.
+        Utilisé par GhostCleaner pour la validation cross-référence.
+        """
+        raw_positions = self._call_api(mt5.positions_get, [])
+        if not raw_positions:
+            return []
+
+        result = []
+        for pos in raw_positions:
+            try:
+                info = self._call_api(lambda: mt5.symbol_info(pos.symbol), None)
+                contract_size = info.trade_contract_size if info and info.trade_contract_size > 0 else 100000.0
+                size_units = pos.volume * contract_size
+                side = "LONG" if pos.type == mt5.POSITION_TYPE_BUY else "SHORT"
+                result.append({
+                    "symbol": pos.symbol,
+                    "ticket": pos.ticket,
+                    "side": side,
+                    "size": size_units,
+                    "entry_price": pos.price_open,
+                    "stop_loss": pos.sl,
+                    "take_profit": pos.tp,
+                    "unrealized_pnl": pos.profit,
+                })
+            except Exception as e:
+                log.warning(f"get_open_positions: erreur lors du traitement de la position {pos.symbol}: {e}")
+        return result
+
     def close_position(self, symbol: str, reason: str = "") -> bool:
         """Ferme toutes les positions ouvertes sur un symbole."""
         symbol = self.normalize_symbol(symbol)
@@ -498,6 +528,21 @@ class MT5Client(Broker):
             log.warning(f"Impossible de modifier le SL/TP: aucune position sur {symbol}")
             return False
 
+        # Vérifier et ajuster les niveaux selon le StopLevel MT5 du broker
+        info = self._call_api(lambda: mt5.symbol_info(symbol), None)
+        tick = self._call_api(lambda: mt5.symbol_info_tick(symbol), None)
+        if info and tick:
+            point = info.point or 0.00001
+            stops_level = (info.trade_stops_level or 0) * point
+            if stops_level > 0:
+                current_price = (tick.bid + tick.ask) / 2
+                if sl > 0 and abs(current_price - sl) < stops_level:
+                    sl = current_price - stops_level if sl < current_price else current_price + stops_level
+                    log.debug(f"SL ajusté pour respecter StopLevel MT5 ({stops_level:.5f}) -> {sl:.5f}")
+                if tp > 0 and abs(current_price - tp) < stops_level:
+                    tp = current_price + stops_level if tp > current_price else current_price - stops_level
+                    log.debug(f"TP ajusté pour respecter StopLevel MT5 ({stops_level:.5f}) -> {tp:.5f}")
+
         success = True
         for pos in positions:
             ticket = pos.ticket
@@ -521,6 +566,27 @@ class MT5Client(Broker):
 
         return success
 
+    def cancel_all_orders(self, symbol: str = "") -> bool:
+        """Annule tous les ordres en attente (pending orders) sur MT5."""
+        if not mt5:
+            return False
+        try:
+            orders = self._call_api(mt5.orders_get, [])
+            if not orders:
+                return True
+            symbol_norm = self.normalize_symbol(symbol) if symbol else ""
+            for o in orders:
+                if not symbol_norm or o.symbol == symbol_norm:
+                    request = {
+                        "action": mt5.TRADE_ACTION_REMOVE,
+                        "order": o.ticket,
+                    }
+                    self._call_api(lambda: mt5.order_send(request), None)
+            return True
+        except Exception as e:
+            log.warning(f"Erreur lors de l'annulation des ordres MT5: {e}")
+            return False
+
     def get_current_price(self, symbol: str) -> float:
         """Retourne le dernier prix (mid price)."""
         symbol = self.normalize_symbol(symbol)
@@ -529,6 +595,19 @@ class MT5Client(Broker):
         if tick is None:
             return 0.0
         return (tick.bid + tick.ask) / 2
+
+    def get_spread(self, symbol: str) -> float:
+        """Retourne le spread actuel en pips."""
+        symbol = self.normalize_symbol(symbol)
+        self._call_api(lambda: mt5.symbol_select(symbol, True), False)
+        tick = self._call_api(lambda: mt5.symbol_info_tick(symbol), None)
+        if tick is None or tick.bid == 0.0 or tick.ask == 0.0:
+            return 0.0
+        spread_raw = tick.ask - tick.bid
+        normalized = symbol.upper().replace("/", "")
+        pip_size = 0.01 if "JPY" in normalized else 0.0001
+        return spread_raw / pip_size
+
 
     def get_min_order_size(self, symbol: str) -> float:
         symbol = self.normalize_symbol(symbol)

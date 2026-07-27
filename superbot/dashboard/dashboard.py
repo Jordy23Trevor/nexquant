@@ -16,6 +16,169 @@ import urllib.parse
 log = logging.getLogger("dashboard")
 
 
+def load_global_trades():
+    import glob
+    folders_to_try = [
+        "superbot/logs",
+        "../logs",
+        os.path.join(os.path.dirname(__file__), "..", "logs"),
+        os.path.join(os.path.dirname(__file__), "logs")
+    ]
+    
+    trades_files = []
+    # Scanner trades_*.jsonl
+    for folder in folders_to_try:
+        if os.path.exists(folder):
+            pattern = os.path.join(folder, "trades_*.jsonl")
+            for f in glob.glob(pattern):
+                if f not in trades_files:
+                    trades_files.append(f)
+            # Ajouter trades.jsonl historique
+            h_file = os.path.join(folder, "trades.jsonl")
+            if os.path.exists(h_file) and h_file not in trades_files:
+                trades_files.append(h_file)
+
+    if not trades_files:
+        return [], []
+
+    raw_trades = []
+    for trades_file in trades_files:
+        try:
+            with open(trades_file, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            trade_data = json.loads(line)
+                            # Si le broker n'est pas spécifié, l'inférer du nom du fichier
+                            if 'broker' not in trade_data:
+                                basename = os.path.basename(trades_file)
+                                if basename.startswith("trades_") and basename.endswith(".jsonl"):
+                                    broker_name = basename[7:-6]
+                                    trade_data['broker'] = broker_name
+                            raw_trades.append(trade_data)
+                        except Exception:
+                            continue
+        except Exception as e:
+            log.error(f"Erreur lors de la lecture de {trades_file} : {e}")
+
+    # Dédupliquer les trades pour éviter d'afficher le même trade en double (ex: s'il est présent dans trades.jsonl et trades_*.jsonl)
+    seen_trades = set()
+    deduped_trades = []
+    for t in raw_trades:
+        ts = t.get('timestamp', '')
+        if isinstance(ts, str) and 'T' in ts:
+            ts = ts.split('.')[0]
+        
+        pnl = t.get('pnl')
+        pnl_val = round(float(pnl), 4) if pnl is not None else None
+        
+        entry = t.get('entry_price')
+        entry_val = round(float(entry), 4) if entry is not None else None
+        
+        qty = t.get('qty') or t.get('size')
+        qty_val = round(float(qty), 6) if qty is not None else None
+        
+        key = (
+            t.get('symbol'),
+            t.get('side'),
+            t.get('status'),
+            ts,
+            pnl_val,
+            entry_val,
+            qty_val
+        )
+        if key not in seen_trades:
+            seen_trades.add(key)
+            deduped_trades.append(t)
+    raw_trades = deduped_trades
+
+    # Trier par timestamp pour reconstruire l'état correctement
+    from datetime import timezone as _tz
+    def parse_time(t):
+        ts = t.get('timestamp')
+        if not ts:
+            return datetime.min.replace(tzinfo=_tz.utc)
+        try:
+            import dateutil.parser
+            dt = dateutil.parser.parse(str(ts))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_tz.utc)
+            return dt
+        except Exception:
+            return datetime.min.replace(tzinfo=_tz.utc)
+
+    raw_trades.sort(key=parse_time)
+
+    active_positions = {}
+    closed_history = []
+    # Seuil : un trade ouvert de plus de 24h sans clôture est considéré orphelin
+    from datetime import timezone as _tz
+    now_utc = datetime.now(_tz.utc)
+    ORPHAN_THRESHOLD_HOURS = 24
+
+    def infer_broker(symbol):
+        sym = symbol.upper()
+        crypto_keywords = ["USDT", "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOT", "LINK"]
+        if any(kw in sym for kw in crypto_keywords):
+            return "binance"
+        stock_keywords = ["SPY", "QQQ", "AAPL", "TSLA", "MSFT"]
+        if any(kw in sym for kw in stock_keywords):
+            return "alpaca"
+        return "mt5"
+
+    def is_orphan(t):
+        """Retourne True si le trade 'ouvert' date de plus de ORPHAN_THRESHOLD_HOURS heures."""
+        ts_raw = t.get('timestamp')
+        if not ts_raw:
+            return True
+        try:
+            from datetime import datetime as _dt
+            ts_str = str(ts_raw)
+            # Tenter parse avec timezone
+            try:
+                import dateutil.parser
+                ts = dateutil.parser.parse(ts_str)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=_tz.utc)
+            except Exception:
+                # Fallback : parse sans timezone
+                ts_clean = ts_str.split('+')[0].split('Z')[0].strip()
+                ts = _dt.fromisoformat(ts_clean).replace(tzinfo=_tz.utc)
+            age_hours = (now_utc - ts).total_seconds() / 3600
+            return age_hours > ORPHAN_THRESHOLD_HOURS
+        except Exception:
+            return True  # En cas d'erreur de parsing, considérer comme orphelin
+
+    for t in raw_trades:
+        symbol = t.get('symbol')
+        if not symbol:
+            continue
+        
+        if 'broker' not in t:
+            t['broker'] = infer_broker(symbol)
+            
+        if t.get('status') == 'closed':
+            closed_history.append(t)
+            key = (symbol, t.get('side'))
+            if key in active_positions:
+                del active_positions[key]
+        else:
+            # Filtrer les trades orphelins (ouverts mais trop anciens sans PnL)
+            if is_orphan(t):
+                # Les traiter comme fermés sans PnL connu plutôt que de les afficher "en cours"
+                t_closed = dict(t)
+                t_closed['status'] = 'closed'
+                t_closed['pnl'] = t.get('pnl')  # None si pas de PnL
+                if t_closed.get('pnl') is not None:
+                    closed_history.append(t_closed)
+                # Ne pas les ajouter dans active_positions
+            else:
+                key = (symbol, t.get('side'))
+                active_positions[key] = t
+
+    return closed_history, list(active_positions.values())
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     """Gestionnaire HTTP pour le dashboard."""
 
@@ -73,6 +236,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
                     bot_running = stats.get('running', True)
 
+                    global_closed, global_active = load_global_trades()
+
                     data = {
                         'timestamp': raw_data.get('timestamp', datetime.now().isoformat()),
                         'bot': {
@@ -101,6 +266,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         'positions': positions,
                         'stats': stats,
                         'history': raw_data.get('history', []),
+                        'global_history': global_closed,
+                        'global_active': global_active,
                         'market_data': raw_data.get('market_data', {}),
                         'broker_type': raw_data.get('broker_type', ''),
                         'asset_type': raw_data.get('asset_type', 'crypto'),
@@ -109,7 +276,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                             'confidence': news_sentiment.get('overall', {}).get('confidence', 0.0) or 0.0,
                             'fear_greed_value': news_sentiment.get('fear_greed', {}).get('value'),
                             'avoidance_active': news_sentiment.get('avoidance_active', False),
-                            'recent_high_impact_count': news_sentiment.get('recent_high_impact_count', 0)
+                            'recent_high_impact_count': news_sentiment.get('recent_high_impact_count', 0),
+                            'recent_events': news_sentiment.get('recent_events', [])
                         }
                     }
 
@@ -605,6 +773,8 @@ a{color:inherit;text-decoration:none}
   padding: 20px;
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
   transition: all 0.3s ease;
+  width: 100%;
+  max-width: 100%;
 }
 
 .card:hover {
@@ -1603,8 +1773,23 @@ td.name { color: var(--txt); font-weight: 600; }
 
             <!-- Recent Signals & Trades Table -->
             <div class="card">
-              <div class="chart-card-hd">
+              <div class="chart-card-hd" style="flex-wrap: wrap; gap: 10px;">
                 <div class="chart-title"><i class="fa-solid fa-list"></i> Signaux récents &amp; Historique de trading</div>
+                <div style="display: flex; gap: 8px;">
+                  <!-- Type Filter -->
+                  <select id="filter-type" class="token-select" onchange="resetHistoryPageAndRender()" style="padding: 4px 10px; font-size: 11px; height: auto; outline: none; border-color: var(--border);">
+                    <option value="all">Tous les Statuts</option>
+                    <option value="active">En Cours</option>
+                    <option value="closed">Clôturés</option>
+                  </select>
+                  <!-- Broker Filter -->
+                  <select id="filter-broker" class="token-select" onchange="resetHistoryPageAndRender()" style="padding: 4px 10px; font-size: 11px; height: auto; outline: none; border-color: var(--border);">
+                    <option value="all">Tous les Brokers</option>
+                    <option value="binance">Binance (Crypto)</option>
+                    <option value="alpaca">Alpaca (ETF)</option>
+                    <option value="mt5">MT5 (Forex)</option>
+                  </select>
+                </div>
               </div>
               <div class="tbl-wrap">
                 <table id="signals-table">
@@ -1624,6 +1809,7 @@ td.name { color: var(--txt); font-weight: 600; }
                   </tbody>
                 </table>
               </div>
+              <div id="history-pagination" class="chart-tabs" style="margin: 16px; justify-content: flex-end; align-items: center; gap: 6px;"></div>
             </div>
 
           </div>
@@ -1696,11 +1882,11 @@ td.name { color: var(--txt); font-weight: 600; }
               <thead>
                 <tr>
                   <th>Symbole</th><th>Sens</th><th>Quantité</th>
-                  <th>Entrée</th><th>Actuel</th><th>P&amp;L non réalisé</th>
+                  <th>Entrée</th><th>Actuel</th><th>Liquidation</th><th>P&amp;L non réalisé</th>
                   <th>Stop loss</th><th>Take profit</th>
                 </tr>
               </thead>
-              <tbody id="pos-tbody"><tr><td colspan="8" class="empty">Aucune position ouverte</td></tr></tbody>
+              <tbody id="pos-tbody"><tr><td colspan="9" class="empty">Aucune position ouverte</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -1805,6 +1991,9 @@ let lastBalanceUsd = null;
 let lastInitUsd = null;
 let lastBtcPrice = 67000.0;
 let latestAssetType = 'crypto';
+let latestData = null;
+let currentHistoryPage = 1;
+const itemsPerPage = 10;
 
 function getCurrencyPrefix() {
   if (selectedCurrency === 'USD') return '$';
@@ -2091,7 +2280,13 @@ function selectCurrency(curr) {
 }
 
 function updateBalanceDisplay() {
-  if (lastBalanceUsd === null) return;
+  // Afficher 0 si pas encore de données plutôt que de ne rien afficher
+  if (lastBalanceUsd === null) {
+    setEl('kpi-balance', '$0.00');
+    setEl('kpi-init', '$0.00');
+    setEl('sub-acc-balance', '$0.00');
+    return;
+  }
   
   // Essayer d'extraire le prix du BTC depuis cachedData s'il est disponible
   if (cachedData && cachedData['BTC/USDT'] && cachedData['BTC/USDT'].length) {
@@ -2399,12 +2594,200 @@ async function fetchLogs() {
   }
 }
 
+function resetHistoryPageAndRender() {
+  currentHistoryPage = 1;
+  renderSignalsAndTradesTable();
+}
+
+function renderSignalsAndTradesTable() {
+  const sigTableBody = document.querySelector('#signals-table tbody');
+  const paginationContainer = document.getElementById('history-pagination');
+  if (!sigTableBody || !latestData) return;
+
+  const typeFilter = document.getElementById('filter-type') ? document.getElementById('filter-type').value : 'all';
+  const brokerFilter = document.getElementById('filter-broker') ? document.getElementById('filter-broker').value : 'all';
+
+  const pos = latestData.global_active || Object.values(latestData.positions || {});
+  const hist = latestData.global_history || latestData.history || [];
+
+  let combined = [];
+
+  const posArray = Array.isArray(pos) ? pos : Object.values(pos);
+  posArray.forEach(p => {
+    combined.push({
+      ...p,
+      is_active: true,
+      broker: p.broker || inferBrokerFromSymbol(p.symbol)
+    });
+  });
+
+  hist.forEach(t => {
+    combined.push({
+      ...t,
+      is_active: false,
+      broker: t.broker || inferBrokerFromSymbol(t.symbol)
+    });
+  });
+
+  function inferBrokerFromSymbol(symbol) {
+    if (!symbol) return 'mt5';
+    const sym = symbol.toUpperCase();
+    const crypto_keywords = ["USDT", "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOT", "LINK"];
+    if (crypto_keywords.some(kw => sym.includes(kw))) return "binance";
+    const stock_keywords = ["SPY", "QQQ", "AAPL", "TSLA", "MSFT"];
+    if (stock_keywords.some(kw => sym.includes(kw))) return "alpaca";
+    return "mt5";
+  }
+
+  let filtered = combined;
+
+  if (typeFilter === 'active') {
+    filtered = filtered.filter(x => x.is_active);
+  } else if (typeFilter === 'closed') {
+    filtered = filtered.filter(x => !x.is_active);
+  }
+
+  if (brokerFilter !== 'all') {
+    filtered = filtered.filter(x => x.broker === brokerFilter);
+  }
+
+  // Sort: active positions first, then closed positions. Within each category, sort by timestamp desc.
+  filtered.sort((a, b) => {
+    if (a.is_active && !b.is_active) return -1;
+    if (!a.is_active && b.is_active) return 1;
+    const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return timeB - timeA;
+  });
+
+  // Pagination logic
+  const totalItems = filtered.length;
+  const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+  if (currentHistoryPage > totalPages) currentHistoryPage = totalPages;
+  if (currentHistoryPage < 1) currentHistoryPage = 1;
+
+  const startIndex = (currentHistoryPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedItems = filtered.slice(startIndex, endIndex);
+
+  const dec = getDecimals();
+  const pref = getCurrencyPrefix();
+  const rate = getRate();
+  let rows = '';
+  let lastGroupDate = '';
+
+  paginatedItems.forEach(t => {
+    const side = (t.side || '').toUpperCase();
+    const dateObj = new Date(t.timestamp);
+    
+    let groupDate = 'Date Inconnue';
+    let timeStr = '—';
+    if (!isNaN(dateObj.getTime())) {
+      const options = { year: 'numeric', month: 'long', day: 'numeric' };
+      groupDate = dateObj.toLocaleDateString('fr-FR', options);
+      timeStr = dateObj.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+    }
+
+    // Grouping row
+    if (groupDate !== lastGroupDate) {
+      lastGroupDate = groupDate;
+      rows += `<tr class="date-group-row">
+        <td colspan="7" style="background: rgba(255, 255, 255, 0.02); font-weight: 700; color: var(--accent-cyan); padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">
+          <i class="fa-solid fa-calendar-day" style="margin-right: 8px;"></i>${groupDate}
+        </td>
+      </tr>`;
+    }
+
+    const brokerName = t.broker === 'binance' ? 'Binance' : t.broker === 'alpaca' ? 'Alpaca' : 'MT5';
+    const brokerBadge = `<span class="badge" style="background: var(--border); color: var(--txt-secondary); margin-left: 6px; font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 4px;">${brokerName}</span>`;
+
+    if (t.is_active) {
+      rows += `<tr>
+        <td class="mono">${timeStr}</td>
+        <td class="name mono">${t.symbol} ${brokerBadge}</td>
+        <td><span class="badge badge-${side === 'LONG' || side === 'BUY' ? 'long' : 'short'}">${side || '—'}</span></td>
+        <td class="mono">${pref}${fmt(t.entry_price, dec)}</td>
+        <td class="mono">${t.stop_loss > 0 ? pref + fmt(t.stop_loss, dec) : '—'}</td>
+        <td class="mono">${t.take_profit > 0 ? pref + fmt(t.take_profit, dec) : '—'}</td>
+        <td><span class="tx-status success"><i class="fa-solid fa-spinner fa-spin" style="margin-right: 4px;"></i>En Cours</span></td>
+      </tr>`;
+    } else {
+      const pnlVal = parseFloat(t.pnl || 0) * (selectedCurrency === 'USD' ? 1.0 : rate);
+      const pnlStr = (pnlVal >= 0 ? '+' : '') + fmt(pnlVal, 2) + ' ' + selectedCurrency;
+      rows += `<tr>
+        <td class="mono">${timeStr}</td>
+        <td class="name mono">${t.symbol} ${brokerBadge}</td>
+        <td><span class="badge badge-${side === 'LONG' || side === 'BUY' ? 'long' : 'short'}">${side || '—'}</span></td>
+        <td class="mono">${pref}${fmt(t.entry_price || 0, dec)}</td>
+        <td class="mono">${pref}${fmt(t.exit_price || 0, dec)} (Sortie)</td>
+        <td class="mono">—</td>
+        <td><span class="tx-status ${pnlVal >= 0 ? 'success' : 'danger'}">${pnlVal >= 0 ? 'Gain' : 'Perte'} (${pnlStr})</span></td>
+      </tr>`;
+    }
+  });
+
+  if (!rows) {
+    sigTableBody.innerHTML = '<tr><td colspan="7" class="empty"><i class="fa-solid fa-circle-nodes"></i> Aucun trade correspondant aux filtres</td></tr>';
+  } else {
+    sigTableBody.innerHTML = rows;
+  }
+
+  // Render pagination controls
+  if (paginationContainer) {
+    if (totalPages <= 1) {
+      paginationContainer.innerHTML = '';
+      return;
+    }
+
+    let paginationHtml = '';
+    
+    // Previous button
+    paginationHtml += `<button class="chart-tab" ${currentHistoryPage === 1 ? 'disabled style="opacity: 0.4; cursor: not-allowed;"' : `onclick="changeHistoryPage(${currentHistoryPage - 1})"`}>Précédent</button>`;
+    
+    // Page numbers — max 4 onglets visibles centrés sur la page courante
+    const maxVisible = 4;
+    let startPage = Math.max(1, currentHistoryPage - Math.floor(maxVisible / 2));
+    let endPage   = startPage + maxVisible - 1;
+    if (endPage > totalPages) {
+      endPage   = totalPages;
+      startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+
+    if (startPage > 1) {
+      paginationHtml += `<span style="color:var(--txt-muted); padding: 0 4px; align-self:center;">...</span>`;
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      if (i === currentHistoryPage) {
+        paginationHtml += `<button class="chart-tab active">${i}</button>`;
+      } else {
+        paginationHtml += `<button class="chart-tab" onclick="changeHistoryPage(${i})">${i}</button>`;
+      }
+    }
+
+    if (endPage < totalPages) {
+      paginationHtml += `<span style="color:var(--txt-muted); padding: 0 4px; align-self:center;">...</span>`;
+    }
+
+    // Next button
+    paginationHtml += `<button class="chart-tab" ${currentHistoryPage === totalPages ? 'disabled style="opacity: 0.4; cursor: not-allowed;"' : `onclick="changeHistoryPage(${currentHistoryPage + 1})"`}>Suivant</button>`;
+    
+    paginationContainer.innerHTML = paginationHtml;
+  }
+}
+
+function changeHistoryPage(page) {
+  currentHistoryPage = page;
+  renderSignalsAndTradesTable();
+}
+
 // ─── Data update ──────────────────────────────────────────────────────────
 async function fetchData() {
   try {
     const res = await fetch('/api/data', { cache: 'no-store' });
     if (!res.ok) { setConnState(false); return; }
     const d = await res.json();
+    latestData = d;
     setConnState(true);
 
     const bot  = d.bot  || {};
@@ -2489,6 +2872,34 @@ async function fetchData() {
     setEl('s-conf',  safe(fmt(news.confidence, 2)));
     setEl('s-avoid', news.avoidance_active ? 'Actif' : 'Inactif');
 
+    // ── News body list ──
+    const newsBody = document.getElementById('news-body');
+    if (newsBody) {
+      const events = news.recent_events || [];
+      if (!events.length) {
+        newsBody.innerHTML = '<div class="empty"><i class="fa-solid fa-circle-info"></i> Aucune actualité à fort impact récente</div>';
+        newsBody.className = 'empty';
+      } else {
+        newsBody.className = '';
+        newsBody.innerHTML = events.map(ev => {
+          const dateObj = new Date(ev.timestamp);
+          const timeStr = isNaN(dateObj.getTime()) ? '' : dateObj.toLocaleDateString('fr-FR', {month:'2-digit', day:'2-digit'}) + ' ' + dateObj.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+          const impactBadge = ev.impact === 'HIGH' ? '<span class="badge badge-short" style="background:#ef4444; color:#fff; border:none; padding:2px 6px;">HIGH</span>' : `<span class="badge" style="background:#f59e0b; color:#fff; border:none; padding:2px 6px;">${ev.impact}</span>`;
+          return `<div style="padding: 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 11px; color: var(--txt-secondary); font-weight:600">${ev.currency || 'ALL'} · ${ev.source || 'Unknown'}</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <span style="font-size: 10px; color: var(--txt-muted); font-family: monospace;">${timeStr}</span>
+                ${impactBadge}
+              </div>
+            </div>
+            <div style="font-size: 12px; color: var(--txt); font-weight: 500;">${escapeHtml(ev.title || '')}</div>
+            ${ev.description ? `<div style="font-size: 11px; color: var(--txt-secondary); margin-top: 2px;">${escapeHtml(ev.description)}</div>` : ''}
+          </div>`;
+        }).join('');
+      }
+    }
+
     // ── Risk panel ──
     const exp = parseFloat(risk.current_risk_pct ?? 0);
     setEl('r-risk',   isNaN(exp) ? '—' : fmt(exp) + ' %');
@@ -2506,7 +2917,7 @@ async function fetchData() {
       const pos  = d.positions || {};
       const keys = Object.keys(pos);
       if (!keys.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty"><i class="fa-solid fa-briefcase"></i> Aucune position ouverte</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="empty"><i class="fa-solid fa-briefcase"></i> Aucune position ouverte</td></tr>';
       } else {
         tbody.innerHTML = keys.map(sym => {
           const p    = pos[sym] || {};
@@ -2515,12 +2926,14 @@ async function fetchData() {
           const dec = getDecimals();
           const pref = getCurrencyPrefix();
           const rate = getRate();
+          const liq = parseFloat(p.liquidation_price || 0);
           return `<tr>
             <td class="name mono">${sym}</td>
             <td><span class="badge badge-${side === 'LONG' ? 'long' : 'short'}">${side || '—'}</span></td>
             <td class="mono">${fmt(p.size, 4)}</td>
             <td class="mono">${pref}${fmt(p.entry_price, dec)}</td>
             <td class="mono">${pref}${fmt(p.current_price || p.mark_price, dec)}</td>
+            <td class="mono neg" style="font-weight: 600; color: #ef4444;">${liq > 0 ? pref + fmt(liq, dec) : '—'}</td>
             <td class="mono ${upnl >= 0 ? 'pos' : 'neg'}">${(upnl >= 0 ? '+' : '') + fmt(upnl * rate)} ${selectedCurrency}</td>
             <td class="mono ${p.stop_loss ? 'neg' : ''}">${p.stop_loss > 0 ? pref + fmt(p.stop_loss, dec) : '—'}</td>
             <td class="mono ${p.take_profit ? 'pos' : ''}">${p.take_profit > 0 ? pref + fmt(p.take_profit, dec) : '—'}</td>
@@ -2530,57 +2943,7 @@ async function fetchData() {
     }
 
     // ── Signals/trades list under overview ──
-    const sigTableBody = document.querySelector('#signals-table tbody');
-    if (sigTableBody) {
-      const pos = d.positions || {};
-      const hist = d.history || [];
-      const posKeys = Object.keys(pos);
-      
-      let rows = '';
-      
-      const dec = getDecimals();
-      const pref = getCurrencyPrefix();
-      
-      // Render active positions
-      posKeys.forEach(sym => {
-        const p = pos[sym] || {};
-        const side = (p.side || '').toUpperCase();
-        const timeStr = p.timestamp ? new Date(p.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'}) : 'Actif';
-        rows += `<tr>
-          <td class="mono">${timeStr}</td>
-          <td class="name mono">${sym}</td>
-          <td><span class="badge badge-${side === 'LONG' ? 'long' : 'short'}">${side || '—'}</span></td>
-          <td class="mono">${pref}${fmt(p.entry_price, dec)}</td>
-          <td class="mono">${p.stop_loss > 0 ? pref + fmt(p.stop_loss, dec) : '—'}</td>
-          <td class="mono">${p.take_profit > 0 ? pref + fmt(p.take_profit, dec) : '—'}</td>
-          <td><span class="tx-status success">En Cours</span></td>
-        </tr>`;
-      });
-      
-      // Render historical closed trades
-      hist.forEach(t => {
-        const side = (t.side || '').toUpperCase();
-        const dateObj = new Date(t.timestamp);
-        const timeStr = isNaN(dateObj.getTime()) ? 'Clôturé' : dateObj.toLocaleDateString('fr-FR', {month:'2-digit', day:'2-digit'}) + ' ' + dateObj.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
-        const pnlVal = parseFloat(t.pnl || 0);
-        const pnlStr = (pnlVal >= 0 ? '+' : '') + fmt(pnlVal, 2) + ' ' + selectedCurrency;
-        rows += `<tr>
-          <td class="mono">${timeStr}</td>
-          <td class="name mono">${t.symbol}</td>
-          <td><span class="badge badge-${side === 'LONG' || side === 'BUY' ? 'long' : 'short'}">${side || '—'}</span></td>
-          <td class="mono">${pref}${fmt(t.entry_price || 0, dec)}</td>
-          <td class="mono">${pref}${fmt(t.exit_price || 0, dec)} (Sortie)</td>
-          <td class="mono">—</td>
-          <td><span class="tx-status ${pnlVal >= 0 ? 'success' : 'danger'}">${pnlVal >= 0 ? 'Gain' : 'Perte'} (${pnlStr})</span></td>
-        </tr>`;
-      });
-      
-      if (!rows) {
-        sigTableBody.innerHTML = '<tr><td colspan="7" class="empty"><i class="fa-solid fa-circle-nodes"></i> En attente de signaux ou trades actifs...</td></tr>';
-      } else {
-        sigTableBody.innerHTML = rows;
-      }
-    }
+    renderSignalsAndTradesTable();
 
     // ── Chart ──
     const md   = d.market_data || {};

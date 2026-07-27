@@ -4,13 +4,13 @@ echo 🚀 Lancement de la flotte NexQuant SuperBot
 echo ===================================================
 echo.
 echo Lancement du Bot Crypto (Binance)...
-start "NexQuant Crypto (Binance)" cmd /k "python superbot/main.py --broker binance --dashboard-port 5000"
+start "NexQuant Crypto (Binance)" cmd /k "set PYTHONPATH=. && python superbot/main.py --broker binance --dashboard-port 5000 --webhook-port 9000"
 
 echo Lancement du Bot Forex (MT5)...
-start "NexQuant Forex (MT5)" cmd /k "python superbot/main.py --broker mt5 --dashboard-port 5001"
+start "NexQuant Forex (MT5)" cmd /k "set PYTHONPATH=. && python superbot/main.py --broker mt5 --dashboard-port 5001 --webhook-port 9001"
 
 echo Lancement du Bot ETF (Alpaca)...
-start "NexQuant ETF (Alpaca)" cmd /k "python superbot/main.py --broker alpaca --dashboard-port 5002"
+start "NexQuant ETF (Alpaca)" cmd /k "set PYTHONPATH=. && python superbot/main.py --broker alpaca --dashboard-port 5002 --webhook-port 9002"
 
 echo.
 echo ===================================================

@@ -25,11 +25,6 @@ ALPACA
 ├─ User base: Stock traders, US only
 └─ Status: ✅ Ready v1
 
-PAPER FOREX (Simulator)
-├─ Built-in simulator
-├─ No real capital needed
-├─ User base: Demo/testing
-└─ Status: ✅ Ready v1
 
 AUTRES BROKERS (Interactive Brokers, TradeStation, etc)
 ├─ Non-officiels
