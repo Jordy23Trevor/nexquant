@@ -185,42 +185,64 @@ VWAP_WINDOW = int(os.getenv("VWAP_WINDOW", "14"))
 # ️ RISK MANAGEMENT PARAMETERS
 # =============================================================================
 # Risk per trade (account currency %)
-RISK_PCT = float(os.getenv("RISK_PCT", "1.0"))
+RISK_PCT = float(os.getenv("RISK_PCT", "1.5"))
 
 # Stop Loss and Take Profit multiples of ATR
 SL_ATR_MULT = float(os.getenv("SL_ATR_MULT", "1.5"))  # Stop Loss = 1.5 × ATR
-TP_ATR_MULT = float(os.getenv("TP_ATR_MULT", "3.0"))  # Take Profit = 3.0 × ATR (1:2 RR)
+TP_ATR_MULT = float(os.getenv("TP_ATR_MULT", "3.5"))  # Take Profit = 3.5 × ATR (Asymmetric R:R > 2.3:1)
 TRAIL_ATR_MULT = float(os.getenv("TRAIL_ATR_MULT", "1.0"))  # Trailing stop distance
 BE_ATR_MULT = float(os.getenv("BE_ATR_MULT", "1.0"))  # Breakeven activation threshold
 
 # Forex filters
-MAX_FOREX_CURRENCY_EXPOSURE = int(os.getenv("MAX_FOREX_CURRENCY_EXPOSURE", "1"))
-MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.0"))
+MAX_FOREX_CURRENCY_EXPOSURE = int(os.getenv("MAX_FOREX_CURRENCY_EXPOSURE", "2"))
+MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))
 BE_DYN_RR = os.getenv("BE_DYN_RR", "true").lower() == "true"
 BE_DYN_RR_RATIO = float(os.getenv("BE_DYN_RR_RATIO", "1.0"))
 
 
 # Score thresholds
 SCORE_MIN = int(os.getenv("SCORE_MIN", "6"))  # Minimum score to enter (out of 10 max base score)
-# Note : CRYPTO_SCORE_MIN (défini dans la section instruments) remplace ce seuil pour la crypto
 
-# Drawdown limits (Elder's rules)
+# Drawdown limits (Elder's rules & Hard Daily Cap)
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))  # Max daily drawdown %
+MAX_DAILY_LOSS_AMOUNT = float(os.getenv("MAX_DAILY_LOSS_AMOUNT", "100.0"))  # Hard cap absolu 100€ max de perte jour
 MAX_MONTHLY_LOSS_PCT = float(os.getenv("MAX_MONTHLY_LOSS_PCT", "6.0"))  # Max monthly drawdown %
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))  # Max concurrent positions
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "6"))  # Max concurrent positions across fleet
 
-# Position sizing limits (will be adjusted by broker-specific min/max)
+# =============================================================================
+# 🌙 PROTECTION NOCTURNE (Recommandation #3 — post-analyse Mer-Ven 22-24/07)
+# =============================================================================
+# Limite de positions ouvertes en session nocturne (heure UTC)
+# Evite l'over-exposition sur des positions corrélées pendant les heures creuses
+MAX_OPEN_POSITIONS_NIGHT = int(os.getenv("MAX_OPEN_POSITIONS_NIGHT", "3"))
+# Score minimum relevé la nuit pour filtrer les signaux de qualité marginale
+SCORE_MIN_NIGHT = int(os.getenv("SCORE_MIN_NIGHT", "8"))
+# Fenêtre nocturne en UTC : 20h00 → 06h00 (= 22h → 08h CET en hiver)
+NIGHT_SESSION_START_UTC = int(os.getenv("NIGHT_SESSION_START_UTC", "20"))
+NIGHT_SESSION_END_UTC = int(os.getenv("NIGHT_SESSION_END_UTC", "6"))
+
+# =============================================================================
+# ⏱️ WATCHDOG & PROTECTION POST-FREEZE (Recommandations #2 & #4)
+# =============================================================================
+# Délai max entre deux heartbeats de cycle avant déclenchement de l'alerte critique (secondes)
+CYCLE_WATCHDOG_TIMEOUT = int(os.getenv("CYCLE_WATCHDOG_TIMEOUT", "300"))
+# Si un cycle a duré plus longtemps que ce seuil, activer le mode audit post-freeze
+# Le bot attendra N cycles d'observation avant d'ouvrir de nouveaux trades
+POST_FREEZE_THRESHOLD_SECONDS = int(os.getenv("POST_FREEZE_THRESHOLD_SECONDS", "120"))
+# Nombre de cycles d'observation après un freeze avant de reprendre les trades
+POST_FREEZE_COOLDOWN_CYCLES = int(os.getenv("POST_FREEZE_COOLDOWN_CYCLES", "2"))
+
+# Position sizing limits
 MIN_POSITION_SIZE = float(os.getenv("MIN_POSITION_SIZE", "0.001"))
 MAX_POSITION_SIZE = float(os.getenv("MAX_POSITION_SIZE", "1000.0"))
 
-# ✅ BUG FIX #5 — Cooldown minimum entre deux trades consécutifs sur le même symbole (en secondes)
-# Valeur par défaut : 3600s (1 heure = au moins 1 bougie H1 complète pour renouveler le contexte)
-# Peut être ajusté via .env : COOLDOWN_SECONDS=1800 (30min) pour des stratégies plus actives
-COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "3600"))
+# Cooldown minimum entre deux trades consécutifs sur le même symbole (en secondes)
+# 300s (5 minutes) pour réactivité optimale en tendance forte
+COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "300"))
 
-# Kelly fraction parameters
-KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.25"))  # Use 25% of Kelly optimum (conservative)
-MIN_TRADES_FOR_KELLY = int(os.getenv("MIN_TRADES_FOR_KELLY", "20"))  # Min trades before using Kelly
+# Kelly fraction parameters (Industrial standard)
+KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.45"))  # 45% Kelly optimum pour compounding rapide
+MIN_TRADES_FOR_KELLY = int(os.getenv("MIN_TRADES_FOR_KELLY", "15"))  # Min trades before using Kelly
 
 # =============================================================================
 # NEWS & SENTIMENT CONFIGURATION
@@ -287,6 +309,30 @@ LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / f"superbot_{BROKER_TYPE}.log"
 TRADE_LOG_FILE = LOG_DIR / f"trades_{BROKER_TYPE}.jsonl"  # Structured trade logs for analysis
 ERROR_LOG_FILE = LOG_DIR / f"errors_{BROKER_TYPE}.log"
+BUG_LOG_FILE   = LOG_DIR / "bug_log.md"                   # Bug Watchdog journal (Formulation 2)
+
+# =============================================================================
+# 🐛 BUG WATCHDOG CONFIGURATION (Formulation 2 — agent de supervision technique)
+# =============================================================================
+# Intervalle de vérification du watchdog (secondes)
+BUG_WATCHDOG_INTERVAL = int(os.getenv("BUG_WATCHDOG_INTERVAL", "60"))
+# Activer/désactiver le Bug Watchdog
+BUG_WATCHDOG_ENABLED  = os.getenv("BUG_WATCHDOG_ENABLED", "true").lower() == "true"
+# Latence d'exécution maximale acceptée (secondes) avant d'émettre une alerte Medium
+BUG_WATCHDOG_MAX_LATENCY = float(os.getenv("BUG_WATCHDOG_MAX_LATENCY", "5.0"))
+
+# =============================================================================
+# 📈 TRAILING PROFIT CIRCUIT BREAKER (Formulation 2 — protection des gains en série)
+# =============================================================================
+# Profit minimal (€) à partir duquel le circuit breaker est actif
+PROFIT_CB_TRIGGER_EUR      = float(os.getenv("PROFIT_CB_TRIGGER_EUR",      "200.0"))
+# Retracement (fraction) du pic qui déclenche la pause (ex: 0.25 = -25%)
+PROFIT_CB_RETRACEMENT      = float(os.getenv("PROFIT_CB_RETRACEMENT",      "0.25"))
+# Durée de la pause de trading en heures (Règle 1)
+PROFIT_CB_PAUSE_HOURS      = float(os.getenv("PROFIT_CB_PAUSE_HOURS",      "3.0"))
+# Retracement après reprise qui déclenche l'arrêt définitif (Règle 2)
+PROFIT_CB_STOP_RETRACEMENT = float(os.getenv("PROFIT_CB_STOP_RETRACEMENT", "0.25"))
+
 
 # =============================================================================
 # DEVELOPMENT & TESTING

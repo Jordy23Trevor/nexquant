@@ -115,36 +115,69 @@ class NewsManager:
         log.info("NewsManager arrêté")
 
     def _update_loop(self):
-        """Boucle principale de mise à jour des nouvelles."""
+        """Boucle principale de mise à jour des nouvelles.
+
+        ⚠️ ROBUSTESSE (fix freeze 6h26 du 24/07/2026) :
+        Chaque source est lancée dans un thread isolé avec timeout.
+        Si une source freeze (DNS, SSL), le cycle ne bloque pas.
+        """
         while self.running:
             try:
-                self._update_all_sources()
+                self._update_all_sources_non_blocking()
                 time.sleep(self.update_interval)
             except Exception as e:
                 log.error(f"Erreur dans la boucle de mise à jour des nouvelles: {e}")
-                time.sleep(min(self.update_interval, 60))  # Attendre au moins 1 minute en cas d'erreur
+                time.sleep(min(self.update_interval, 60))
+
+    def _run_source_with_timeout(self, fn, name: str, timeout: float = 15.0):
+        """
+        Exécute une fonction de mise à jour dans un thread isolé avec timeout strict.
+        Si le thread ne se termine pas dans le délai imparti, on l'abandonne et
+        on continue — la source reste en cache jusqu'à la prochaine tentative.
+
+        Args:
+            fn: Callable à exécuter (ex: self._update_fear_greed)
+            name: Nom lisible de la source (pour les logs)
+            timeout: Délai max en secondes (défaut 15s)
+        """
+        t = threading.Thread(target=fn, name=f"news_{name}", daemon=True)
+        t.start()
+        t.join(timeout=timeout)
+        if t.is_alive():
+            log.warning(
+                f"⚠️ [NewsManager] Source '{name}' a dépassé le timeout de {timeout}s — "
+                f"poursuite avec les données en cache. Le thread continuera en arrière-plan."
+            )
+
+    def _update_all_sources_non_blocking(self):
+        """
+        Met à jour toutes les sources de nouvelles de manière non-bloquante.
+
+        Chaque source est isolée dans son propre thread avec un timeout de 15s.
+        Même si une source est injoignable (DNS, SSL, timeout réseau), le cycle
+        de trading ne sera jamais bloqué.
+        """
+        sources = [
+            (self._update_fear_greed,       "fear_greed"),
+            (self._update_forex_factory_news, "forex_factory"),
+            (self._update_crypto_news,       "crypto"),
+            (self._update_social_sentiment,  "social_sentiment"),
+        ]
+
+        for fn, name in sources:
+            self._run_source_with_timeout(fn, name, timeout=15.0)
+
+        # Calculer le sentiment global après les mises à jour
+        try:
+            self._calculate_global_sentiment()
+        except Exception as e:
+            log.warning(f"[NewsManager] Erreur calcul sentiment global (non-bloquant): {e}")
+
+        log.debug("Mise à jour des nouvelles terminée (non-bloquant)")
 
     def _update_all_sources(self):
-        """Met à jour toutes les sources de nouvelles disponibles."""
-        try:
-            # Mettre à jour le Fear & Greed Index
-            self._update_fear_greed()
-
-            # Mettre à jour les nouvelles Forex Factory (pour forex)
-            self._update_forex_factory_news()
-
-            # Mettre à jour les nouvelles crypto (CoinGecko, CryptoCompare)
-            self._update_crypto_news()
-
-            # Mettre à jour les données des réseaux sociaux (simplifié)
-            self._update_social_sentiment()
-
-            # Calculer le score de sentiment global
-            self._calculate_global_sentiment()
-
-            log.debug("Mise à jour des nouvelles terminée")
-        except Exception as e:
-            log.error(f"Erreur lors de la mise à jour des sources: {e}")
+        """Alias de compatibilité → délègue au mode non-bloquant."""
+        self._update_all_sources_non_blocking()
 
     def _update_fear_greed(self):
         """Met à jour l'indice Fear & Greed."""
@@ -184,7 +217,8 @@ class NewsManager:
                 self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour du Fear & Greed: {e}")
-            self._cache_timestamps[cache_key] = datetime.now()
+            # Étendre le cache pour éviter les retry en boucle rapide
+            self._cache_timestamps[cache_key] = datetime.now() - timedelta(minutes=self.update_interval / 60 - 60)
 
     def _update_forex_factory_news(self):
         """Met à jour les nouvelles de Forex Factory."""
@@ -271,7 +305,9 @@ class NewsManager:
                 self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour des nouvelles Forex Factory: {e}")
-            self._cache_timestamps[cache_key] = datetime.now()
+            # ⚠️ En cas d'erreur réseau, étendre le cache à 60min pour éviter les
+            # retry frénétiques qui peuvent bloquer le cycle (fix freeze 24/07/2026)
+            self._cache_timestamps[cache_key] = datetime.now() - timedelta(minutes=self.update_interval / 60 - 60)
 
     def _update_crypto_news(self):
         """Met à jour les nouvelles crypto depuis CoinGecko et CryptoCompare."""

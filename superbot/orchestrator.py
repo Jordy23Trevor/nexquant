@@ -169,6 +169,8 @@ class SuperBot:
         self.news_manager = None
         self.technical_indicators = None
         self.dashboard = None
+        self.bug_watchdog = None
+        self.profit_circuit_breaker = None
 
         # Données de marché et états
         self.market_data: Dict[str, any] = {}  # Symbol -> DataFrame avec indicateurs
@@ -582,6 +584,23 @@ class SuperBot:
             except Exception as e:
                 log.warning(f"Impossible de synchroniser les positions initiales : {e}")
 
+            # 7. Initialiser les agents de supervision (Formulation 2)
+            try:
+                from superbot.monitoring.bug_watchdog import BugWatchdog
+                from superbot.config import BUG_WATCHDOG_INTERVAL, BUG_WATCHDOG_MAX_LATENCY, BUG_WATCHDOG_ENABLED
+                if BUG_WATCHDOG_ENABLED:
+                    self.bug_watchdog = BugWatchdog(self, interval=BUG_WATCHDOG_INTERVAL, max_latency=BUG_WATCHDOG_MAX_LATENCY)
+                    log.info("Bug Watchdog initialisé")
+            except Exception as e:
+                log.warning(f"Impossible d'initialiser Bug Watchdog : {e}")
+
+            try:
+                from superbot.risk.modules.profit_circuit_breaker import ProfitCircuitBreaker
+                self.profit_circuit_breaker = ProfitCircuitBreaker(self)
+                log.info("Trailing Profit Circuit Breaker initialisé")
+            except Exception as e:
+                log.warning(f"Impossible d'initialiser Trailing Profit Circuit Breaker : {e}")
+
             log.info("Tous les composants ont été initialisés avec succès")
 
         except Exception as e:
@@ -647,6 +666,13 @@ class SuperBot:
         self.main_thread.start()
         log.info("Boucle principale de trading démarrée")
 
+        # Démarrer le Bug Watchdog (Formulation 2)
+        if getattr(self, 'bug_watchdog', None):
+            try:
+                self.bug_watchdog.start()
+            except Exception as e:
+                log.error(f"Erreur lors du démarrage du Bug Watchdog : {e}")
+
         # Configurer la gestion des signaux pour un arrêt propre
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -673,6 +699,13 @@ class SuperBot:
             log.info("Gestionnaire de nouvelles arrêté")
         except Exception as e:
             log.error(f"Erreur lors de l'arrêt du gestionnaire de nouvelles : {e}")
+
+        # Arrêter le Bug Watchdog (Formulation 2)
+        if getattr(self, 'bug_watchdog', None):
+            try:
+                self.bug_watchdog.stop()
+            except Exception as e:
+                log.error(f"Erreur lors de l'arrêt du Bug Watchdog : {e}")
 
         # Arrêter le dashboard
         if self.dashboard:

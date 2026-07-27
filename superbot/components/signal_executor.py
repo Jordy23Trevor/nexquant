@@ -36,6 +36,26 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         log.info(f"🚫 Trade {symbol} rejeté : Position déjà ouverte (pyramidage bloqué).")
         return
 
+    # ── Audit post-freeze (fix 24/07/2026) ──────────────────────────────────
+    # Après un freeze long du cycle (ex: 6h26 à cause d'une erreur DNS),
+    # le bot attend N cycles d'observation avant d'ouvrir de nouveaux trades.
+    # Ceci évite d'entrer sur un marché qui a drastiquement changé de régime.
+    post_freeze_remaining = getattr(bot, '_post_freeze_cooldown_cycles', 0)
+    if post_freeze_remaining > 0:
+        bot._post_freeze_cooldown_cycles = max(0, post_freeze_remaining - 1)
+        log.warning(
+            f"🔍 [Post-Freeze] Trade {symbol} rejeté — mode audit actif "
+            f"({post_freeze_remaining} cycle(s) restant(s)). "
+            f"Le bot observe le marché sans ouvrir de nouvelles positions."
+        )
+        return
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # 0b. Vérifier le Trailing Profit Circuit Breaker (Formulation 2)
+    if getattr(bot, '_circuit_breaker_paused', False):
+        log.info(f"⏸️ [CircuitBreaker] Trade sur {symbol} rejeté — trading en pause automatique par protection des gains.")
+        return
+
     # 1. Vérifier les filtres de nouvelles et de sentiment
     if getattr(bot, 'news_manager', None):
         should_avoid, news_event = bot.news_manager.should_avoid_trading_due_to_news(symbol)
@@ -44,6 +64,25 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     if should_avoid:
         log.info(f"Trading évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
         return
+
+    # 1b. Filtre de score nocturne (fix sur-exposition 23-24/07/2026) ─────────
+    # En session nocturne (20h-06h UTC), exiger un score minimum plus élevé
+    # pour éviter les entrées sur des signaux de qualité marginale.
+    from superbot.risk.modules.risk_monitor import _is_night_session
+    try:
+        from superbot.config import SCORE_MIN_NIGHT, NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC
+    except ImportError:
+        SCORE_MIN_NIGHT, NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC = 8, 20, 6
+
+    if _is_night_session(NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC):
+        current_score = signal_data.get('total_score', 0)
+        if current_score < SCORE_MIN_NIGHT:
+            log.info(
+                f"🌙 [NightFilter] Trade {symbol} rejeté — score {current_score:.1f} < "
+                f"{SCORE_MIN_NIGHT} requis en session nocturne (20h-06h UTC)"
+            )
+            return
+    # ─────────────────────────────────────────────────────────────────────────
 
     # 2. Récupérer le solde et le prix d'entrée
     account_balance = float(bot.broker.get_balance())
@@ -193,17 +232,17 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     adx_val = float(df_with_indicators.iloc[-1].get('adx', 0))
     regime_val = signal_data.get('market_regime', '').upper()
 
-    high_score = score_raw_val >= (score_min_val + 2)
-    strong_trend = adx_val >= 30
+    high_score = score_raw_val >= (score_min_val + 1)
+    strong_trend = adx_val >= 25
     trending_regime = 'TRENDING' in regime_val
     low_correlation = max_open_corr < 0.70
 
     if high_score and strong_trend and trending_regime and low_correlation:
         # Boost progressif selon le niveau du score
         score_excess = score_raw_val - score_min_val
-        conviction_boost = min(1.0 + (score_excess * 0.10) + ((adx_val - 30) * 0.005), 1.50)
+        conviction_boost = min(1.15 + (score_excess * 0.10) + ((adx_val - 25) * 0.008), 1.50)
         log.info(
-            f"🚀 [ConvictionBoost] {symbol} — Conditions excellentes détectées "
+            f"🚀 [ConvictionBoost] {symbol} — Conditions probabilistes supérieures détectées "
             f"(Score={score_raw_val:.1f}/{score_min_val}, ADX={adx_val:.1f}, Régime={regime_val}). "
             f"Boost de taille : ×{conviction_boost:.2f}"
         )

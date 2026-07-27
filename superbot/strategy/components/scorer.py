@@ -340,3 +340,30 @@ def _calculate_ranging_score(self, df: pd.DataFrame) -> Tuple[float, Dict[str, A
     score = min(score, 10)
 
     return score, details
+
+
+def calculate_probabilistic_win_rate(score: float, market_regime: str = "TRENDING", adx_value: float = 20.0, rr_ratio: float = 2.0) -> Dict[str, Any]:
+    """
+    Estime la probabilité de réussite P(Win) et l'espérance mathématique E(R) du trade.
+
+    E(R) = P(Win) * RR - (1 - P(Win)) * 1.0
+    """
+    base_pwin = 0.35 + (min(score, 10.0) / 10.0) * 0.40  # Score 6 -> 59%, Score 8 -> 67%, Score 10 -> 75%
+
+    if market_regime in ["TRENDING", "HIGH_VOL_TREND"]:
+        if adx_value > 25:
+            base_pwin += 0.05
+        if adx_value > 35:
+            base_pwin += 0.03
+    elif market_regime == "HIGH_VOL_RANGE":
+        base_pwin -= 0.05
+
+    win_prob = min(max(base_pwin, 0.20), 0.85)
+    expected_value = (win_prob * rr_ratio) - ((1.0 - win_prob) * 1.0)
+    has_statistical_edge = expected_value > 0.30 and win_prob >= 0.55
+
+    return {
+        'win_prob': round(win_prob, 3),
+        'expected_value': round(expected_value, 3),
+        'has_edge': has_statistical_edge
+    }

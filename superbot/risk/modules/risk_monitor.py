@@ -6,6 +6,29 @@ import math
 from typing import Dict, Any, Tuple, Optional
 log = logging.getLogger(__name__)
 
+
+def _is_night_session(start_utc: int = 20, end_utc: int = 6) -> bool:
+    """
+    Détermine si on est actuellement en session nocturne (heures UTC).
+
+    La session nocturne correspond aux heures de faible liquidité durant lesquelles
+    l'exposition doit être réduite pour éviter les sur-expositions liées au retournement
+    de tendance lors de la session asiatique.
+
+    Args:
+        start_utc: Heure UTC de début de session nocturne (défaut: 20h)
+        end_utc:   Heure UTC de fin   de session nocturne (défaut: 06h)
+
+    Returns:
+        True si l'heure courante (UTC) est dans la fenêtre nocturne
+    """
+    now_hour = datetime.now(timezone.utc).hour
+    if start_utc > end_utc:  # Fenêtre traverse minuit (ex: 20h → 06h)
+        return now_hour >= start_utc or now_hour < end_utc
+    else:  # Fenêtre dans la même journée (ex: 08h → 18h)
+        return start_utc <= now_hour < end_utc
+
+
 def _can_take_new_trade(rm, account_balance: float, symbol: str = "") -> bool:
     """
     Vérifie si on peut prendre un nouveau trade basé sur les limites de risque.
@@ -36,12 +59,39 @@ def _can_take_new_trade(rm, account_balance: float, symbol: str = "") -> bool:
             return False
 
     # Vérifier le nombre maximum de positions ouvertes
-    if len(rm.open_positions) >= rm.MAX_OPEN_POSITIONS:
+    # 🌙 PROTECTION NOCTURNE (fix sur-exposition 23-24/07/2026) :
+    # En session nocturne (20h-06h UTC), limiter à MAX_OPEN_POSITIONS_NIGHT positions
+    # pour éviter une sur-exposition corrélée sur les paires USD.
+    try:
+        from superbot.config import (
+            MAX_OPEN_POSITIONS_NIGHT, NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC
+        )
+    except ImportError:
+        MAX_OPEN_POSITIONS_NIGHT = 3
+        NIGHT_SESSION_START_UTC = 20
+        NIGHT_SESSION_END_UTC = 6
+
+    if _is_night_session(NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC):
+        effective_max = min(rm.MAX_OPEN_POSITIONS, MAX_OPEN_POSITIONS_NIGHT)
+        if len(rm.open_positions) >= effective_max:
+            log.info(
+                f"🌙 Limite nocturne atteinte: {len(rm.open_positions)}/{effective_max} positions "
+                f"(session nocturne 20h-06h UTC — réduction du risque d'exposition corrélée)"
+            )
+            return False
+    elif len(rm.open_positions) >= rm.MAX_OPEN_POSITIONS:
         log.info(f"Nombre maximum de positions atteint: {len(rm.open_positions)}/{rm.MAX_OPEN_POSITIONS}")
         return False
 
-    # Vérifier la limite de perte quotidienne
-    daily_loss_pct = abs(min(0, rm.daily_pnl)) / account_balance * 100 if account_balance > 0 else 0
+    # Vérifier la limite de perte quotidienne (en % et en valeur absolue 100€ max)
+    daily_loss_amount = abs(min(0, rm.daily_pnl))
+    daily_loss_pct = daily_loss_amount / account_balance * 100 if account_balance > 0 else 0
+    max_daily_amount = getattr(rm, 'MAX_DAILY_LOSS_AMOUNT', 100.0)
+
+    if daily_loss_amount >= max_daily_amount:
+        log.info(f"🚫 Limite de perte quotidienne absolue atteinte: {daily_loss_amount:.2f}€ >= {max_daily_amount:.2f}€ max")
+        return False
+
     if daily_loss_pct >= rm.MAX_DAILY_LOSS_PCT:
         log.info(f"Limite de perte quotidienne atteinte: {daily_loss_pct:.2f}% >= {rm.MAX_DAILY_LOSS_PCT}%")
         return False

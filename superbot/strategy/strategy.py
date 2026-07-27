@@ -330,16 +330,22 @@ class TradingStrategy:
         effective_balance = account_balance if account_balance > 0 else 10000.0
         risk_amount = effective_balance * (risk_pct / 100.0)
 
-        # ── Phase 3.1 : Inférence Probabiliste ML ────────────────────────────────
-        win_proba = 0.5
+        # ── Phase 3.1 : Inférence Probabiliste ML et Matrice E(R) ────────────────
+        from superbot.strategy.components.scorer import calculate_probabilistic_win_rate
+        adx_val = latest.get('adx', 20.0)
+        prob_meta = calculate_probabilistic_win_rate(adjusted_score, market_regime, adx_val, rr_ratio)
+
+        win_proba = prob_meta['win_prob']
         if self.ml_scorer and self.ml_scorer.is_trained:
-            win_proba = self.ml_scorer.predict_proba(latest)
+            ml_prob = self.ml_scorer.predict_proba(latest)
+            win_proba = max(win_proba, ml_prob)
             log.debug(f"[ML Scoring] Probabilité de gain calculée: {win_proba:.1%}")
-            
-            is_valid_score = win_proba >= 0.60
-        else:
-            # Fallback sur l'ancien système de score linéaire
-            is_valid_score = adjusted_score >= effective_score_min
+
+        details['win_prob'] = win_proba
+        details['expected_value'] = prob_meta['expected_value']
+
+        # Validation Probabiliste : Requis P(Win) >= 55% et score >= minimum
+        is_valid_score = (adjusted_score >= effective_score_min) and (win_proba >= 0.55)
 
         should_long = (
                 is_valid_score and

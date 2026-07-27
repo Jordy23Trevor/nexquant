@@ -7,6 +7,43 @@ from datetime import datetime, timezone
 
 log = logging.getLogger("cycle_runner")
 
+
+def _start_cycle_watchdog(bot, watchdog_timeout: int = 300):
+    """
+    Lance un thread watchdog qui surveille le heartbeat du cycle principal.
+
+    Si aucun cycle ne s'est terminé depuis plus de `watchdog_timeout` secondes,
+    une alerte critique est loggée. Ceci permet de détecter les freezes du type
+    '⚠️ Cycle trop long : 23177s' qui ont causé la perte du 24/07/2026.
+
+    Args:
+        bot: Instance du SuperBot
+        watchdog_timeout: Délai max entre deux cycles avant alerte (secondes)
+    """
+    def _watchdog_loop():
+        log.info(f"⏱️ [Watchdog] Démarré — alerte si aucun cycle après {watchdog_timeout}s")
+        while getattr(bot, 'running', False) and not bot.shutdown_event.is_set():
+            time.sleep(30)  # vérifier toutes les 30 secondes
+            last_hb = getattr(bot, '_last_cycle_heartbeat', None)
+            if last_hb is None:
+                continue
+            elapsed = time.time() - last_hb
+            if elapsed > watchdog_timeout:
+                log.critical(
+                    f"🚨 [Watchdog] CYCLE GELÉ DEPUIS {elapsed:.0f}s (seuil: {watchdog_timeout}s) — "
+                    f"des positions ouvertes ne sont peut-être plus surveillées ! "
+                    f"Vérifier la connexion réseau et l'état du broker."
+                )
+            elif elapsed > watchdog_timeout * 0.6:
+                log.warning(
+                    f"⚠️ [Watchdog] Cycle lent : {elapsed:.0f}s sans heartbeat "
+                    f"(seuil critique: {watchdog_timeout}s)"
+                )
+
+    t = threading.Thread(target=_watchdog_loop, name="cycle_watchdog", daemon=True)
+    t.start()
+    return t
+
 def run_main_loop(bot):
     """
     Boucle principale de trading.
@@ -18,10 +55,29 @@ def run_main_loop(bot):
     last_news_update = 0
     news_update_interval = 300  # 5 minutes
 
+    # ── Watchdog de cycle (fix freeze 24/07/2026) ─────────────────────────────
+    # Initialiser le heartbeat avant de lancer le watchdog
+    bot._last_cycle_heartbeat = time.time()
+    bot._post_freeze_cooldown_cycles = 0
+    try:
+        from superbot.config import CYCLE_WATCHDOG_TIMEOUT, POST_FREEZE_THRESHOLD_SECONDS, POST_FREEZE_COOLDOWN_CYCLES as _PF_CYCLES
+    except ImportError:
+        CYCLE_WATCHDOG_TIMEOUT = 300
+        POST_FREEZE_THRESHOLD_SECONDS = 120
+        _PF_CYCLES = 2
+    _start_cycle_watchdog(bot, watchdog_timeout=CYCLE_WATCHDOG_TIMEOUT)
+    # ─────────────────────────────────────────────────────────────────────────
+
     while bot.running and not bot.shutdown_event.is_set():
         cycle_start_time = time.time()
 
         try:
+            # ── Heartbeat watchdog ────────────────────────────────────────────
+            # Mis à jour au tout début du cycle pour que le watchdog sache
+            # que le bot est vivant même pendant les longs cycles.
+            bot._last_cycle_heartbeat = time.time()
+            # ─────────────────────────────────────────────────────────────────
+
             # Réinitialiser le cache des données de marché pour ce cycle
             bot._market_data_cache = {}
             bot._indicators_cache = {}
@@ -145,6 +201,27 @@ def run_main_loop(bot):
                 except Exception as e:
                     log.debug(f"Erreur envoi positions télémétrie : {e}")
 
+            # ── Trailing Profit Circuit Breaker (Formulation 2) ──────────────
+            if getattr(bot, 'profit_circuit_breaker', None):
+                try:
+                    cb_balance = getattr(bot, '_cached_balance', 0.0)
+                    if cb_balance <= 0.0:
+                        if bot.risk_manager and getattr(bot.risk_manager, 'current_balance', 0.0) > 0:
+                            cb_balance = bot.risk_manager.current_balance
+                        else:
+                            try:
+                                cb_balance = bot.broker.get_balance()
+                            except Exception:
+                                cb_balance = 0.0
+                    if cb_balance > 0:
+                        cb_paused = bot.profit_circuit_breaker.check(cb_balance)
+                        bot._circuit_breaker_paused = cb_paused
+                        if cb_paused:
+                            log.info("⏸️ [CircuitBreaker] Trading suspendu par protection de profit. Analyse en cours sans exécution.")
+                except Exception as e:
+                    log.debug(f"Erreur vérification ProfitCircuitBreaker : {e}")
+            # ─────────────────────────────────────────────────────────────────
+
             if bot.is_paused:
                 log.info("😴 Bot en pause. En attente du signal de démarrage depuis la plateforme web...")
                 cycle_duration = time.time() - cycle_start_time
@@ -164,6 +241,8 @@ def run_main_loop(bot):
                 bot.blocked_symbols.clear()
                 bot.session_pnl_by_symbol.clear()
                 bot.session_date = today
+                if getattr(bot, 'profit_circuit_breaker', None):
+                    bot.profit_circuit_breaker.reset_daily()
                 if blocked_count > 0:
                     log.info(f"📅 Reset quotidien : {blocked_count} actifs débloqués pour nouvelle session")
                 else:
@@ -277,6 +356,19 @@ def run_main_loop(bot):
                     slept += 1
             else:
                 log.warning(f"⚠️ Cycle trop long : {cycle_duration:.2f}s (cible : {target_cycle_time}s)")
+
+                # ── Détection post-freeze (fix 24/07/2026) ────────────────────
+                # Si le cycle a duré bien plus que la cible, activer un
+                # mode d'audit qui bloque les nouveaux trades N cycles.
+                if cycle_duration > POST_FREEZE_THRESHOLD_SECONDS:
+                    bot._post_freeze_cooldown_cycles = _PF_CYCLES
+                    log.critical(
+                        f"🔴 [Post-Freeze] Cycle de {cycle_duration:.0f}s détecté "
+                        f"(seuil: {POST_FREEZE_THRESHOLD_SECONDS}s). "
+                        f"Mode audit activé : aucun nouveau trade pendant {_PF_CYCLES} cycle(s). "
+                        f"Les positions existantes sont vérifiées avant toute action."
+                    )
+                # ─────────────────────────────────────────────────────────────
 
         except Exception as e:
             log.error(f"Erreur dans la boucle principale : {e}")
