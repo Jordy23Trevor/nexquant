@@ -271,6 +271,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         'market_data': raw_data.get('market_data', {}),
                         'broker_type': raw_data.get('broker_type', ''),
                         'asset_type': raw_data.get('asset_type', 'crypto'),
+                        'brain': raw_data.get('brain', {}),
                         'news': {
                             'overall_score': news_sentiment.get('overall', {}).get('score', 0.0) or 0.0,
                             'confidence': news_sentiment.get('overall', {}).get('confidence', 0.0) or 0.0,
@@ -295,18 +296,30 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_error(503, "Service unavailable")
 
     def _serve_api_logs(self):
-        """Sert les dernières lignes du fichier de log."""
+        """Sert les dernières lignes du fichier de log actif."""
+        from superbot.config import BROKER_TYPE, LOG_FILE
+        broker_type = BROKER_TYPE.lower()
         paths_to_try = [
+            LOG_FILE,
+            f"superbot/logs/superbot_{broker_type}.log",
+            f"../logs/superbot_{broker_type}.log",
+            os.path.join(os.path.dirname(__file__), "..", "logs", f"superbot_{broker_type}.log"),
             "superbot/logs/superbot.log",
             "../logs/superbot.log",
-            os.path.join(os.path.dirname(__file__), "..", "logs", "superbot.log"),
-            os.path.join(os.path.dirname(__file__), "logs", "superbot.log")
         ]
+        
+        # Trouver le fichier qui existe et a été modifié le plus récemment
         log_file = None
+        latest_mtime = 0.0
         for p in paths_to_try:
-            if os.path.exists(p):
-                log_file = p
-                break
+            if p and os.path.exists(p):
+                try:
+                    mtime = os.path.getmtime(p)
+                    if mtime > latest_mtime:
+                        latest_mtime = mtime
+                        log_file = p
+                except Exception:
+                    pass
                 
         content = ""
         if log_file and os.path.exists(log_file):
@@ -1670,6 +1683,11 @@ td.name { color: var(--txt); font-weight: 600; }
         <i class="fa-solid fa-shield-halved"></i>
         <span>Gestion du Risque</span>
       </div>
+      <div class="nav-item" onclick="showPanel('brain')">
+        <i class="fa-solid fa-brain"></i>
+        <span>Brain V3</span>
+        <span style="font-size:9px; padding:2px 6px; border-radius:8px; background: rgba(124,58,237,0.2); color:#a78bfa; font-weight:700; margin-left:auto;">IA</span>
+      </div>
       <div class="nav-label">Analyse & Logs</div>
       <div class="nav-item" onclick="showPanel('news')">
         <i class="fa-solid fa-newspaper"></i>
@@ -1935,6 +1953,89 @@ td.name { color: var(--txt); font-weight: 600; }
             <div class="metric-item"><span class="metric-item-name">Trailing Stop</span><span class="metric-item-value">1.00 ATR</span></div>
             <div class="metric-item"><span class="metric-item-name">Break-Even Trigger</span><span class="metric-item-value">1.00 ATR</span></div>
           </div>
+        </div>
+      </div>
+
+      <!-- ═══ BRAIN V3 ═════════════════════════════════════ -->
+      <div class="panel" id="panel-brain">
+        <div class="balance-header-row">
+          <div>
+            <h2 class="brand-name"><i class="fa-solid fa-brain" style="color:#a78bfa;"></i> Intelligence Autonome — Brain V3</h2>
+            <div class="balance-subtitle">Auto-apprentissage, gestion de session, régime de marché et stratégie active.</div>
+          </div>
+        </div>
+
+        <!-- Objectif journalier -->
+        <div class="card">
+          <div class="metric-header">
+            <span class="metric-title"><i class="fa-solid fa-bullseye"></i> Objectif Journalier</span>
+            <span class="metric-title" id="brain-daily-pct" style="color:var(--green); font-size:14px;">0%</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:10px;">
+            <span class="spark-price" id="brain-pnl-val">0.00 €</span>
+            <span style="font-size:12px; color:var(--txt-secondary);">Sur <strong id="brain-target-val">200.00 €</strong></span>
+          </div>
+          <div class="pnl-prog-bar" style="height:8px; border-radius:4px; overflow:hidden;">
+            <div class="pnl-prog-fill green" id="brain-target-bar" style="width:0%; transition: width 0.8s ease;"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:10px; color:var(--txt-muted);">
+            <span>Début de session</span>
+            <span id="brain-target-label">Objectif non atteint</span>
+          </div>
+        </div>
+
+        <div class="sparkline-row">
+          <!-- Session active -->
+          <div class="card sparkline-card">
+            <span class="status-label"><i class="fa-solid fa-clock"></i> Session Active</span>
+            <div class="spark-price" id="brain-session" style="color:#60a5fa;">—</div>
+            <span class="status-label" id="brain-session-desc" style="font-size:10px;">Détection en cours...</span>
+          </div>
+          <!-- Régime de marché -->
+          <div class="card sparkline-card">
+            <span class="status-label"><i class="fa-solid fa-wave-square"></i> Régime de Marché</span>
+            <div class="spark-price" id="brain-regime" style="color:#f59e0b;">—</div>
+            <span class="status-label" id="brain-regime-conf" style="font-size:10px;">Confiance: —</span>
+          </div>
+          <!-- Stratégie active -->
+          <div class="card sparkline-card">
+            <span class="status-label"><i class="fa-solid fa-chess"></i> Stratégie Active</span>
+            <div class="spark-price" id="brain-strategy" style="font-size:14px; color:#10b981;">—</div>
+            <span class="status-label" id="brain-strategy-conf" style="font-size:10px;">Score: —</span>
+          </div>
+        </div>
+
+        <div class="widget-row-2">
+          <!-- Paramètres adaptatifs -->
+          <div class="card">
+            <div class="metric-header"><span class="metric-title"><i class="fa-solid fa-sliders"></i> Paramètres Adaptatifs (PerformanceLearner)</span></div>
+            <div class="metric-item"><span class="metric-item-name">Score Min effectif</span><span class="metric-item-value" id="brain-score-min">—</span></div>
+            <div class="metric-item"><span class="metric-item-name">Risque par trade (%)</span><span class="metric-item-value" id="brain-risk-pct">—</span></div>
+            <div class="metric-item"><span class="metric-item-name">Max positions actives</span><span class="metric-item-value" id="brain-max-pos">—</span></div>
+            <div class="metric-item"><span class="metric-item-name">SL Multiplicateur ATR</span><span class="metric-item-value" id="brain-sl-mult">—</span></div>
+            <div class="metric-item"><span class="metric-item-name">TP Multiplicateur ATR</span><span class="metric-item-value" id="brain-tp-mult">—</span></div>
+          </div>
+          <!-- Knowledge Feeder -->
+          <div class="card">
+            <div class="metric-header"><span class="metric-title"><i class="fa-solid fa-rss"></i> Knowledge Feeder</span></div>
+            <div class="metric-item"><span class="metric-item-name">Items ingérés (24h)</span><span class="metric-item-value" id="brain-kf-count">—</span></div>
+            <div class="metric-item"><span class="metric-item-name">Dernière MaJ</span><span class="metric-item-value" id="brain-kf-last">—</span></div>
+            <div class="metric-item"><span class="metric-item-name">Index Fear &amp; Greed (Brain)</span><span class="metric-item-value" id="brain-kf-fg">—</span></div>
+            <div class="metric-item"><span class="metric-item-name">Sentiment global</span><span class="metric-item-value" id="brain-kf-sentiment">—</span></div>
+            <div class="metric-item"><span class="metric-item-name">Statut KnowledgeFeeder</span><span class="metric-item-value" id="brain-kf-status">—</span></div>
+          </div>
+        </div>
+
+        <!-- Blocages actifs -->
+        <div class="card">
+          <div class="metric-header"><span class="metric-title"><i class="fa-solid fa-ban"></i> Symboles Bloqués (PerformanceLearner)</span></div>
+          <div id="brain-blocked-list"><div class="empty"><i class="fa-solid fa-check-circle" style="color:var(--green);"></i> Aucun symbole bloqué</div></div>
+        </div>
+
+        <!-- Derniers apprentissages -->
+        <div class="card">
+          <div class="metric-header"><span class="metric-title"><i class="fa-solid fa-book-open"></i> Dernières décisions autonomes</span></div>
+          <div id="brain-decisions-list"><div class="empty">Aucune décision enregistrée.</div></div>
         </div>
       </div>
 
@@ -2323,7 +2424,7 @@ function updateBalanceDisplay() {
 }
 
 // ─── Nav ──────────────────────────────────────────────────────────────────
-const PANELS = ['overview','positions','risk','news','logs'];
+const PANELS = ['overview','positions','risk','brain','news','logs'];
 function showPanel(id) {
   PANELS.forEach(p => {
     document.getElementById('panel-' + p).classList.toggle('active', p === id);
@@ -2956,6 +3057,76 @@ async function fetchData() {
       if (needInit || !chartReady) renderChart(md[activeSymbol], activeSymbol);
     }
 
+    // ── Brain V3 data ──
+    const brain = d.brain || {};
+    const progress = brain.daily_progress || {};
+    const brainPnl = parseFloat(progress.achieved_eur ?? 0);
+    const brainTarget = parseFloat(progress.target_eur ?? 200);
+    const brainPct = brainTarget > 0 ? Math.min((brainPnl / brainTarget) * 100, 100) : 0;
+    setEl('brain-pnl-val', (brainPnl >= 0 ? '+' : '') + fmt(brainPnl, 2) + ' €');
+    setEl('brain-target-val', fmt(brainTarget, 2) + ' €');
+    setEl('brain-daily-pct', Math.round(brainPct) + '%');
+    const brainBar = document.getElementById('brain-target-bar');
+    if (brainBar) {
+      brainBar.style.width = brainPct + '%';
+      brainBar.className = 'pnl-prog-fill ' + (brainPnl < 0 ? 'red' : brainPct >= 100 ? 'green' : 'amber');
+    }
+    const brainLbl = document.getElementById('brain-target-label');
+    if (brainLbl) brainLbl.textContent = brainPct >= 100 ? '✅ Objectif atteint !' : `Restant : ${fmt(Math.max(0, brainTarget - brainPnl), 2)} €`;
+
+    // Session
+    const sess = brain.session || {};
+    setEl('brain-session', sess.name || '—');
+    setEl('brain-session-desc', sess.description || '');
+
+    // Régime
+    const reg = brain.regime || {};
+    setEl('brain-regime', reg.regime || '—');
+    setEl('brain-regime-conf', reg.confidence != null ? 'Confiance : ' + Math.round(reg.confidence * 100) + '%' : 'Confiance : —');
+
+    // Stratégie active
+    const strat = brain.strategy || {};
+    setEl('brain-strategy', strat.name || '—');
+    setEl('brain-strategy-conf', strat.confidence != null ? 'Score : ' + fmt(strat.confidence, 2) : 'Score : —');
+
+    // Params adaptatifs
+    const params = brain.learner_params || {};
+    setEl('brain-score-min', params.score_min ?? '—');
+    setEl('brain-risk-pct', params.risk_pct != null ? params.risk_pct + '%' : '—');
+    setEl('brain-max-pos', params.max_positions ?? '—');
+    setEl('brain-sl-mult', params.sl_atr_mult != null ? params.sl_atr_mult + '×ATR' : '—');
+    setEl('brain-tp-mult', params.tp_atr_mult != null ? params.tp_atr_mult + '×ATR' : '—');
+
+    // Knowledge Feeder
+    const kf_brain = brain.knowledge_feeder || {};
+    setEl('brain-kf-count', kf_brain.items_today ?? '—');
+    setEl('brain-kf-last', kf_brain.last_refresh ? new Date(kf_brain.last_refresh).toLocaleTimeString('fr-FR') : '—');
+    setEl('brain-kf-fg', kf_brain.fear_greed_index != null ? kf_brain.fear_greed_index : '—');
+    setEl('brain-kf-sentiment', kf_brain.overall_sentiment || '—');
+    setEl('brain-kf-status', kf_brain.is_running ? '🟢 Actif' : '⚫ Inactif');
+
+    // Symboles bloqués
+    const blockedEl = document.getElementById('brain-blocked-list');
+    const blocked = brain.blocked_symbols || [];
+    if (blockedEl) {
+      if (!blocked.length) {
+        blockedEl.innerHTML = '<div class="empty"><i class="fa-solid fa-check-circle" style="color:var(--green);"></i> Aucun symbole bloqué</div>';
+      } else {
+        blockedEl.innerHTML = blocked.map(s => `<div class="metric-item"><span class="metric-item-name">${s.symbol}</span><span class="metric-item-value" style="color:var(--red);">⚫ Bloqué — ${s.reason || '3 pertes consécutives'}</span></div>`).join('');
+      }
+    }
+
+    // Décisions autonomes
+    const decisionsEl = document.getElementById('brain-decisions-list');
+    const decisions = brain.recent_decisions || [];
+    if (decisionsEl) {
+      if (!decisions.length) {
+        decisionsEl.innerHTML = '<div class="empty">Aucune décision enregistrée.</div>';
+      } else {
+        decisionsEl.innerHTML = decisions.slice(-5).reverse().map(d2 => `<div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:12px; color:var(--txt-secondary);"><strong style="color:var(--txt);">${d2.type || 'ajustement'}</strong> — ${d2.reason || ''} <span style="font-size:10px; color:var(--txt-muted); float:right;">${d2.time ? new Date(d2.time).toLocaleTimeString('fr-FR') : ''}</span></div>`).join('');
+      }
+    }
+
   } catch(e) {
     setConnState(false);
     console.warn('fetchData error:', e);
@@ -3055,15 +3226,18 @@ class DashboardServer:
 
 
 # Fonction utilitaire pour créer une fonction de données de dashboard simple
-def create_dashboard_data_func(broker, strategy, risk_manager, news_manager):
+def create_dashboard_data_func(broker, strategy, risk_manager, news_manager,
+                               bot_instance=None):
     """
     Crée une fonction pour récupérer les données du dashboard à partir des composants du bot.
+    V3 : passe également les données brain (session, régime, learner, knowledge feeder).
 
     Args:
         broker: Instance du broker
         strategy: Instance de la stratégie
         risk_manager: Instance du gestionnaire de risque
         news_manager: Instance du gestionnaire de nouvelles
+        bot_instance: Instance du SuperBot (optionnel, pour les données V3 brain)
 
     Returns:
         Fonction qui retourne un dictionnaire avec les données du dashboard
@@ -3130,6 +3304,76 @@ def create_dashboard_data_func(broker, strategy, risk_manager, news_manager):
             except Exception as e:
                 log.debug(f"Impossible d'obtenir les données de nouvelles: {e}")
 
+            # =================================================================
+            # 🧠 V3 : Données Brain (SessionManager, RegimeDetector, Learner, KF)
+            # =================================================================
+            brain_data = {}
+            try:
+                bot = bot_instance
+                if bot:
+                    # Progression journalière
+                    sm = getattr(bot, 'session_manager', None)
+                    if sm:
+                        progress = sm.get_daily_progress()
+                        curr_session = sm.get_current_session()
+                        brain_data['daily_progress'] = {
+                            'achieved_eur': progress.get('achieved_eur', 0),
+                            'target_eur': progress.get('target_eur', 200),
+                            'achievement_pct': progress.get('achievement_pct', 0),
+                        }
+                        brain_data['session'] = {
+                            'name': curr_session.get('name', ''),
+                            'description': curr_session.get('description', ''),
+                            'risk_mult': curr_session.get('risk_mult', 1.0),
+                        }
+
+                    # Régime de marché (dernier connu)
+                    rd = getattr(bot, 'regime_detector', None)
+                    if rd and hasattr(rd, '_last_regime'):
+                        last_reg = rd._last_regime
+                        if last_reg:
+                            brain_data['regime'] = {
+                                'regime': last_reg.regime,
+                                'confidence': last_reg.confidence,
+                                'risk_mult': rd.get_risk_multiplier(last_reg.regime),
+                            }
+
+                    # Stratégie active (dernier signal)
+                    se = getattr(bot, 'strategy_engine', None)
+                    if se:
+                        lb = se.get_strategy_leaderboard()[:1]
+                        if lb:
+                            top = lb[0]
+                            brain_data['strategy'] = {
+                                'name': top.get('strategy', ''),
+                                'confidence': top.get('wr', 0),
+                                'trades': top.get('trades', 0),
+                            }
+
+                    # Params adaptatifs (PerformanceLearner)
+                    pl = getattr(bot, 'performance_learner', None)
+                    if pl:
+                        brain_data['learner_params'] = pl.get_current_params()
+                        brain_data['blocked_symbols'] = [
+                            {'symbol': sym, 'reason': '3 pertes consécutives'}
+                            for sym in pl._blocked_symbols
+                        ]
+                        brain_data['recent_decisions'] = getattr(pl, '_decisions_log', [])
+
+                    # Knowledge Feeder
+                    kf_inst = getattr(bot, 'knowledge_feeder', None)
+                    if kf_inst:
+                        kf_sentiment = kf_inst.get_current_sentiment()
+                        brain_data['knowledge_feeder'] = {
+                            'items_today': getattr(kf_inst, '_items_today', 0),
+                            'last_refresh': getattr(kf_inst, '_last_refresh_time', None),
+                            'is_running': getattr(kf_inst, '_running', False),
+                            'fear_greed_index': kf_sentiment.get('fear_greed_index'),
+                            'overall_sentiment': kf_sentiment.get('overall_sentiment', 'neutral'),
+                        }
+            except Exception as e:
+                log.debug(f"Erreur collecte brain data: {e}")
+
             return {
                 'timestamp': datetime.now().isoformat(),
                 'bot': {
@@ -3140,7 +3384,8 @@ def create_dashboard_data_func(broker, strategy, risk_manager, news_manager):
                 'performance': performance,
                 'risk': risk_data,
                 'positions': positions,
-                'news': news_data
+                'news': news_data,
+                'brain': brain_data,  # 🧠 V3
             }
 
         except Exception as e:
@@ -3152,7 +3397,8 @@ def create_dashboard_data_func(broker, strategy, risk_manager, news_manager):
                 'performance': {},
                 'risk': {},
                 'positions': {},
-                'news': {}
+                'news': {},
+                'brain': {},
             }
 
     return get_dashboard_data

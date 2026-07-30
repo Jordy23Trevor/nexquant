@@ -3,9 +3,27 @@ import time
 import traceback
 import threading
 import random
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime, timezone
 
 log = logging.getLogger("cycle_runner")
+
+# ⚡ V3 : Lire CYCLE_TIME depuis config (fix bug heartbeat 50-60s)
+try:
+    from superbot.config import (
+        CYCLE_WATCHDOG_TIMEOUT, POST_FREEZE_THRESHOLD_SECONDS,
+        POST_FREEZE_COOLDOWN_CYCLES as _PF_CYCLES,
+        CYCLE_TIME as _DEFAULT_CYCLE_TIME,
+        SYMBOL_TIMEOUT_SECONDS as _DEFAULT_SYMBOL_TIMEOUT,
+        MAX_PARALLEL_SYMBOLS as _DEFAULT_MAX_PARALLEL,
+    )
+except ImportError:
+    CYCLE_WATCHDOG_TIMEOUT = 300
+    POST_FREEZE_THRESHOLD_SECONDS = 120
+    _PF_CYCLES = 2
+    _DEFAULT_CYCLE_TIME = 15  # V3 : 15s au lieu de 60s
+    _DEFAULT_SYMBOL_TIMEOUT = 8
+    _DEFAULT_MAX_PARALLEL = 4
 
 
 def _start_cycle_watchdog(bot, watchdog_timeout: int = 300):
@@ -66,6 +84,40 @@ def run_main_loop(bot):
         POST_FREEZE_THRESHOLD_SECONDS = 120
         _PF_CYCLES = 2
     _start_cycle_watchdog(bot, watchdog_timeout=CYCLE_WATCHDOG_TIMEOUT)
+
+    # ⚡ V3 : Lire CYCLE_TIME et les paramètres parallèles depuis la config du bot
+    target_cycle_time = getattr(bot, 'CYCLE_TIME', _DEFAULT_CYCLE_TIME)
+    symbol_timeout = getattr(bot, 'SYMBOL_TIMEOUT_SECONDS', _DEFAULT_SYMBOL_TIMEOUT)
+    max_parallel = getattr(bot, 'MAX_PARALLEL_SYMBOLS', _DEFAULT_MAX_PARALLEL)
+    log.info(
+        f"⚡ Cycle runner V3 | CYCLE_TIME={target_cycle_time}s | "
+        f"SYMBOL_TIMEOUT={symbol_timeout}s | MAX_PARALLEL={max_parallel}"
+    )
+
+    # ── 🧠 V3 : Démarrage des modules Brain ──────────────────────────────────
+    # 1. KnowledgeFeeder en background thread
+    if getattr(bot, 'knowledge_feeder', None):
+        try:
+            bot.knowledge_feeder.start()
+            log.info("🌐 KnowledgeFeeder démarré en background")
+        except Exception as _e:
+            log.debug(f"KnowledgeFeeder start error: {_e}")
+
+    # 2. Analyse pré-session initiale
+    if getattr(bot, 'performance_learner', None) and getattr(bot, 'AUTO_LEARN_ENABLED', True):
+        try:
+            adj = bot.performance_learner.pre_session_analysis(bot)
+            log.info(f"🔍 Pré-session initiale | {adj}")
+        except Exception as _e:
+            log.debug(f"Pre-session init error: {_e}")
+
+    # 3. Timer interne pour les checks périodiques brain
+    _last_pre_session_check = 0.0
+    _last_mid_check = 0.0
+    _last_perf_log = 0.0
+    _PRE_SESSION_INTERVAL = 3600   # Analyse pré-session toutes les heures
+    _MID_CHECK_INTERVAL = 1800     # Check mi-session toutes les 30 min
+    _PERF_LOG_INTERVAL = 600       # Log de performance toutes les 10 min
     # ─────────────────────────────────────────────────────────────────────────
 
     while bot.running and not bot.shutdown_event.is_set():
@@ -225,7 +277,6 @@ def run_main_loop(bot):
             if bot.is_paused:
                 log.info("😴 Bot en pause. En attente du signal de démarrage depuis la plateforme web...")
                 cycle_duration = time.time() - cycle_start_time
-                target_cycle_time = 60
                 if cycle_duration < target_cycle_time:
                     sleep_time = target_cycle_time - cycle_duration
                     slept = 0
@@ -234,7 +285,7 @@ def run_main_loop(bot):
                         slept += 1
                 continue
 
-            # 📅 RESET QUOTIDIEN DES BLOCAGES D'ACTIFS
+            # 📅 RESET QUOTIDIEN DES BLOCAGES D'ACTIFS + BRAIN V3
             today = datetime.now().date()
             if today != bot.session_date:
                 blocked_count = len(bot.blocked_symbols)
@@ -247,6 +298,71 @@ def run_main_loop(bot):
                     log.info(f"📅 Reset quotidien : {blocked_count} actifs débloqués pour nouvelle session")
                 else:
                     log.debug("📅 Reset quotidien des blocages d'actifs")
+
+                # 🧠 V3 : Reset journalier du SessionManager et PerformanceLearner
+                if getattr(bot, 'session_manager', None):
+                    try:
+                        balance = getattr(bot, '_cached_balance', 0.0) or getattr(bot, 'initial_balance', 10000.0)
+                        bot.session_manager.reset_daily(balance)
+                        log.info(f"🧠 SessionManager reset journalier | balance={balance:.2f}€")
+                    except Exception as _e:
+                        log.debug(f"SessionManager reset error: {_e}")
+                
+                if getattr(bot, 'risk_manager', None):
+                    try:
+                        bot.risk_manager.reset_daily_stats()
+                    except Exception as _e:
+                        log.debug(f"RiskManager reset error: {_e}")
+
+            # 🧠 V3 : Analyse PRÉ-SESSION périodique (toutes les heures)
+            if (getattr(bot, 'performance_learner', None) and
+                    getattr(bot, 'AUTO_LEARN_ENABLED', True) and
+                    now_time - _last_pre_session_check >= _PRE_SESSION_INTERVAL):
+                try:
+                    threading.Thread(
+                        target=lambda: bot.performance_learner.pre_session_analysis(bot),
+                        daemon=True, name="pre_session_analysis"
+                    ).start()
+                    _last_pre_session_check = now_time
+                except Exception as _e:
+                    log.debug(f"Pre-session analysis error: {_e}")
+
+            # 🧠 V3 : Check MID-SESSION (toutes les 30 min)
+            if (getattr(bot, 'performance_learner', None) and
+                    getattr(bot, 'session_manager', None) and
+                    now_time - _last_mid_check >= _MID_CHECK_INTERVAL):
+                try:
+                    sm = bot.session_manager
+                    progress = sm.get_daily_progress()
+                    pnl = progress.get('achieved_eur', 0)
+                    target = progress.get('target_eur', 200)
+                    balance = getattr(bot, '_cached_balance', 0.0) or getattr(bot, 'initial_balance', 10000.0)
+                    actions = bot.performance_learner.mid_session_check(pnl, target, balance)
+                    if actions.get('action'):
+                        log.info(f"🔄 Mid-session : {actions['action']} | {progress['achieved_eur']:.1f}€/{target:.1f}€ ({progress['achievement_pct']:.0f}%)")
+                    _last_mid_check = now_time
+                except Exception as _e:
+                    log.debug(f"Mid-session check error: {_e}")
+
+            # 🧠 V3 : Log de performance périodique (toutes les 10 min)
+            if now_time - _last_perf_log >= _PERF_LOG_INTERVAL:
+                try:
+                    if getattr(bot, 'session_manager', None):
+                        log.info(f"📊 {bot.session_manager.get_session_summary()}")
+                    if getattr(bot, 'db', None):
+                        bal = getattr(bot, '_cached_balance', 0.0) or getattr(bot, 'initial_balance', 0.0)
+                        sess = getattr(bot, 'session_manager', None)
+                        bot.db.log_performance({
+                            'balance': bal,
+                            'equity': bal,
+                            'daily_pnl': sess.get_daily_progress().get('achieved_eur', 0) if sess else 0,
+                            'daily_target': getattr(bot, 'DAILY_TARGET_EUR', 200),
+                            'open_positions': len(getattr(bot, 'positions', {})),
+                            'session_name': sess.get_current_session().get('name', '') if sess else '',
+                        })
+                    _last_perf_log = now_time
+                except Exception as _e:
+                    log.debug(f"Perf log error: {_e}")
 
             cycle_count += 1
             
@@ -281,32 +397,45 @@ def run_main_loop(bot):
             scanned_instruments = list(bot.instruments)
             random.shuffle(scanned_instruments)
 
-            def run_process_symbol(symbol):
-                if not bot.running or bot.shutdown_event.is_set():
-                    return
+            def _process_symbol_safe(bot, sym, timeout):
                 try:
-                    bot._process_symbol(symbol)
+                    bot._process_symbol(sym)
                 except Exception as e:
-                    log.error(f"Erreur lors du traitement de {symbol} : {e}")
+                    log.error(f"Erreur lors du traitement de {sym} : {e}")
                     log.debug(traceback.format_exc())
                     with bot._state_lock:
                         bot.stats['errors_count'] += 1
-                        if getattr(bot, 'prometheus', None):
-                            bot.prometheus.bot_api_errors_total.labels(
-                                broker=bot.broker.get_asset_type(),
-                                error_code="process_symbol_error"
-                            ).inc()
 
-            # 🔒 BUG FIX #RC — Traitement séquentiel pour éviter les race conditions
-            # sur bot.positions, bot.session_pnl_by_symbol et les caches partagés.
-            # _process_symbol modifie l'état global (positions, PnL, cooldowns) et le
-            # _lock (RLock) ne couvre pas toutes les sections critiques.
-            # Le ThreadPoolExecutor parallélisait les symboles et pouvait causer :
-            # - double-exécution de trades (deux threads lisent bot.positions vides simultanément)
-            # - corruption de session_pnl_by_symbol (écriture concurrente)
-            # - écrasement des caches _indicators_cache / _strategy_cache
-            for symbol in scanned_instruments:
-                run_process_symbol(symbol)
+            if max_parallel > 1 and len(scanned_instruments) > 1:
+                with ThreadPoolExecutor(
+                    max_workers=min(max_parallel, len(scanned_instruments)),
+                    thread_name_prefix="sym_worker"
+                ) as executor:
+                    future_to_sym = {
+                        executor.submit(
+                            _process_symbol_safe, bot, sym, symbol_timeout
+                        ): sym
+                        for sym in scanned_instruments
+                        if bot.running and not bot.shutdown_event.is_set()
+                    }
+                    for future in as_completed(
+                        future_to_sym,
+                        timeout=symbol_timeout * len(scanned_instruments) + 10
+                    ):
+                        sym = future_to_sym[future]
+                        try:
+                            future.result(timeout=symbol_timeout)
+                        except FuturesTimeoutError:
+                            log.warning(f"⏱️ Timeout ({symbol_timeout}s) pour {sym}")
+                        except Exception as e:
+                            log.error(f"Erreur traitement {sym}: {e}")
+                            with bot._state_lock:
+                                bot.stats['errors_count'] += 1
+            else:
+                for sym in scanned_instruments:
+                    if not bot.running or bot.shutdown_event.is_set():
+                        break
+                    _process_symbol_safe(bot, sym, symbol_timeout)
 
             if bot.dashboard:
                 try:
@@ -346,18 +475,23 @@ def run_main_loop(bot):
                 except Exception as e:
                     log.debug(f"Erreur mise à jour Prometheus : {e}")
 
-            target_cycle_time = 60
-
+            # ⚡ V3 : Sleep jusqu'au prochain cycle (target_cycle_time lu depuis config)
+            # BUG FIX : 'target_cycle_time = 60' était ici avant → écrasait la valeur de la config !
+            # La valeur correcte est définie une seule fois au début de run_main_loop().
             if cycle_duration < target_cycle_time:
                 sleep_time = target_cycle_time - cycle_duration
                 slept = 0
                 while slept < sleep_time and bot.running and not bot.shutdown_event.is_set():
                     time.sleep(min(1, sleep_time - slept))
                     slept += 1
+                log.debug(
+                    f"✅ Cycle #{cycle_count} : {cycle_duration:.1f}s "
+                    f"(cible={target_cycle_time}s | sleep={sleep_time:.1f}s)"
+                )
             else:
-                log.warning(f"⚠️ Cycle trop long : {cycle_duration:.2f}s (cible : {target_cycle_time}s)")
+                log.warning(f"⚠️ Cycle #{cycle_count} trop long : {cycle_duration:.2f}s (cible : {target_cycle_time}s)")
 
-                # ── Détection post-freeze (fix 24/07/2026) ────────────────────
+                # ── Détection post-freeze (fix 24/07/2026) ─────────────────
                 # Si le cycle a duré bien plus que la cible, activer un
                 # mode d'audit qui bloque les nouveaux trades N cycles.
                 if cycle_duration > POST_FREEZE_THRESHOLD_SECONDS:

@@ -46,26 +46,32 @@ def calculate_sl_tp_levels(rm, entry_price: float, atr_value: float,
             tp_price = entry_price * (1 - risk_pct * 2)
         return sl_price, tp_price
 
-    mults = rm.ATR_MULTIPLIERS.get(effective_asset_type, rm.ATR_MULTIPLIERS['forex'])
-    sl_mult, tp_mult = mults['sl'], mults['tp']
+    # 🧠 V3 : Smart SL/TP multipliers (Target-Aware)
+    if hasattr(rm, 'get_regime_sl_tp_multipliers'):
+        mults = rm.get_regime_sl_tp_multipliers(regime=hmm_regime, asset_class=effective_asset_type)
+        sl_mult = mults.get('sl_atr_mult', 1.5)
+        tp_mult = mults.get('tp_atr_mult', 3.0)
+    else:
+        mults = rm.ATR_MULTIPLIERS.get(effective_asset_type, rm.ATR_MULTIPLIERS['forex'])
+        sl_mult, tp_mult = mults['sl'], mults['tp']
 
-    # ── Phase 3 §2 — Modulation des multiplicateurs par régime HMM ──────
-    regime_upper = hmm_regime.upper() if hmm_regime else ""
-    if regime_upper == "HIGH_VOL_RANGE":
-        # Haute volatilité : écarter SL et TP pour éviter les whipsaws
-        sl_mult *= 1.40
-        tp_mult *= 1.40
-        log.debug(f"[Régime HMM] HIGH_VOL_RANGE → SL×1.4={sl_mult:.2f}, TP×1.4={tp_mult:.2f} pour {symbol}")
-    elif regime_upper == "LOW_VOL_RANGE":
-        # Marché calme : objectifs plus proches, moins de bruit
-        sl_mult *= 0.85
-        tp_mult *= 0.85
-        log.debug(f"[Régime HMM] LOW_VOL_RANGE → SL×0.85={sl_mult:.2f}, TP×0.85={tp_mult:.2f} pour {symbol}")
-    elif regime_upper == "LOW_VOL_TREND":
-        # Tendance propre et calme : SL légèrement plus serré (moins de bruit)
-        sl_mult *= 0.90
-        log.debug(f"[Régime HMM] LOW_VOL_TREND → SL×0.90={sl_mult:.2f} pour {symbol}")
-    # TRENDING et cas inconnus : multiplicateurs standards (pas de modification)
+        # ── Phase 3 §2 — Modulation des multiplicateurs par régime HMM ──────
+        regime_upper = hmm_regime.upper() if hmm_regime else ""
+        if regime_upper == "HIGH_VOL_RANGE":
+            # Haute volatilité : écarter SL et TP pour éviter les whipsaws
+            sl_mult *= 1.40
+            tp_mult *= 1.40
+            log.debug(f"[Régime HMM] HIGH_VOL_RANGE → SL×1.4={sl_mult:.2f}, TP×1.4={tp_mult:.2f} pour {symbol}")
+        elif regime_upper == "LOW_VOL_RANGE":
+            # Marché calme : objectifs plus proches, moins de bruit
+            sl_mult *= 0.85
+            tp_mult *= 0.85
+            log.debug(f"[Régime HMM] LOW_VOL_RANGE → SL×0.85={sl_mult:.2f}, TP×0.85={tp_mult:.2f} pour {symbol}")
+        elif regime_upper == "LOW_VOL_TREND":
+            # Tendance propre et calme : SL légèrement plus serré (moins de bruit)
+            sl_mult *= 0.90
+            log.debug(f"[Régime HMM] LOW_VOL_TREND → SL×0.90={sl_mult:.2f} pour {symbol}")
+        # TRENDING et cas inconnus : multiplicateurs standards (pas de modification)
 
     if position_side == "LONG":
         sl_price = entry_price - (sl_mult * atr_value)

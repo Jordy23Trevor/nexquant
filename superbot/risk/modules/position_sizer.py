@@ -71,7 +71,13 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
         risk_per_unit = (price_risk / tick_size) * (tick_value / contract_size)
 
         # 3. Calculer le risque en pourcentage du compte
-        risk_pct = rm.RISK_PCT / 100.0  # Convertir en décimal
+        base_risk = rm.RISK_PCT
+        # 🧠 V3 : Target-aware risk si applicable
+        daily_target = getattr(rm, 'daily_target', 0)
+        if daily_target > 0:
+            base_risk = rm.get_target_aware_risk_pct(rm.daily_pnl, daily_target, base_risk)
+        
+        risk_pct = base_risk / 100.0  # Convertir en décimal
 
         # ── Phase 3 §1 — Dimensionnement dynamique par régime HMM ────────────
         # Le risque par trade est ajusté selon le régime détecté :

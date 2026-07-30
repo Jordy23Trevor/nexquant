@@ -15,10 +15,53 @@ except ImportError:
 
 from superbot.broker.base import Broker
 from superbot.config import (
-    MT5_LOGIN, MT5_PASSWORD, MT5_SERVER, MT5_PATH
+    MT5_LOGIN, MT5_PASSWORD, MT5_SERVER, MT5_PATH,
+    MT5_CRYPTO_SYMBOLS, MT5_CRYPTO_ENABLED
 )
 
 log = logging.getLogger("mt5_client")
+
+# Symboles crypto disponibles sur Fusion Markets MT5 (CFD 24/7)
+_MT5_CRYPTO_PATTERNS = [
+    "BTCUSD", "ETHUSD", "BNBUSD", "XRPUSD", "SOLUSD",
+    "ADAUSD", "DOTUSD", "LINKUSD", "LTCUSD", "BCHUSD",
+    "MATICUSD", "AVAXUSD", "UNIUSD", "ATOMUSD",
+    # Paires BTC cross
+    "BTCEUR", "ETHEUR",
+]
+
+# Matières premières Fusion Markets
+_MT5_COMMODITY_PATTERNS = [
+    "XAUUSD", "XAGUSD", "XTIUSD", "XBRUSD",
+    "UKOUSD", "USOILCASH", "XNGUSD",
+]
+
+
+def _detect_asset_class_mt5(symbol: str) -> str:
+    """
+    Détecte la classe d'actif d'un symbole MT5.
+    Retourne : 'crypto' | 'commodity' | 'forex'
+    """
+    sym_upper = symbol.upper().replace("/", "").replace(".", "")
+    # Crypto
+    for pat in _MT5_CRYPTO_PATTERNS:
+        if sym_upper.startswith(pat[:3]) and "USD" in sym_upper and len(sym_upper) <= 8:
+            # Vérifier que c'est vraiment crypto (BTC, ETH, BNB...)
+            crypto_bases = ["BTC", "ETH", "BNB", "XRP", "SOL", "ADA",
+                           "DOT", "LINK", "LTC", "BCH", "MATIC",
+                           "AVAX", "UNI", "ATOM"]
+            for base in crypto_bases:
+                if sym_upper.startswith(base):
+                    return "crypto"
+    # Matières premières
+    for pat in _MT5_COMMODITY_PATTERNS:
+        if pat in sym_upper:
+            return "commodity"
+    # JPY pairs
+    if "JPY" in sym_upper:
+        return "forex_jpy"
+    # Défaut : forex
+    return "forex"
 
 
 class MT5Client(Broker):
@@ -121,7 +164,20 @@ class MT5Client(Broker):
         return ["EUR", "USD", "GBP", "JPY"]
 
     def get_asset_type(self) -> str:
-        return "forex"
+        """
+        V3: Retourne le type d'actif principal du broker.
+        Pour MT5 (multi-actifs), retourne 'multi' pour indiquer que le broker
+        supporte forex + crypto + commodities.
+        Utiliser get_asset_class_for_symbol() pour un symbole précis.
+        """
+        return "forex"  # Type de base pour la compatibilité
+
+    def get_asset_class_for_symbol(self, symbol: str) -> str:
+        """
+        V3: Détecte la classe d'actif d'un symbole MT5 spécifique.
+        Retourne : 'crypto' | 'commodity' | 'forex_jpy' | 'forex'
+        """
+        return _detect_asset_class_mt5(symbol)
 
     def get_balance(self) -> float:
         """Retourne le solde disponible."""
@@ -597,16 +653,28 @@ class MT5Client(Broker):
         return (tick.bid + tick.ask) / 2
 
     def get_spread(self, symbol: str) -> float:
-        """Retourne le spread actuel en pips."""
+        """Retourne le spread actuel en pips/points selon le type d'actif."""
         symbol = self.normalize_symbol(symbol)
         self._call_api(lambda: mt5.symbol_select(symbol, True), False)
         tick = self._call_api(lambda: mt5.symbol_info_tick(symbol), None)
         if tick is None or tick.bid == 0.0 or tick.ask == 0.0:
             return 0.0
         spread_raw = tick.ask - tick.bid
-        normalized = symbol.upper().replace("/", "")
-        pip_size = 0.01 if "JPY" in normalized else 0.0001
-        return spread_raw / pip_size
+
+        # Déterminer la taille du pip selon la classe d'actif
+        asset_class = _detect_asset_class_mt5(symbol)
+        if asset_class == "crypto":
+            # Crypto : le spread est en USD, on le normalise en 'points'
+            info = self._call_api(lambda: mt5.symbol_info(symbol), None)
+            point = info.point if info and info.point > 0 else 0.01
+            return spread_raw / point
+        elif asset_class == "commodity":
+            # Or/Pétrole : point de 0.01
+            return spread_raw / 0.01
+        elif asset_class == "forex_jpy":
+            return spread_raw / 0.01  # JPY pairs
+        else:
+            return spread_raw / 0.0001  # Forex standard
 
 
     def get_min_order_size(self, symbol: str) -> float:
@@ -627,16 +695,72 @@ class MT5Client(Broker):
 
     def normalize_symbol(self, symbol: str) -> str:
         """
-        Adapte le symbole (ex: EUR/USD -> EURUSD).
-        Fusion Markets utilise des symboles sans barre oblique et des codes spécifiques.
+        Adapte le symbole pour MT5/Fusion Markets.
+        V3: Support étendu des symboles crypto CFD et des formats courants.
+        
+        Ex: EUR/USD → EURUSD
+            BTC/USD → BTCUSD (crypto CFD sur Fusion Markets)
+            BTC/USDT → BTCUSD (conversion Binance → MT5)
+            ETH/USDT → ETHUSD
         """
-        clean = symbol.strip().upper().replace("/", "")
-        # Correspondance des matières premières Fusion Markets
-        if clean in ["WTIUSD", "WTI"]:
-            return "XTIUSD"
-        if clean in ["BRENTUSD", "BRENT", "BRNUSD"]:
-            return "XBRUSD"
-        return clean
+        # Nettoyage de base
+        clean = symbol.strip().upper()
+        
+        # Convertir le format Binance (BTC/USDT) vers MT5 (BTCUSD)
+        if "/USDT" in clean:
+            clean = clean.replace("/USDT", "USD")
+        elif "/USD" in clean:
+            clean = clean.replace("/", "")
+        elif "/" in clean:
+            clean = clean.replace("/", "")
+        
+        # Correspondances spécifiques Fusion Markets
+        SYMBOL_MAP = {
+            "WTIUSD": "XTIUSD",
+            "WTI": "XTIUSD",
+            "BRENTUSD": "XBRUSD",
+            "BRENT": "XBRUSD",
+            "BRNUSD": "XBRUSD",
+            "XAUUSD": "XAUUSD",  # Gold
+            "GOLD": "XAUUSD",
+            "SILVER": "XAGUSD",
+            "XAGUSD": "XAGUSD",
+        }
+        return SYMBOL_MAP.get(clean, clean)
+
+    def get_crypto_instruments(self) -> list:
+        """
+        V3: Retourne les instruments crypto disponibles sur ce compte MT5.
+        Vérifie quels symboles crypto sont effectivement présents dans le Market Watch.
+        """
+        if not mt5 or not MT5_CRYPTO_ENABLED:
+            return []
+        
+        available = []
+        for sym in MT5_CRYPTO_SYMBOLS:
+            normalized = self.normalize_symbol(sym)
+            # Tester si le symbole existe dans MT5
+            self._call_api(lambda: mt5.symbol_select(normalized, True), False)
+            info = self._call_api(lambda: mt5.symbol_info(normalized), None)
+            if info is not None:
+                available.append(normalized)
+                log.debug(f"Crypto MT5 disponible : {normalized}")
+            else:
+                log.debug(f"Crypto MT5 non disponible : {normalized} (non trouvé sur Fusion Markets)")
+        
+        log.info(f"Crypto CFD disponibles sur MT5 : {available}")
+        return available
+
+    def get_all_instruments(self, include_crypto: bool = True) -> list:
+        """
+        V3: Retourne tous les instruments tradables (forex + crypto si activé).
+        """
+        base = self.get_default_instruments()
+        if include_crypto and MT5_CRYPTO_ENABLED:
+            crypto = self.get_crypto_instruments()
+            # Éviter les doublons
+            return list(dict.fromkeys(base + crypto))
+        return base
 
     def __del__(self):
         """Libère le terminal à la suppression de l'objet client."""

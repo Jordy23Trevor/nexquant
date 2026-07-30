@@ -12,7 +12,7 @@ load_dotenv(dotenv_path=env_path)
 # =============================================================================
 # BROKER CONFIGURATION
 # =============================================================================
-BROKER_TYPE = os.getenv("BROKER_TYPE", "binance").lower()  # binance, alpaca, mt5
+BROKER_TYPE = os.getenv("BROKER_TYPE", "mt5").lower()  # mt5 (prioritaire V3), binance, alpaca
 ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "false").lower() == "true"
 
 # =============================================================================
@@ -232,6 +232,81 @@ POST_FREEZE_THRESHOLD_SECONDS = int(os.getenv("POST_FREEZE_THRESHOLD_SECONDS", "
 # Nombre de cycles d'observation après un freeze avant de reprendre les trades
 POST_FREEZE_COOLDOWN_CYCLES = int(os.getenv("POST_FREEZE_COOLDOWN_CYCLES", "2"))
 
+# =============================================================================
+# ⚡ CYCLE TIME — V3 Fix bug heartbeat lent (50-60s → 15s)
+# =============================================================================
+# Durée cible d'un cycle complet en secondes.
+# AVANT : 60s par défaut → heartbeat lent (50-60s mesuré = bug critique)
+# APRES : 15s → réactivité accrue, pas de signal manqué
+CYCLE_TIME = int(os.getenv("CYCLE_TIME", "15"))
+# Timeout maximum par symbole pour éviter les blocages (secondes)
+SYMBOL_TIMEOUT_SECONDS = int(os.getenv("SYMBOL_TIMEOUT_SECONDS", "8"))
+# Nombre max de symboles traités en parallèle (threads)
+MAX_PARALLEL_SYMBOLS = int(os.getenv("MAX_PARALLEL_SYMBOLS", "4"))
+
+# =============================================================================
+# 🎯 OBJECTIFS JOURNALIERS & GESTION DE SESSIONS — V3
+# =============================================================================
+# Objectif de gain journalier en EUR (pour comptes ≥ 1000€)
+# Le PerformanceLearner adapte automatiquement pour les autres soldes
+DAILY_TARGET_EUR = float(os.getenv("DAILY_TARGET_EUR", "200.0"))
+# Activer la conscience temporelle (sessions Asia/London/NY)
+SESSION_AWARE = os.getenv("SESSION_AWARE", "true").lower() == "true"
+# Mode de condition : 'paper' = paper trading, 'live_conditions' = mêmes règles que live mais en paper
+# 'live_conditions' impose les mêmes garde-fous (spread, latence, slippage simulé) que le live
+TRADING_MODE = os.getenv("TRADING_MODE", "live_conditions")  # 'paper' | 'live_conditions' | 'live'
+# Slippage simulé en paper (points/pips) pour conditions réalistes
+SIMULATED_SLIPPAGE_POINTS = float(os.getenv("SIMULATED_SLIPPAGE_POINTS", "2.0"))
+# Commission simulée en paper (% par trade) pour conditions réalistes
+SIMULATED_COMMISSION_PCT = float(os.getenv("SIMULATED_COMMISSION_PCT", "0.003"))
+
+# =============================================================================
+# 🪙 CRYPTO SUR MT5 — V3 (paires CFD crypto via Fusion Markets)
+# =============================================================================
+# Fusion Markets propose des CFD crypto : BTCUSD, ETHUSD, BNBUSD, XRPUSD, SOLUSD
+# Ces symboles sont disponibles 24h/24 7j/7 sur MT5
+MT5_CRYPTO_ENABLED = os.getenv("MT5_CRYPTO_ENABLED", "true").lower() == "true"
+# Symboles crypto disponibles sur Fusion Markets MT5 (format sans /)
+MT5_CRYPTO_SYMBOLS_STR = os.getenv("MT5_CRYPTO_SYMBOLS", "BTCUSD,ETHUSD,BNBUSD,XRPUSD")
+MT5_CRYPTO_SYMBOLS: list = [s.strip() for s in MT5_CRYPTO_SYMBOLS_STR.split(",") if s.strip()]
+# Paramètres crypto MT5 (CFD avec spread, pas de funding)
+MT5_CRYPTO_SCORE_MIN = int(os.getenv("MT5_CRYPTO_SCORE_MIN", "7"))
+MT5_CRYPTO_SL_ATR = float(os.getenv("MT5_CRYPTO_SL_ATR", "2.0"))
+MT5_CRYPTO_TP_ATR = float(os.getenv("MT5_CRYPTO_TP_ATR", "4.0"))
+MT5_CRYPTO_MAX_SPREAD = float(os.getenv("MT5_CRYPTO_MAX_SPREAD", "50.0"))  # En points
+
+# =============================================================================
+# 🧠 PARAMÈTRES AUTO-APPRENTISSAGE — V3 (PerformanceLearner)
+# =============================================================================
+# Activer l'auto-apprentissage post-session
+AUTO_LEARN_ENABLED = os.getenv("AUTO_LEARN_ENABLED", "true").lower() == "true"
+# Heure UTC du debrief post-session (analyse de fin de journée)
+POST_SESSION_DEBRIEF_HOUR_UTC = int(os.getenv("POST_SESSION_DEBRIEF_HOUR_UTC", "22"))
+# Heure UTC de la pré-analyse (avant ouverture London)
+PRE_SESSION_ANALYSIS_HOUR_UTC = int(os.getenv("PRE_SESSION_ANALYSIS_HOUR_UTC", "6"))
+# Activer le Knowledge Feeder automatique (ingestion quotidienne RSS/blogs/forums)
+KNOWLEDGE_FEEDER_ENABLED = os.getenv("KNOWLEDGE_FEEDER_ENABLED", "true").lower() == "true"
+# Heure UTC d'ingestion quotidienne des nouvelles ressources
+KNOWLEDGE_FEEDER_HOUR_UTC = int(os.getenv("KNOWLEDGE_FEEDER_HOUR_UTC", "0"))
+# Reddit API (optionnel) - pour scraping r/Forex r/algotrading
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
+# Alpha Vantage (gratuit, 500 req/jour)
+ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY", "")
+# FRED (Federal Reserve Economic Data) — gratuit, sans clé requise
+FRED_API_KEY = os.getenv("FRED_API_KEY", "")
+# NewsAPI (optionnel, 100 req/jour gratuit)
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
+
+# =============================================================================
+# 📊 PARAMÈTRES ADAPTATIFS PAR SOLDE — V3
+# =============================================================================
+# Seuils de solde pour l'adaptation automatique des barrières
+BALANCE_TIER_HIGH = float(os.getenv("BALANCE_TIER_HIGH", "5000.0"))   # ≥5000€ : agressif
+BALANCE_TIER_MID = float(os.getenv("BALANCE_TIER_MID", "1000.0"))    # ≥1000€ : standard (200€/j)
+BALANCE_TIER_LOW = float(os.getenv("BALANCE_TIER_LOW", "500.0"))     # ≥500€ : prudent
+BALANCE_TIER_MICRO = float(os.getenv("BALANCE_TIER_MICRO", "200.0")) # ≥200€ : micro
+
 # Position sizing limits
 MIN_POSITION_SIZE = float(os.getenv("MIN_POSITION_SIZE", "0.001"))
 MAX_POSITION_SIZE = float(os.getenv("MAX_POSITION_SIZE", "1000.0"))
@@ -341,6 +416,10 @@ PROFIT_CB_STOP_RETRACEMENT = float(os.getenv("PROFIT_CB_STOP_RETRACEMENT", "0.25
 BACKTEST_MODE = os.getenv("BACKTEST_MODE", "false").lower() == "true"
 LOG_TRADES = os.getenv("LOG_TRADES", "true").lower() == "true"
 ENABLE_DASHBOARD = os.getenv("ENABLE_DASHBOARD", "true").lower() == "true"
+# V3: Chemin base de données SQLite persistante
+import tempfile as _tmpfile
+_default_db_path = str(Path(__file__).parent / "db" / "nexquant.db")
+DB_PATH = os.getenv("DB_PATH", _default_db_path)
 
 # =============================================================================
 # CONFIGURATION VALIDATION ENGINE
@@ -375,11 +454,11 @@ def validate_config():
                 errors.append("ALPACA_API_KEY et ALPACA_API_SECRET doivent être configurés.")
 
     # 3. Risk parameter bounds checks
-    if not (0.1 <= RISK_PCT <= 5.0):
-        errors.append(f"RISK_PCT ({RISK_PCT}%) est hors limites. Pour la sécurité de vos fonds en réel, il doit être compris entre 0.1% et 5.0% par transaction.")
+    if not (0.1 <= RISK_PCT <= 10.0):  # V3: élargi à 10% max pour stratégies agressives
+        errors.append(f"RISK_PCT ({RISK_PCT}%) est hors limites. Il doit être compris entre 0.1% et 10.0% par transaction.")
 
-    if not (0.5 <= MAX_DAILY_LOSS_PCT <= 10.0):
-        errors.append(f"MAX_DAILY_LOSS_PCT ({MAX_DAILY_LOSS_PCT}%) est hors limites. Il doit être compris entre 0.5% et 10.0% pour protéger le capital.")
+    if not (0.5 <= MAX_DAILY_LOSS_PCT <= 15.0):  # V3: élargi à 15% pour stratégies x10
+        errors.append(f"MAX_DAILY_LOSS_PCT ({MAX_DAILY_LOSS_PCT}%) est hors limites. Il doit être compris entre 0.5% et 15.0% pour protéger le capital.")
 
     if not (1.0 <= MAX_MONTHLY_LOSS_PCT <= 20.0):
         errors.append(f"MAX_MONTHLY_LOSS_PCT ({MAX_MONTHLY_LOSS_PCT}%) doit être compris entre 1.0% et 20.0%.")
@@ -415,7 +494,14 @@ __all__ = [
     # Crypto-specific filters (rapport 2026-07-02)
     "CRYPTO_BLACKLIST", "CRYPTO_SCORE_MIN", "CRYPTO_BUY_BLOCK_BTC_DROP", "CRYPTO_BNB_VOLUME_FACTOR",
     # Broker
-    "BROKER_TYPE",
+    "BROKER_TYPE", "ALLOW_LIVE_TRADING",
+
+    # MT5 (prioritaire V3)
+    "MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER", "MT5_PATH",
+
+    # MT5 Crypto (CFD)
+    "MT5_CRYPTO_ENABLED", "MT5_CRYPTO_SYMBOLS", "MT5_CRYPTO_SCORE_MIN",
+    "MT5_CRYPTO_SL_ATR", "MT5_CRYPTO_TP_ATR", "MT5_CRYPTO_MAX_SPREAD",
 
     # Binance
     "BINANCE_API_KEY", "BINANCE_API_SECRET", "BINANCE_TESTNET", "LEVERAGE",
@@ -438,13 +524,50 @@ __all__ = [
     "BB_LEN", "BB_STD", "ICHIMOKU_TENKAN", "ICHIMOKU_KIJUN",
     "ICHIMOKU_SENKOU_SPAN_B", "ICHIMOKU_DISPLACEMENT", "VWAP_WINDOW",
 
+    # Paramètres par classe d'actifs
+    "EMA_FAST_CRYPTO", "EMA_SLOW_CRYPTO", "ADX_TREND_CRYPTO", "SCORE_MIN_CRYPTO",
+    "SL_ATR_MULT_CRYPTO", "TP_ATR_MULT_CRYPTO",
+    "EMA_FAST_FOREX", "EMA_SLOW_FOREX", "ADX_TREND_FOREX", "SCORE_MIN_FOREX",
+    "SL_ATR_MULT_FOREX", "TP_ATR_MULT_FOREX", "FOREX_NEWS_AVOID_MINUTES",
+    "EMA_FAST_STOCK", "EMA_SLOW_STOCK", "ADX_TREND_STOCK", "SCORE_MIN_STOCK",
+    "SL_ATR_MULT_STOCK", "TP_ATR_MULT_STOCK", "ALLOW_SHORT_STOCK",
+
     # Risk Management
     "RISK_PCT", "SL_ATR_MULT", "TP_ATR_MULT", "TRAIL_ATR_MULT", "BE_ATR_MULT",
     "SCORE_MIN", "MAX_DAILY_LOSS_PCT", "MAX_MONTHLY_LOSS_PCT", "MAX_OPEN_POSITIONS",
+    "MAX_DAILY_LOSS_AMOUNT",
     "MIN_POSITION_SIZE", "MAX_POSITION_SIZE", "KELLY_FRACTION", "MIN_TRADES_FOR_KELLY",
-    "COOLDOWN_SECONDS",  # ✅ BUG FIX #5
+    "COOLDOWN_SECONDS",
     "MAX_FOREX_CURRENCY_EXPOSURE", "MAX_SPREAD_PIPS", "BE_DYN_RR", "BE_DYN_RR_RATIO",
+    "DRAWDOWN_REDUCE_5PCT", "DRAWDOWN_REDUCE_10PCT", "DRAWDOWN_THRESH_1", "DRAWDOWN_THRESH_2",
 
+    # Protection nocturne
+    "MAX_OPEN_POSITIONS_NIGHT", "SCORE_MIN_NIGHT",
+    "NIGHT_SESSION_START_UTC", "NIGHT_SESSION_END_UTC",
+
+    # Watchdog
+    "CYCLE_WATCHDOG_TIMEOUT", "POST_FREEZE_THRESHOLD_SECONDS", "POST_FREEZE_COOLDOWN_CYCLES",
+    "BUG_WATCHDOG_INTERVAL", "BUG_WATCHDOG_ENABLED", "BUG_WATCHDOG_MAX_LATENCY",
+
+    # ⚡ V3 — Cycle et performance
+    "CYCLE_TIME", "SYMBOL_TIMEOUT_SECONDS", "MAX_PARALLEL_SYMBOLS",
+
+    # 🎯 V3 — Objectifs journaliers & sessions
+    "DAILY_TARGET_EUR", "SESSION_AWARE", "TRADING_MODE",
+    "SIMULATED_SLIPPAGE_POINTS", "SIMULATED_COMMISSION_PCT",
+
+    # 🧠 V3 — Auto-apprentissage
+    "AUTO_LEARN_ENABLED", "POST_SESSION_DEBRIEF_HOUR_UTC", "PRE_SESSION_ANALYSIS_HOUR_UTC",
+    "KNOWLEDGE_FEEDER_ENABLED", "KNOWLEDGE_FEEDER_HOUR_UTC",
+    "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET",
+    "FRED_API_KEY", "NEWS_API_KEY",
+
+    # 📊 V3 — Tiers de solde adaptatifs
+    "BALANCE_TIER_HIGH", "BALANCE_TIER_MID", "BALANCE_TIER_LOW", "BALANCE_TIER_MICRO",
+
+    # Circuit breaker profit
+    "PROFIT_CB_TRIGGER_EUR", "PROFIT_CB_RETRACEMENT",
+    "PROFIT_CB_PAUSE_HOURS", "PROFIT_CB_STOP_RETRACEMENT",
 
     # News & Sentiment
     "NEWS_AVOIDANCE_BEFORE", "NEWS_AVOIDANCE_AFTER", "NEWS_RISK_REDUCTION_FACTOR",
@@ -459,8 +582,11 @@ __all__ = [
     "FOREX_SESSIONS_UTC", "USE_LIQUIDITY_FILTER", "HIGH_LIQUIDITY_HOURS_UTC",
 
     # Logging
-    "LOG_LEVEL", "LOG_DIR", "LOG_FILE", "TRADE_LOG_FILE", "ERROR_LOG_FILE",
+    "LOG_LEVEL", "LOG_DIR", "LOG_FILE", "TRADE_LOG_FILE", "ERROR_LOG_FILE", "BUG_LOG_FILE",
 
     # Development
-    "BACKTEST_MODE", "LOG_TRADES", "ENABLE_DASHBOARD"
+    "BACKTEST_MODE", "LOG_TRADES", "ENABLE_DASHBOARD",
+
+    # DB
+    "DB_PATH",
 ]

@@ -123,6 +123,16 @@ def sync_positions_with_broker(bot):
                     trade_record.update(features_at_open)
                     bot.risk_manager.record_trade(trade_record)
 
+                    # 🧠 V3 : Apprentissage en ligne
+                    if getattr(bot, 'online_learner', None):
+                        try:
+                            import pandas as pd
+                            # Reconstruire la ligne de dataframe pour le modèle
+                            df_row = pd.Series(features_at_open)
+                            bot.online_learner.on_trade_closed(trade_record, df_row=df_row, context=features_at_open)
+                        except Exception as e:
+                            log.debug(f"Erreur online_learner : {e}")
+
                     # Envoi de la clôture à la télémétrie Cloud
                     if bot.telemetry.enabled:
                         try:

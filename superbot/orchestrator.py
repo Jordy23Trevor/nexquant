@@ -102,6 +102,24 @@ from superbot.config import (
     # Filtres crypto — rapport post-mortem 2026-07-02
     CRYPTO_BLACKLIST, CRYPTO_SCORE_MIN, CRYPTO_BUY_BLOCK_BTC_DROP, CRYPTO_BNB_VOLUME_FACTOR,
     COMMISSION_PCT, SLIPPAGE_PCT,
+
+    # ⚡ V3 — Cycle, performances et sessions
+    CYCLE_TIME, SYMBOL_TIMEOUT_SECONDS, MAX_PARALLEL_SYMBOLS,
+    DAILY_TARGET_EUR, SESSION_AWARE, TRADING_MODE,
+    SIMULATED_SLIPPAGE_POINTS, SIMULATED_COMMISSION_PCT,
+
+    # 🪙 V3 — Crypto MT5
+    MT5_CRYPTO_ENABLED, MT5_CRYPTO_SYMBOLS,
+
+    # 📊 V3 — Tiers de solde adaptatifs
+    BALANCE_TIER_HIGH, BALANCE_TIER_MID, BALANCE_TIER_LOW, BALANCE_TIER_MICRO,
+
+    # 🧠 V3 — Auto-apprentissage
+    AUTO_LEARN_ENABLED, POST_SESSION_DEBRIEF_HOUR_UTC, PRE_SESSION_ANALYSIS_HOUR_UTC,
+    KNOWLEDGE_FEEDER_ENABLED,
+
+    # DB
+    DB_PATH,
 )
 from superbot.broker import create_broker
 from superbot.strategy import TradingStrategy
@@ -243,8 +261,151 @@ class SuperBot:
             'last_cycle_time': None
         }
 
-        # Initialiser les composants
+        # =================================================================
+        # ⚡ V3 : Attributs de cycle et performance (lus par cycle_runner)
+        # =================================================================
+        # Fix bug heartbeat 50-60s : CYCLE_TIME est maintenant 15s par défaut
+        self.CYCLE_TIME = CYCLE_TIME
+        self.SYMBOL_TIMEOUT_SECONDS = SYMBOL_TIMEOUT_SECONDS
+        self.MAX_PARALLEL_SYMBOLS = MAX_PARALLEL_SYMBOLS
+        # Objectifs journaliers et mode de trading
+        self.DAILY_TARGET_EUR = DAILY_TARGET_EUR
+        self.SESSION_AWARE = SESSION_AWARE
+        self.TRADING_MODE = TRADING_MODE
+        self.SIMULATED_SLIPPAGE_POINTS = SIMULATED_SLIPPAGE_POINTS
+        self.SIMULATED_COMMISSION_PCT = SIMULATED_COMMISSION_PCT
+        # Crypto MT5
+        self.MT5_CRYPTO_ENABLED = MT5_CRYPTO_ENABLED
+        self.MT5_CRYPTO_SYMBOLS = MT5_CRYPTO_SYMBOLS
+        # Tiers de solde
+        self.BALANCE_TIER_HIGH = BALANCE_TIER_HIGH
+        self.BALANCE_TIER_MID = BALANCE_TIER_MID
+        self.BALANCE_TIER_LOW = BALANCE_TIER_LOW
+        self.BALANCE_TIER_MICRO = BALANCE_TIER_MICRO
+        # Auto-apprentissage
+        self.AUTO_LEARN_ENABLED = AUTO_LEARN_ENABLED
+        self.POST_SESSION_DEBRIEF_HOUR_UTC = POST_SESSION_DEBRIEF_HOUR_UTC
+        self.PRE_SESSION_ANALYSIS_HOUR_UTC = PRE_SESSION_ANALYSIS_HOUR_UTC
+        self.KNOWLEDGE_FEEDER_ENABLED = KNOWLEDGE_FEEDER_ENABLED
+        # DB
+        self.DB_PATH = DB_PATH
+
+        log.info(
+            f"🚀 SuperBot V3 | CYCLE_TIME={self.CYCLE_TIME}s | "
+            f"MAX_PARALLEL={self.MAX_PARALLEL_SYMBOLS} | "
+            f"DAILY_TARGET={self.DAILY_TARGET_EUR}€ | "
+            f"TRADING_MODE={self.TRADING_MODE} | "
+            f"MT5_CRYPTO={'activé' if self.MT5_CRYPTO_ENABLED else 'désactivé'}"
+        )
+
+        # =================================================================
+        # 🧠 V3 : BRAIN — Modules d'intelligence autonome
+        # =================================================================
+        self.db = None
+        self.session_manager = None
+        self.knowledge_feeder = None
+        self.performance_learner = None
+        self.strategy_engine = None
+        self.regime_detector = None
+        self.report_generator = None
+        self.online_learner = None
+        self._brain_initialized = False
+        self._last_pre_session_hour = -1
+        self._last_mid_check_time = 0.0
+        self._last_perf_log_time = 0.0
+        self._init_brain()
+
+        # Initialiser les composants broker/stratégie
         self._initialize_components()
+
+    def _init_brain(self):
+        """Initialise tous les modules d'intelligence autonome V3."""
+        log.info("🧠 Initialisation du Brain V3...")
+        try:
+            from superbot.db.database import init_db
+            self.db = init_db(self.DB_PATH)
+            log.info(f"🗄️ DB SQLite initialisée : {self.DB_PATH}")
+        except Exception as e:
+            log.warning(f"⚠️ DB non disponible : {e}")
+
+        try:
+            from superbot.brain.session_manager import SessionManager
+            self.session_manager = SessionManager(
+                bot_instance=self,
+                daily_target_eur=self.DAILY_TARGET_EUR
+            )
+            log.info("🕐 SessionManager initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ SessionManager non disponible : {e}")
+
+        try:
+            from superbot.brain.strategy_engine import StrategyEngine
+            self.strategy_engine = StrategyEngine(db=self.db, session_manager=self.session_manager)
+            log.info("♟️ StrategyEngine initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ StrategyEngine non disponible : {e}")
+
+        try:
+            from superbot.brain.performance_learner import PerformanceLearner
+            self.performance_learner = PerformanceLearner(
+                db=self.db,
+                session_manager=self.session_manager,
+                strategy_engine=self.strategy_engine
+            )
+            log.info("📊 PerformanceLearner initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ PerformanceLearner non disponible : {e}")
+
+        try:
+            from superbot.brain.regime_detector import MarketRegimeDetector
+            self.regime_detector = MarketRegimeDetector(db=self.db)
+            log.info("🔍 RegimeDetector initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ RegimeDetector non disponible : {e}")
+
+        if self.KNOWLEDGE_FEEDER_ENABLED:
+            try:
+                from superbot.brain.knowledge_feeder import KnowledgeFeeder
+                self.knowledge_feeder = KnowledgeFeeder(db=self.db)
+                log.info("🌐 KnowledgeFeeder initialisé")
+            except Exception as e:
+                log.warning(f"⚠️ KnowledgeFeeder non disponible : {e}")
+
+        # Online Learner (EnsembleScorer partial_fit)
+        try:
+            from superbot.ml.online_learner import OnlineLearner
+            self.online_learner = OnlineLearner(db=self.db)
+            log.info("🤖 OnlineLearner initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ OnlineLearner non disponible : {e}")
+
+        # Report Generator (rapport journalier à 22h30 UTC)
+        try:
+            from superbot.brain.report_generator import ReportGenerator
+            self.report_generator = ReportGenerator(
+                db=self.db,
+                session_manager=self.session_manager,
+                strategy_engine=self.strategy_engine,
+                performance_learner=self.performance_learner,
+                knowledge_feeder=self.knowledge_feeder,
+            )
+            self.report_generator.start_daily_scheduler()
+            log.info("📝 ReportGenerator initialisé + scheduler 22h30 UTC")
+        except Exception as e:
+            log.warning(f"⚠️ ReportGenerator non disponible : {e}")
+
+        # Initialiser la DB journalière
+        if self.db and self.session_manager:
+            try:
+                balance = getattr(self, 'initial_balance', 0) or 0
+                target = self.session_manager._compute_daily_target(balance or self.BALANCE_TIER_MID)
+                self.db.set_daily_target(balance or self.BALANCE_TIER_MID, target)
+            except Exception:
+                pass
+
+        self._brain_initialized = True
+        log.info("✅ Brain V3 initialisé avec succès")
+
 
     def _initialize_components(self):
         """Initialise tous les composants du bot."""
@@ -343,6 +504,27 @@ class SuperBot:
             else:
                 self.instruments = self.broker.get_default_instruments()
                 log.info(f"Aucun instrument configuré — défauts courtier ({active_broker_type}) : {self.instruments}")
+
+            # 🪙 V3 : Intégration crypto MT5 (Fusion Markets CFD)
+            # Si broker=MT5 et MT5_CRYPTO_ENABLED=true, ajouter les paires crypto disponibles
+            if (active_broker_type == "mt5" and
+                    MT5_CRYPTO_ENABLED and
+                    hasattr(self.broker, 'get_crypto_instruments')):
+                try:
+                    crypto_instruments = self.broker.get_crypto_instruments()
+                    if crypto_instruments:
+                        # Ajouter uniquement les crypto pas déjà dans la liste
+                        existing = set(self.instruments)
+                        new_crypto = [s for s in crypto_instruments if s not in existing]
+                        self.instruments.extend(new_crypto)
+                        log.info(
+                            f"🪙 Crypto MT5 ajoutée à la liste des instruments : {new_crypto}\n"
+                            f"   Total instruments : {self.instruments}"
+                        )
+                    else:
+                        log.info("🪙 MT5_CRYPTO_ENABLED=true mais aucun symbole crypto disponible sur ce compte Fusion Markets")
+                except Exception as e:
+                    log.warning(f"Impossible de charger les instruments crypto MT5 : {e}")
 
             # 1.4 Filtre Multi-devises (Désactiver les paires croisées non-USD)
             supported_instruments = []
@@ -733,11 +915,31 @@ class SuperBot:
 
         # Fermer les connexions du broker
         try:
-            # La plupart des brokers n'ont pas besoin de fermeture explicite
-            # mais on peut ajouter ici du nettoyage si nécessaire
             log.info("Connexions broker fermées")
         except Exception as e:
             log.error(f"Erreur lors de la fermeture des connexions broker : {e}")
+
+        # 🧠 V3 : Arrêter les modules Brain
+        if getattr(self, 'report_generator', None):
+            try:
+                self.report_generator.stop()
+                log.info("📝 ReportGenerator arrêté")
+            except Exception as e:
+                log.debug(f"Erreur arrêt ReportGenerator: {e}")
+
+        if getattr(self, 'knowledge_feeder', None):
+            try:
+                self.knowledge_feeder.stop()
+                log.info("KnowledgeFeeder arrêté")
+            except Exception as e:
+                log.debug(f"Erreur arrêt KnowledgeFeeder: {e}")
+
+        if getattr(self, 'db', None):
+            try:
+                self.db.close()
+                log.info("🗄️ DB SQLite fermée")
+            except Exception as e:
+                log.debug(f"Erreur fermeture DB: {e}")
 
         log.info("SuperBot arrêté avec succès")
 
@@ -805,6 +1007,26 @@ class SuperBot:
             risk_start = time.time()
             self._update_active_position_risk(symbol, df_with_indicators)
             risk_time = time.time() - risk_start
+
+            # 🧠 V3 : Vérification de session (SessionManager)
+            if self.session_manager:
+                try:
+                    self.session_manager.tick()
+                    can_trade, reason = self.session_manager.can_trade_symbol(symbol)
+                    if not can_trade:
+                        log.debug(f"Session filter: {symbol} skipé — {reason}")
+                        return
+                except Exception as _se:
+                    log.debug(f"SessionManager tick error: {_se}")
+
+            # ⚫ V3 : Vérification PerformanceLearner (blocage pertes consécutives)
+            if self.performance_learner:
+                try:
+                    if self.performance_learner.is_symbol_blocked(symbol):
+                        log.info(f"🚫 {symbol} bloqué par PerformanceLearner (3+ pertes consécutives)")
+                        return
+                except Exception as _pe:
+                    log.debug(f"PerformanceLearner check error: {_pe}")
 
             # 🚫 BLOCAGE DYNAMIQUE : Skip si actif bloqué pour cette session
             if symbol in self.blocked_symbols:
@@ -887,6 +1109,46 @@ class SuperBot:
                     news_filter_passed=_news_filter_passed
                 )
                 signal_data['symbol'] = symbol
+
+                # 🧠 V3 : Enrichir le signal avec le régime Brain + StrategyEngine
+                try:
+                    if self.regime_detector:
+                        asset_class = 'crypto' if 'BTC' in symbol or 'ETH' in symbol or 'BNB' in symbol else 'forex'
+                        regime_result = self.regime_detector.detect(
+                            df_with_indicators, symbol=symbol, asset_class=asset_class, store_in_db=False
+                        )
+                        signal_data['market_regime'] = regime_result.regime
+                        signal_data['regime_confidence'] = regime_result.confidence
+                        signal_data['regime_risk_mult'] = self.regime_detector.get_risk_multiplier(regime_result.regime)
+
+                    if self.strategy_engine and self.session_manager:
+                        sess = self.session_manager.get_current_session()
+                        regime = signal_data.get('market_regime', 'ranging')
+                        asset_class = 'crypto' if 'BTC' in symbol or 'ETH' in symbol else 'forex'
+                        best_strat, strat_conf = self.strategy_engine.select_best_strategy(
+                            regime=regime,
+                            session_name=sess.get('name', 'LONDON'),
+                            asset_class=asset_class,
+                            symbol=symbol,
+                            adx_value=float(df_with_indicators.iloc[-1].get('adx', 0) or 0),
+                        )
+                        signal_data['strategy_used'] = best_strat
+                        signal_data['strategy_confidence'] = strat_conf
+
+                        # Ajuster le score_min selon le régime
+                        if self.regime_detector:
+                            score_adj = self.regime_detector.get_score_min_adjustment(regime)
+                            base_score_min = signal_data.get('score_min', self.strategy.score_min)
+                            signal_data['score_min'] = max(1, base_score_min + score_adj)
+
+                        # Ajuster le score_min selon la session
+                        if self.session_manager:
+                            base_score_min = signal_data.get('score_min', self.strategy.score_min)
+                            signal_data['score_min'] = self.session_manager.get_adapted_score_min(base_score_min)
+
+                except Exception as _brain_e:
+                    log.debug(f"Brain enrichment error ({symbol}): {_brain_e}")
+
                 with self._lock:
                     self._strategy_cache[symbol] = signal_data
             strategy_time = time.time() - strategy_start
@@ -1583,6 +1845,74 @@ class SuperBot:
                             continue
                     if candles:
                         dashboard_data['market_data'][symbol] = candles
+
+            # 🧠 V3: Collecte des données Brain
+            brain_data = {}
+            try:
+                sm = getattr(self, 'session_manager', None)
+                if sm:
+                    progress = sm.get_daily_progress()
+                    curr_session = sm.get_current_session()
+                    brain_data['daily_progress'] = {
+                        'achieved_eur': progress.get('achieved_eur', 0),
+                        'target_eur': progress.get('target_eur', 200),
+                        'achievement_pct': progress.get('achievement_pct', 0),
+                    }
+                    brain_data['session'] = {
+                        'name': curr_session.get('name', ''),
+                        'description': curr_session.get('description', ''),
+                        'risk_mult': curr_session.get('risk_multiplier', 1.0),
+                    }
+
+                rd = getattr(self, 'regime_detector', None)
+                if rd:
+                    last_reg = None
+                    if hasattr(rd, '_cache') and rd._cache:
+                        last_reg = list(rd._cache.values())[-1]
+                    elif hasattr(rd, '_last_regime'):
+                        last_reg = rd._last_regime
+
+                    if last_reg:
+                        brain_data['regime'] = {
+                            'regime': getattr(last_reg, 'regime', '—'),
+                            'confidence': getattr(last_reg, 'confidence', 0),
+                            'risk_mult': rd.get_risk_multiplier(getattr(last_reg, 'regime', '')) if hasattr(rd, 'get_risk_multiplier') else 1.0,
+                        }
+
+                se = getattr(self, 'strategy_engine', None)
+                if se:
+                    lb = se.get_strategy_leaderboard()[:1]
+                    if lb:
+                        top = lb[0]
+                        brain_data['strategy'] = {
+                            'name': top.get('strategy', ''),
+                            'confidence': top.get('wr', 0),
+                            'trades': top.get('trades', 0),
+                        }
+
+                pl = getattr(self, 'performance_learner', None)
+                if pl:
+                    brain_data['learner_params'] = pl.get_current_params()
+                    brain_data['blocked_symbols'] = [
+                        {'symbol': sym, 'reason': '3 pertes consécutives'}
+                        for sym in getattr(pl, '_blocked_symbols', set())
+                    ]
+                    brain_data['recent_decisions'] = getattr(pl, '_decisions_log', [])
+
+                kf_inst = getattr(self, 'knowledge_feeder', None)
+                if kf_inst:
+                    kf_sentiment = kf_inst.get_current_sentiment()
+                    brain_data['knowledge_feeder'] = {
+                        'items_today': getattr(kf_inst, '_items_today', 0),
+                        'last_refresh': getattr(kf_inst, '_last_refresh_time', None),
+                        'is_running': getattr(kf_inst, '_running', False),
+                        'fear_greed_index': kf_sentiment.get('fear_greed_index'),
+                        'overall_sentiment': kf_sentiment.get('overall_sentiment', 'neutral'),
+                    }
+            except Exception as e:
+                log.debug(f"Erreur collecte brain data dans _update_dashboard: {e}")
+
+            dashboard_data['brain'] = brain_data
 
             # Mettre à jour le dashboard
             self.dashboard.update_data(dashboard_data)

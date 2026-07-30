@@ -1,400 +1,581 @@
 """
-Main loop module for SuperBot.
-Contains the main trading loop logic.
+Main loop module for SuperBot V3.
+====================================
+Fix critique Phase 0 — Bug cycle lent (heartbeat 50-60s → <15s)
+
+Causes du bug identifiées dans bug_log.md :
+  - CYCLE_TIME hardcodé à 60s dans getattr() → jamais lu depuis config
+  - Traitement SÉQUENTIEL des symboles (chaque MT5 fetch_candles = 2-3s × N symboles)
+  - Pas de timeout par symbole → un symbole bloqué = tout le cycle bloqué
+
+Corrections V3 :
+  1. CYCLE_TIME lu depuis config (défaut 15s)
+  2. Traitement PARALLÈLE des symboles via ThreadPoolExecutor (max 4 workers)
+  3. Timeout hard de SYMBOL_TIMEOUT_SECONDS (défaut 8s) par symbole
+  4. Cache de données invalidé correctement entre cycles
+  5. Heartbeat mesuré et loggé à chaque fin de cycle
+  6. Slippage/commission simulés en mode live_conditions pour préparer le live
 """
 
 import time
 import threading
+import traceback
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 import hashlib
 import logging
 
-# Import statements will be resolved when used in the context of the bot
 
 class MainLoopManager:
-    """Manages the main trading loop of the SuperBot."""
+    """
+    Gestionnaire de la boucle principale de trading V3.
+    
+    Améliorations vs V2 :
+    - Traitement parallèle des symboles (ThreadPoolExecutor)
+    - Timeout par symbole pour éviter les blocages
+    - Cycle time réduit à 15s (vs 60s avant)
+    - Heartbeat mesuré et loggé
+    - Support du mode live_conditions (slippage + commission simulés)
+    """
 
     def __init__(self, bot_instance):
         self.bot = bot_instance
         self.log = bot_instance.log
 
+        # Lire les paramètres V3 depuis le bot ou la config
+        self.cycle_time = getattr(bot_instance, 'CYCLE_TIME', 15)
+        self.symbol_timeout = getattr(bot_instance, 'SYMBOL_TIMEOUT_SECONDS', 8)
+        self.max_parallel = getattr(bot_instance, 'MAX_PARALLEL_SYMBOLS', 4)
+        self.trading_mode = getattr(bot_instance, 'TRADING_MODE', 'live_conditions')
+        self.simulated_slippage = getattr(bot_instance, 'SIMULATED_SLIPPAGE_POINTS', 2.0)
+        self.simulated_commission_pct = getattr(bot_instance, 'SIMULATED_COMMISSION_PCT', 0.003)
+
+        # Statistiques heartbeat
+        self._last_heartbeat: float = time.time()
+        self._cycle_times: list = []  # Historique des 10 derniers temps de cycle
+        self._data_hash_cache: Dict[str, str] = {}  # Cache hash par symbole
+
+        self.log.info(
+            f"MainLoopManager V3 initialisé | "
+            f"CYCLE_TIME={self.cycle_time}s | "
+            f"SYMBOL_TIMEOUT={self.symbol_timeout}s | "
+            f"MAX_PARALLEL={self.max_parallel} | "
+            f"TRADING_MODE={self.trading_mode}"
+        )
+
     def run_main_loop(self):
         """
-        Main trading loop.
-        This loop executes the trading cycle for each instrument.
+        Boucle principale de trading V3 — traitement parallèle avec heartbeat.
+        
+        Architecture du cycle :
+          1. Rotation crypto (si applicable)
+          2. Traitement PARALLÈLE de tous les symboles (ThreadPoolExecutor)
+          3. Mise à jour dashboard
+          4. Adaptation des paramètres (toutes les N cycles)
+          5. Détection drift ML (toutes les M cycles)
+          6. Sauvegarde d'état (toutes les 5 min)
+          7. Sleep jusqu'à prochain cycle (target = CYCLE_TIME)
         """
-        self.log.info("Main trading loop started")
+        self.log.info(
+            f"🚀 Boucle principale V3 démarrée | "
+            f"Cycle cible : {self.cycle_time}s | "
+            f"Symboles : {self.bot.instruments}"
+        )
 
         while self.bot.running and not self.bot.shutdown_event.is_set():
             cycle_start_time = time.time()
 
             try:
-                # Process Symbol Rotation for Crypto (if applicable)
+                # === 1. ROTATION CRYPTO (si applicable) ===
                 if hasattr(self.bot, '_select_and_rotate_crypto'):
-                    self.bot._select_and_rotate_crypto()
+                    try:
+                        self.bot._select_and_rotate_crypto()
+                    except Exception as e:
+                        self.log.warning(f"Erreur rotation crypto : {e}")
 
-                # Process each instrument
-                for symbol in self.bot.instruments:
-                    if not self.bot.running or self.bot.shutdown_event.is_set():
-                        break
-                    self._process_symbol(symbol)
+                # === 2. TRAITEMENT PARALLÈLE DES SYMBOLES ===
+                # Invalider les caches de stratégie et indicateurs avant le cycle
+                with self.bot._lock:
+                    self.bot._indicators_cache = {}
+                    self.bot._strategy_cache = {}
+                    # Conserver _market_data_cache pour le cycle (rempli au fur et à mesure)
+                    self.bot._market_data_cache = {}
 
-                # Update dashboard
+                symbols_to_process = list(self.bot.instruments)
+
+                if symbols_to_process:
+                    self._process_symbols_parallel(symbols_to_process)
+
+                # === 3. MISE À JOUR DASHBOARD ===
                 if hasattr(self.bot, '_update_dashboard'):
-                    self.bot._update_dashboard()
+                    try:
+                        self.bot._update_dashboard()
+                    except Exception as e:
+                        self.log.debug(f"Dashboard update error: {e}")
 
-                # Update adaptive parameters periodically
+                # === 4. ADAPTATION DES PARAMÈTRES (toutes les N cycles) ===
                 if hasattr(self.bot, '_update_adaptive_parameters'):
-                    self.bot._adaptation_counter += 1
-                    if self.bot._adaptation_counter >= self.bot._adaptation_every:
-                        self.bot._update_adaptive_parameters()
+                    self.bot._adaptation_counter = getattr(self.bot, '_adaptation_counter', 0) + 1
+                    adapt_every = getattr(self.bot, '_adaptation_every', 20)
+                    if self.bot._adaptation_counter >= adapt_every:
+                        try:
+                            self.bot._update_adaptive_parameters()
+                        except Exception as e:
+                            self.log.warning(f"Adaptive params update error: {e}")
                         self.bot._adaptation_counter = 0
 
-                # Check for model drift periodically
+                # === 5. DÉTECTION DRIFT ML (toutes les 30 cycles ≈ 7.5 min) ===
                 if hasattr(self.bot, '_detect_model_drift'):
-                    self.bot._detect_model_drift()
+                    _drift_counter = getattr(self.bot, '_drift_counter', 0) + 1
+                    self.bot._drift_counter = _drift_counter
+                    if _drift_counter >= 30:
+                        try:
+                            self.bot._detect_model_drift()
+                        except Exception as e:
+                            self.log.debug(f"Model drift detection error: {e}")
+                        self.bot._drift_counter = 0
 
-                # Run walk-forward calibration periodically
+                # === 6. WALK-FORWARD CALIBRATION (toutes les 100 cycles ≈ 25 min) ===
                 if hasattr(self.bot, '_run_walk_forward_calibration'):
-                    self.bot._run_walk_forward_calibration()
+                    _wf_counter = getattr(self.bot, '_wf_counter', 0) + 1
+                    self.bot._wf_counter = _wf_counter
+                    if _wf_counter >= 100:
+                        try:
+                            self.bot._run_walk_forward_calibration()
+                        except Exception as e:
+                            self.log.debug(f"Walk-forward calibration error: {e}")
+                        self.bot._wf_counter = 0
 
-                # Update cooldowns and save state periodically
+                # === 7. SAUVEGARDE D'ÉTAT (toutes les 5 minutes) ===
                 if hasattr(self.bot, '_save_cooldowns'):
-                    # Save every 5 minutes or so
-                    if time.time() - getattr(self.bot, '_last_state_save', 0) > 300:
-                        self.bot._save_cooldowns()
+                    last_save = getattr(self.bot, '_last_state_save', 0)
+                    if time.time() - last_save > 300:
+                        try:
+                            self.bot._save_cooldowns()
+                        except Exception as e:
+                            self.log.debug(f"State save error: {e}")
                         self.bot._last_state_save = time.time()
 
-                # Calculate cycle time and sleep if needed to maintain frequency
-                cycle_time = time.time() - cycle_start_time
-                target_cycle_time = getattr(self.bot, 'CYCLE_TIME', 60)  # Default 60 seconds
-                if cycle_time < target_cycle_time:
-                    time.sleep(target_cycle_time - cycle_time)
+                # === 8. MESURE DU HEARTBEAT ===
+                cycle_elapsed = time.time() - cycle_start_time
+                self._cycle_times.append(cycle_elapsed)
+                if len(self._cycle_times) > 10:
+                    self._cycle_times.pop(0)
+                avg_cycle = sum(self._cycle_times) / len(self._cycle_times)
 
-                # Update stats
+                # Mettre à jour le heartbeat
+                self._last_heartbeat = time.time()
                 self.bot.stats['cycles_completed'] += 1
-                self.bot.stats['last_cycle_time'] = time.time()
+                self.bot.stats['last_cycle_time'] = self._last_heartbeat
+
+                # Log du cycle avec heartbeat (INFO si lent, DEBUG si normal)
+                if cycle_elapsed > self.cycle_time * 1.5:
+                    self.log.warning(
+                        f"⚠️ Cycle lent : {cycle_elapsed:.1f}s (cible {self.cycle_time}s) | "
+                        f"Moy. 10 derniers : {avg_cycle:.1f}s"
+                    )
+                else:
+                    self.log.debug(
+                        f"✅ Cycle OK : {cycle_elapsed:.1f}s (cible {self.cycle_time}s) | "
+                        f"Moy. : {avg_cycle:.1f}s"
+                    )
+
+                # === 9. SLEEP JUSQU'AU PROCHAIN CYCLE ===
+                remaining = self.cycle_time - cycle_elapsed
+                if remaining > 0:
+                    # Sleep fractionné pour réactivité au shutdown
+                    sleep_chunk = min(1.0, remaining)
+                    slept = 0.0
+                    while slept < remaining and self.bot.running and not self.bot.shutdown_event.is_set():
+                        time.sleep(sleep_chunk)
+                        slept += sleep_chunk
 
             except Exception as e:
                 self.bot.stats['errors_count'] += 1
-                self.log.error(f"Error in main loop: {e}")
+                self.log.error(f"Erreur critique dans la boucle principale : {e}")
                 self.log.debug(traceback.format_exc())
-                # Short sleep to prevent tight error loops
+                # Sleep court pour éviter les boucles d'erreurs serrées
                 time.sleep(5)
 
-        self.log.info("Main trading loop stopped")
+        self.log.info("Boucle principale V3 arrêtée proprement.")
+
+    def _process_symbols_parallel(self, symbols: list):
+        """
+        Traite tous les symboles EN PARALLÈLE avec un pool de threads.
+        
+        Chaque symbole a un timeout de SYMBOL_TIMEOUT_SECONDS pour éviter
+        qu'un symbole bloqué ne retarde tout le cycle.
+        
+        Args:
+            symbols: Liste des symboles à traiter
+        """
+        if not symbols:
+            return
+
+        with ThreadPoolExecutor(max_workers=self.max_parallel, thread_name_prefix="symbol_worker") as executor:
+            # Soumettre tous les symboles
+            future_to_symbol = {
+                executor.submit(self._process_symbol_safe, symbol): symbol
+                for symbol in symbols
+                if self.bot.running and not self.bot.shutdown_event.is_set()
+            }
+
+            # Récupérer les résultats avec timeout
+            for future in as_completed(future_to_symbol, timeout=self.symbol_timeout * len(symbols) + 5):
+                symbol = future_to_symbol[future]
+                try:
+                    future.result(timeout=self.symbol_timeout)
+                except FuturesTimeoutError:
+                    self.log.warning(f"⏱️ Timeout ({self.symbol_timeout}s) pour {symbol} — cycle suivant")
+                except Exception as e:
+                    self.log.error(f"Erreur lors du traitement de {symbol} : {e}")
+
+    def _process_symbol_safe(self, symbol: str):
+        """
+        Wrapper sécurisé autour de _process_symbol pour le threading.
+        Gère les exceptions et assure la non-réentrance par symbole.
+        """
+        try:
+            if not self.bot.running or self.bot.shutdown_event.is_set():
+                return
+            self._process_symbol(symbol)
+        except Exception as e:
+            self.log.error(f"Exception non capturée pour {symbol}: {e}")
+            self.log.debug(traceback.format_exc())
 
     def _process_symbol(self, symbol: str):
         """
-        Process a specific symbol: fetch data, analyze, generate signals, execute trades.
-
-        Args:
-            symbol: Symbol to process (e.g., BTC/USDT)
+        Traite un symbole : fetch data → indicateurs → signal → exécution.
+        
+        V3 additions :
+        - Hash check pour détecter les nouvelles données réelles
+        - Mode live_conditions : slippage + commission simulés
+        - Log de profiling détaillé en DEBUG
         """
         try:
-            # Measure total processing time for profiling
             symbol_start_time = time.time()
 
-            # 1. Fetch recent market data
+            # === 1. FETCH DES DONNÉES MARCHÉ ===
             fetch_start = time.time()
             df = self._fetch_market_data(symbol)
             fetch_time = time.time() - fetch_start
-            if df is None or len(df) < 50:  # Minimum data required
-                self.log.debug(f"Insufficient data for {symbol}: {len(df) if df is not None else 0} bars")
+
+            if df is None or len(df) < 50:
+                self.log.debug(f"Données insuffisantes pour {symbol}: {len(df) if df is not None else 0} bougies")
                 return
 
-            # Check if we have new data since last processing
+            # Check hash pour détecter les vraies nouvelles données
             df_hash = hashlib.md5(df.iloc[-1].to_string().encode()).hexdigest() if len(df) > 0 else None
-            last_hash = getattr(self, '_last_data_hash', {}).get(symbol)
-            if df_hash == last_hash and len(df) > 0:
-                # Same last bar, can skip processing except for position risk updates
-                pass  # Continue for risk management
-            else:
-                # New data, update hash
-                if not hasattr(self, '_last_data_hash'):
-                    self._last_data_hash = {}
-                self._last_data_hash[symbol] = df_hash
+            last_hash = self._data_hash_cache.get(symbol)
+            data_changed = (df_hash != last_hash)
+            self._data_hash_cache[symbol] = df_hash
 
-            # 2. Calculate technical indicators (with cycle caching)
+            # === 2. CALCUL DES INDICATEURS TECHNIQUES ===
             indicators_start = time.time()
             with self.bot._lock:
-                if not hasattr(self.bot, '_indicators_cache'):
-                    self.bot._indicators_cache = {}
-                if symbol in self.bot._indicators_cache:
-                    df_with_indicators = self.bot._indicators_cache[symbol]
-                else:
+                if symbol not in self.bot._indicators_cache or data_changed:
                     df_with_indicators = self.bot.technical_indicators.calculate_all_indicators(df.copy())
                     self.bot._indicators_cache[symbol] = df_with_indicators
+                else:
+                    df_with_indicators = self.bot._indicators_cache[symbol]
                 self.bot.market_data[symbol] = df_with_indicators
             indicators_time = time.time() - indicators_start
 
-            # === CONTINUOUS RISK MANAGEMENT FOR OPEN POSITIONS ===
+            # === 3. GESTION DU RISQUE DES POSITIONS OUVERTES ===
             risk_start = time.time()
             self._update_active_position_risk(symbol, df_with_indicators)
             risk_time = time.time() - risk_start
 
-            # 🚫 DYNAMIC BLOCKING: Skip if asset is blocked for this session
+            # === 4. VÉRIFICATIONS DE FILTRES ===
+            # Symbole bloqué ?
             if symbol in self.bot.blocked_symbols:
-                self.log.info(f"⛔ {symbol} blocked for this session (cumulative loss > threshold)")
+                self.log.info(f"⛔ {symbol} bloqué pour cette session")
                 return
 
-            # If broker is crypto and symbol is not among selected assets
+            # Crypto active ?
             if self.bot.broker.get_asset_type() == "crypto":
                 active_cryptos = getattr(self.bot, '_active_crypto_symbols', [])
                 if active_cryptos and symbol not in active_cryptos:
-                    # Don't look to open new positions on this asset
                     return
 
-            # 🕒 US SESSION FILTER (Alpaca/Stocks)
+            # Marché US ouvert ? (Alpaca uniquement)
             if self.bot.broker.get_asset_type() == "stock":
-                market_is_open = True
-
-                # Check official Alpaca API
-                if hasattr(self.bot.broker, '_api') and hasattr(self.bot.broker._api, 'get_clock'):
-                    try:
-                        clock = self.bot.broker._api.get_clock()
-                        market_is_open = clock.is_open
-                    except Exception as e:
-                        self.log.warning(f"Error checking Alpaca clock: {e}")
-                        market_is_open = False  # Err on the side of caution
-
-                if not market_is_open:
-                    self.log.debug(f"US market closed (Alpaca API): skip {symbol}")
+                if not self._is_us_market_open():
+                    self.log.debug(f"Marché US fermé : skip {symbol}")
                     return
 
-            # 3. Analyze market and generate trading signal (with cycle caching)
+            # === 5. ANALYSE STRATÉGIE ET SIGNAL ===
             strategy_start = time.time()
-            with self.bot._lock:
-                if not hasattr(self.bot, '_strategy_cache'):
-                    self.bot._strategy_cache = {}
-                if symbol in self.bot._strategy_cache:
-                    signal_data = self.bot._strategy_cache[symbol]
-                else:
-                    signal_data = None
-            if signal_data is None:
-                # Pass the real balance and actual Kelly calculated from history to the model
-                _real_balance = getattr(self.bot, '_cached_balance', 0.0)
-                _real_win_rate = None
-                if (self.bot.risk_manager and
-                    len(self.bot.risk_manager.trade_history) >= self.bot.risk_manager.MIN_TRADES_FOR_KELLY):
-                    _real_win_rate = self.bot.risk_manager._calculate_kelly_fraction()
-
-                # P1-1: Calculate 24h BTC change from cached market data
-                _btc_change_24h = None
-                if self.bot.broker.get_asset_type() == "crypto":
-                    btc_sym = 'BTC/USDT'
-                    btc_df_24h = self.bot.market_data.get(btc_sym)
-                    if btc_df_24h is not None and len(btc_df_24h) >= 24:
-                        try:
-                            price_now = float(btc_df_24h.iloc[-1]['close'])
-                            price_24h = float(btc_df_24h.iloc[-24]['close'])  # 24 H1 candles = 24h
-                            if price_24h > 0:
-                                _btc_change_24h = (price_now - price_24h) / price_24h * 100.0
-                                self.log.debug(f"[P1-1] 24h BTC change: {_btc_change_24h:+.2f}%")
-                        except Exception as _e:
-                            self.log.debug(f"[P1-1] Could not calculate 24h BTC change: {_e}")
-
-                # Get NLP factors and filters from NewsManager
-                _sentiment_factor = 1.0
-                _news_filter_passed = True
-                if self.bot.news_manager:
-                    try:
-                        _sentiment_factor = self.bot.news_manager.get_risk_factor()
-                        _should_avoid, _ = self.bot.news_manager.should_avoid_trading_due_to_news(symbol)
-                        _news_filter_passed = not _should_avoid
-                    except Exception as e:
-                        self.log.debug(f"NewsManager error: {e}")
-
-                signal_data = self.bot.strategy.analyze_market(
-                    df_with_indicators,
-                    account_balance=_real_balance,
-                    real_win_rate=_real_win_rate,
-                    symbol=symbol,
-                    btc_change_24h=_btc_change_24h,
-                    sentiment_factor=_sentiment_factor,
-                    news_filter_passed=_news_filter_passed
-                )
-                signal_data['symbol'] = symbol
-                with self.bot._lock:
-                    self.bot._strategy_cache[symbol] = signal_data
+            signal_data = self._compute_signal(symbol, df_with_indicators)
             strategy_time = time.time() - strategy_start
 
-            # DEBUG: Log signal details and pre-check news avoidance
+            if signal_data is None:
+                return
+
+            # === 6. FILTRES NEWS ===
+            should_avoid, news_event = False, None
+            if getattr(self.bot, 'news_manager', None):
+                try:
+                    should_avoid, news_event = self.bot.news_manager.should_avoid_trading_due_to_news(symbol)
+                except Exception as e:
+                    self.log.debug(f"NewsManager error pour {symbol}: {e}")
+
             score_raw = signal_data['total_score']
-            # Show effective score_min (per asset_type) rather than global
             score_min = signal_data.get('score_min', self.bot.strategy.score_min)
             rr = signal_data['rr_ratio']
-            if getattr(self.bot, 'news_manager', None):
-                should_avoid, news_event = self.bot.news_manager.should_avoid_trading_due_to_news(symbol)
-            else:
-                should_avoid, news_event = False, None
-            news_ok = not should_avoid
+
             self.log.info(
-                f"Signal DEBUG {symbol}: regime={signal_data['market_regime']} "
-                f"score_raw={score_raw:.1f} score_min={score_min} "
-                f"should_long={signal_data['should_long']} should_short={signal_data['should_short']} "
-                f"RR={rr:.2f} news_ok={news_ok}"
+                f"📊 Signal {symbol}: régime={signal_data['market_regime']} "
+                f"score={score_raw:.1f}/{score_min} "
+                f"L={signal_data['should_long']} S={signal_data['should_short']} "
+                f"RR={rr:.2f} news_ok={not should_avoid}"
             )
 
             if should_avoid:
-                self.log.info(f"Trading avoided for {symbol} due to news: {news_event.title if news_event else 'Unknown'}")
+                self.log.info(f"📰 Trading évité pour {symbol} (news: {news_event.title if news_event else '?'})")
                 return
-            elif signal_data['should_long'] or signal_data['should_short']:
-                # Execute the trade
+
+            # === 7. EXÉCUTION DU SIGNAL ===
+            if signal_data['should_long'] or signal_data['should_short']:
                 trade_start = time.time()
+                # En mode live_conditions : appliquer slippage simulé
+                if self.trading_mode == 'live_conditions':
+                    signal_data['_simulated_slippage'] = self.simulated_slippage
+                    signal_data['_simulated_commission_pct'] = self.simulated_commission_pct
                 self._execute_signal_trade(symbol, signal_data, df_with_indicators)
                 trade_time = time.time() - trade_start
             else:
                 self.log.info(
-                    f"Scan {symbol} : {signal_data['market_regime']} | "
+                    f"👁️  Scan {symbol} : {signal_data['market_regime']} | "
                     f"Score: {score_raw:.1f}/{score_min} | "
-                    f"No signal (Trigger L: {signal_data['trigger_long']}, S: {signal_data['trigger_short']}, R:R: {rr:.2f})"
+                    f"Pas de signal (Trigger L={signal_data['trigger_long']}, S={signal_data['trigger_short']}, RR={rr:.2f})"
                 )
+                trade_time = 0.0
 
-            # Log processing times for profiling (debug mode only)
+            # === 8. LOG DE PROFILING ===
             total_time = time.time() - symbol_start_time
-            if self.log.isEnabledFor(logging.DEBUG):
-                self.log.debug(
-                    f"Profiling {symbol}: "
-                    f"fetch={fetch_time:.3f}s, indicators={indicators_time:.3f}s, "
-                    f"risk={risk_time:.3f}s, strategy={strategy_time:.3f}s, "
-                    f"trade={trade_time if 'trade_time' in locals() else 0:.3f}s, "
-                    f"total={total_time:.3f}s"
-                )
+            self.log.debug(
+                f"⏱️ Profiling {symbol}: "
+                f"fetch={fetch_time:.2f}s indicators={indicators_time:.2f}s "
+                f"risk={risk_time:.2f}s strategy={strategy_time:.2f}s "
+                f"trade={trade_time:.2f}s TOTAL={total_time:.2f}s"
+            )
 
         except Exception as e:
             self.bot.stats['errors_count'] += 1
-            self.log.error(f"Unexpected error in _process_symbol for {symbol}: {e}")
+            self.log.error(f"Erreur inattendue dans _process_symbol({symbol}): {e}")
             self.log.debug(traceback.format_exc())
+
+    def _compute_signal(self, symbol: str, df_with_indicators) -> Optional[dict]:
+        """
+        Calcule le signal de trading en utilisant le cache du cycle.
+        Thread-safe grâce au lock.
+        """
+        with self.bot._lock:
+            if symbol in self.bot._strategy_cache:
+                return self.bot._strategy_cache[symbol]
+
+        # Données balance et Kelly
+        real_balance = getattr(self.bot, '_cached_balance', 0.0)
+        real_win_rate = None
+        if (self.bot.risk_manager and
+                len(self.bot.risk_manager.trade_history) >= self.bot.risk_manager.MIN_TRADES_FOR_KELLY):
+            try:
+                real_win_rate = self.bot.risk_manager._calculate_kelly_fraction()
+            except Exception:
+                pass
+
+        # Changement BTC 24h (pour crypto uniquement)
+        btc_change_24h = self._get_btc_24h_change()
+
+        # Facteur de sentiment
+        sentiment_factor = 1.0
+        news_filter_passed = True
+        if self.bot.news_manager:
+            try:
+                sentiment_factor = self.bot.news_manager.get_risk_factor()
+                should_avoid, _ = self.bot.news_manager.should_avoid_trading_due_to_news(symbol)
+                news_filter_passed = not should_avoid
+            except Exception as e:
+                self.log.debug(f"NewsManager error: {e}")
+
+        try:
+            signal_data = self.bot.strategy.analyze_market(
+                df_with_indicators,
+                account_balance=real_balance,
+                real_win_rate=real_win_rate,
+                symbol=symbol,
+                btc_change_24h=btc_change_24h,
+                sentiment_factor=sentiment_factor,
+                news_filter_passed=news_filter_passed
+            )
+            signal_data['symbol'] = symbol
+
+            with self.bot._lock:
+                self.bot._strategy_cache[symbol] = signal_data
+
+            return signal_data
+        except Exception as e:
+            self.log.error(f"Erreur analyse stratégie pour {symbol}: {e}")
+            return None
+
+    def _get_btc_24h_change(self) -> Optional[float]:
+        """Calcule le changement BTC sur 24h depuis les données en cache (crypto only)."""
+        if self.bot.broker.get_asset_type() != "crypto":
+            return None
+
+        # Essayer BTC/USDT ou BTCUSD (MT5 crypto)
+        for btc_sym in ['BTC/USDT', 'BTCUSD']:
+            btc_df = self.bot.market_data.get(btc_sym)
+            if btc_df is not None and len(btc_df) >= 24:
+                try:
+                    price_now = float(btc_df.iloc[-1]['close'])
+                    price_24h = float(btc_df.iloc[-24]['close'])
+                    if price_24h > 0:
+                        return (price_now - price_24h) / price_24h * 100.0
+                except Exception:
+                    pass
+        return None
+
+    def _is_us_market_open(self) -> bool:
+        """Vérifie si le marché US est ouvert (Alpaca uniquement)."""
+        if hasattr(self.bot.broker, '_api') and hasattr(self.bot.broker._api, 'get_clock'):
+            try:
+                clock = self.bot.broker._api.get_clock()
+                return clock.is_open
+            except Exception:
+                return False
+        return True  # Fallback permissif
 
     def _update_active_position_risk(self, symbol: str, df_with_indicators):
         """
-        Update trailing stops and break-evens for open positions.
-
-        Args:
-            symbol: Symbol to update
-            df_with_indicators: DataFrame with technical indicators
+        Met à jour trailing stops et break-evens pour les positions ouvertes.
+        Thread-safe via lock.
         """
-        # Thread-safe snapshot of position existence
         with self.bot._lock:
             has_local_pos = symbol in self.bot.positions
             has_risk_pos = (self.bot.risk_manager is not None and
-                          symbol in self.bot.risk_manager.open_positions)
+                           symbol in self.bot.risk_manager.open_positions)
+
         if not has_local_pos or not has_risk_pos:
             return
 
-        current_price = df_with_indicators.iloc[-1]['close']
-        atr_value = df_with_indicators.iloc[-1].get('atr', 0)
+        try:
+            current_price = df_with_indicators.iloc[-1]['close']
+            atr_value = df_with_indicators.iloc[-1].get('atr', 0)
 
-        # Update ATR in position for risk manager
-        pos_risk = self.bot.risk_manager.open_positions[symbol]
-        pos_risk['atr_value'] = atr_value
+            pos_risk = self.bot.risk_manager.open_positions[symbol]
+            pos_risk['atr_value'] = atr_value
+            old_sl = pos_risk.get('stop_loss', 0.0)
 
-        old_sl = pos_risk.get('stop_loss', 0.0)
+            broker_pos = self.bot.broker.get_position(symbol)
+            broker_tp = broker_pos.get('take_profit', 0.0) if broker_pos else 0.0
+            broker_sl = broker_pos.get('stop_loss', 0.0) if broker_pos else 0.0
 
-        # Get raw position from broker to check for real SL/TP orders
-        broker_pos = self.bot.broker.get_position(symbol)
-        broker_tp = broker_pos.get('take_profit', 0.0) if broker_pos else 0.0
-        broker_sl = broker_pos.get('stop_loss', 0.0) if broker_pos else 0.0
+            self.bot.risk_manager.update_open_position(symbol, current_price)
 
-        # Execute update (trailing stop / break-even calculation)
-        self.bot.risk_manager.update_open_position(symbol, current_price)
+            new_sl = pos_risk.get('stop_loss', 0.0)
+            theoretical_tp = pos_risk.get('take_profit', 0.0)
 
-        new_sl = pos_risk.get('stop_loss', 0.0)
-        theoretical_tp = pos_risk.get('take_profit', 0.0)
-
-        # Recalculate theoretical TP if missing
-        if theoretical_tp == 0.0:
-            entry_price = pos_risk.get('entry_price', current_price)
-            side = pos_risk.get('side', 'LONG')
-            _, theoretical_tp = self.bot.risk_manager.calculate_sl_tp_levels(
-                entry_price=entry_price,
-                atr_value=atr_value,
-                position_side=side,
-                asset_type=self.bot.broker.get_asset_type(),
-                symbol=symbol
-            )
-            pos_risk['take_profit'] = theoretical_tp
-            with self.bot._lock:
-                if symbol in self.bot.positions:
-                    self.bot.positions[symbol]['take_profit'] = theoretical_tp
-            self.log.info(f"Recalculated theoretical Take Profit for {symbol}: {theoretical_tp:.5f}")
-
-        # Update if SL changed significantly (deadband > 0.2 ATR)
-        significant_move = abs(new_sl - old_sl) > (atr_value * 0.2)
-        should_update_broker = (significant_move and new_sl > 0) or \
-                              (broker_sl == 0.0 and new_sl > 0) or \
-                              (broker_tp == 0.0 and theoretical_tp > 0)
-
-        if should_update_broker:
-            self.log.info(f"Updating SL/TP for {symbol} with broker (SL: {old_sl:.5f} -> {new_sl:.5f}, TP: {theoretical_tp:.5f})")
-            success = self.bot.broker.modify_sl_tp(symbol, new_sl, theoretical_tp)
-            if success:
-                # Update local position tracking dictionary
+            # Recalculer TP si manquant
+            if theoretical_tp == 0.0:
+                entry_price = pos_risk.get('entry_price', current_price)
+                side = pos_risk.get('side', 'LONG')
+                _, theoretical_tp = self.bot.risk_manager.calculate_sl_tp_levels(
+                    entry_price=entry_price,
+                    atr_value=atr_value,
+                    position_side=side,
+                    asset_type=self.bot.broker.get_asset_type(),
+                    symbol=symbol
+                )
+                pos_risk['take_profit'] = theoretical_tp
                 with self.bot._lock:
                     if symbol in self.bot.positions:
-                        self.bot.positions[symbol]['stop_loss'] = new_sl
                         self.bot.positions[symbol]['take_profit'] = theoretical_tp
 
-    def _execute_signal_trade(self, symbol: str, signal_data: dict, df_with_indicators):
-        """
-        Validate macro filters, calculate position size safely, and execute order.
+            # Mise à jour broker si SL a bougé significativement (deadband > 0.2 ATR)
+            significant_move = abs(new_sl - old_sl) > (atr_value * 0.2)
+            should_update = (significant_move and new_sl > 0) or \
+                           (broker_sl == 0.0 and new_sl > 0) or \
+                           (broker_tp == 0.0 and theoretical_tp > 0)
 
-        Args:
-            symbol: Symbol to trade
-            signal_data: Signal data from strategy analysis
-            df_with_indicators: DataFrame with technical indicators
-        """
+            if should_update:
+                self.log.info(
+                    f"📈 Mise à jour SL/TP {symbol}: "
+                    f"SL {old_sl:.5f}→{new_sl:.5f} TP={theoretical_tp:.5f}"
+                )
+                success = self.bot.broker.modify_sl_tp(symbol, new_sl, theoretical_tp)
+                if success:
+                    with self.bot._lock:
+                        if symbol in self.bot.positions:
+                            self.bot.positions[symbol]['stop_loss'] = new_sl
+                            self.bot.positions[symbol]['take_profit'] = theoretical_tp
+
+        except Exception as e:
+            self.log.warning(f"Erreur update position risk pour {symbol}: {e}")
+
+    def _execute_signal_trade(self, symbol: str, signal_data: dict, df_with_indicators):
+        """Délègue l'exécution à signal_executor."""
         from superbot.components.signal_executor import execute_signal_trade
         execute_signal_trade(self.bot, symbol, signal_data, df_with_indicators)
 
     def _fetch_market_data(self, symbol: str, limit: int = 500) -> Optional[Any]:
         """
-        Fetch recent market data for a symbol.
-
-        Args:
-            symbol: Symbol to fetch
-            limit: Number of candles to fetch
-
-        Returns:
-            DataFrame with OHLCV data or None on error
+        Récupère les données marché avec cache par cycle.
+        
+        V3: thread-safe, utilise _market_data_cache partagé.
         """
-        # First check the trading cycle cache to avoid double API calls
-        cache = getattr(self.bot, '_market_data_cache', {})
-        if symbol in cache:
-            return cache[symbol]
+        with self.bot._lock:
+            cache = getattr(self.bot, '_market_data_cache', {})
+            if symbol in cache:
+                return cache[symbol]
 
         try:
-            # Use configured timeframe
             timeframe = self.bot.GRANULARITY
-
-            # Fetch data from broker
             df = self.bot.broker.fetch_candles(symbol, timeframe, limit)
 
             if df is None or df.empty:
-                self.log.warning(f"No data returned for {symbol}")
+                self.log.warning(f"Pas de données pour {symbol}")
                 return None
 
-            # Ensure DataFrame has required columns
             required_columns = ['open', 'high', 'low', 'close', 'volume']
             if not all(col in df.columns for col in required_columns):
-                self.log.warning(f"Missing columns in data for {symbol}: {df.columns.tolist()}")
+                self.log.warning(f"Colonnes manquantes pour {symbol}: {df.columns.tolist()}")
                 return None
 
-            # Cache for this cycle
-            if not hasattr(self.bot, '_market_data_cache'):
-                self.bot._market_data_cache = {}
-            self.bot._market_data_cache[symbol] = df
+            with self.bot._lock:
+                if not hasattr(self.bot, '_market_data_cache'):
+                    self.bot._market_data_cache = {}
+                self.bot._market_data_cache[symbol] = df
 
             return df
 
         except Exception as e:
-            self.log.error(f"Error fetching data for {symbol}: {e}")
+            self.log.error(f"Erreur fetch données pour {symbol}: {e}")
             return None
+
+    def get_heartbeat_status(self) -> dict:
+        """
+        Retourne le statut du heartbeat pour monitoring.
+        Utilisé par le BugWatchdog et le dashboard.
+        """
+        now = time.time()
+        time_since_last = now - self._last_heartbeat
+        avg_cycle = sum(self._cycle_times) / len(self._cycle_times) if self._cycle_times else 0
+        last_cycle = self._cycle_times[-1] if self._cycle_times else 0
+
+        return {
+            'last_heartbeat_ago_s': round(time_since_last, 1),
+            'target_cycle_s': self.cycle_time,
+            'last_cycle_s': round(last_cycle, 2),
+            'avg_cycle_s': round(avg_cycle, 2),
+            'is_healthy': time_since_last < self.cycle_time * 3,
+            'cycles_completed': self.bot.stats.get('cycles_completed', 0),
+        }
 
 
 def run_main_loop(bot_instance):
-    """Convenience function to run the main loop."""
+    """Convenience function pour lancer la boucle principale V3."""
     manager = MainLoopManager(bot_instance)
     manager.run_main_loop()

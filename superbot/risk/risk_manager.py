@@ -281,6 +281,179 @@ class RiskManager:
         self.last_monthly_reset = datetime.now().replace(day=1).date()
         log.info("Statistiques mensuelles réinitialisées")
 
+    # =========================================================================
+    # 🧠 V3 : TARGET-AWARE RISK MANAGEMENT
+    # =========================================================================
+
+    def auto_adjust_barriers(self, balance: float) -> dict:
+        """
+        Ajuste automatiquement les barrières de risque en fonction du solde.
+        Implémente la logique du plan V3 Phase 7.
+
+        Solde ≥ 5000€  : Target 5% du solde, Risk 1.5%, Max 3 positions
+        Solde ≥ 1000€  : Target 200€,         Risk 1.0%, Max 2 positions
+        Solde ≥  500€  : Target 100€,          Risk 0.8%, Max 2 positions
+        Solde ≥  200€  : Target 40€,           Risk 0.5%, Max 1 position
+        Solde <  200€  : Target 10€,           Risk 0.3%, Mode ultra-conservateur
+
+        Returns: dict avec daily_target, risk_pct, max_positions, score_min
+        """
+        if balance >= 5000:
+            barriers = {
+                'daily_target': balance * 0.05,
+                'risk_pct': 1.5,
+                'max_positions': 3,
+                'score_min': 5,
+                'sl_atr_mult': 1.5,
+                'tp_atr_mult': 3.0,
+            }
+        elif balance >= 1000:
+            barriers = {
+                'daily_target': 200.0,
+                'risk_pct': 1.0,
+                'max_positions': 2,
+                'score_min': 6,
+                'sl_atr_mult': 1.5,
+                'tp_atr_mult': 3.0,
+            }
+        elif balance >= 500:
+            barriers = {
+                'daily_target': 100.0,
+                'risk_pct': 0.8,
+                'max_positions': 2,
+                'score_min': 7,
+                'sl_atr_mult': 1.3,
+                'tp_atr_mult': 2.5,
+            }
+        elif balance >= 200:
+            barriers = {
+                'daily_target': 40.0,
+                'risk_pct': 0.5,
+                'max_positions': 1,
+                'score_min': 8,
+                'sl_atr_mult': 1.2,
+                'tp_atr_mult': 2.0,
+            }
+        else:
+            barriers = {
+                'daily_target': 10.0,
+                'risk_pct': 0.3,
+                'max_positions': 1,
+                'score_min': 9,
+                'sl_atr_mult': 1.0,
+                'tp_atr_mult': 2.0,
+            }
+
+        # Appliquer les nouvelles barrières au RiskManager
+        self.RISK_PCT = barriers['risk_pct']
+        self.MAX_OPEN_POSITIONS = barriers['max_positions']
+        self.daily_target = barriers['daily_target']
+        log.info(
+            f"🧠 auto_adjust_barriers | solde={balance:.0f}€ | "
+            f"target={barriers['daily_target']:.0f}€ | risk={barriers['risk_pct']}% | "
+            f"max_pos={barriers['max_positions']}"
+        )
+        return barriers
+
+    def get_target_aware_risk_pct(self, daily_pnl: float, daily_target: float,
+                                   base_risk_pct: float = None) -> float:
+        """
+        Ajuste le risque par trade en fonction du PnL journalier vs objectif.
+        Implémente la logique du plan V3 Phase 7.
+
+        > 75% target atteint    → ÷0.6 (mode conservation des gains)
+        > 50% target atteint    → ÷0.8 (légère réduction)
+        PnL < -50% target       → ÷2.0 (mode défensif)
+        PnL < -75% target       → ÷3.0 (mode ultra-défensif)
+        Retard important        → ×1.15 (légèrement plus agressif, cap 2%)
+        """
+        if base_risk_pct is None:
+            base_risk_pct = self.RISK_PCT
+
+        if daily_target <= 0:
+            return base_risk_pct
+
+        pct_achieved = daily_pnl / daily_target
+
+        if pct_achieved >= 1.0:
+            # Objectif atteint → mode ultra-conservation
+            adjusted = base_risk_pct * 0.4
+            log.debug(f"TargetAware: objectif atteint ({pct_achieved:.0%}) → risque ×0.4")
+        elif pct_achieved >= 0.75:
+            # 75% atteint → conservation
+            adjusted = base_risk_pct * 0.6
+            log.debug(f"TargetAware: 75% atteint ({pct_achieved:.0%}) → risque ×0.6")
+        elif pct_achieved >= 0.5:
+            # 50% atteint → légère réduction
+            adjusted = base_risk_pct * 0.8
+        elif daily_pnl < -0.75 * daily_target:
+            # Perte sévère → mode ultra-défensif
+            adjusted = base_risk_pct * 0.33
+            log.warning(f"TargetAware: perte sévère ({daily_pnl:.1f}€) → risque ×0.33")
+        elif daily_pnl < -0.5 * daily_target:
+            # Perte modérée → mode défensif
+            adjusted = base_risk_pct * 0.5
+            log.warning(f"TargetAware: perte modérée ({daily_pnl:.1f}€) → risque ×0.5")
+        else:
+            # Zone neutre ou objectif en retard → légèrement plus agressif
+            if pct_achieved < 0 and abs(pct_achieved) < 0.5:
+                adjusted = min(base_risk_pct * 1.15, 2.0)
+            else:
+                adjusted = base_risk_pct
+
+        return round(max(0.1, adjusted), 3)
+
+    @staticmethod
+    def get_regime_sl_tp_multipliers(regime: str, session: str = 'LONDON',
+                                      asset_class: str = 'forex') -> dict:
+        """
+        Retourne les multiplicateurs SL/TP adaptatifs selon le régime + session + asset class.
+        Implémente la logique du plan V3 Phase 7.
+
+        RANGING  + ASIA     → SL=1.2×ATR, TP=1.8×ATR (objectifs plus petits, rapides)
+        TRENDING + LONDON   → SL=1.5×ATR, TP=3.0×ATR (standard)
+        HIGH_VOL + OVERLAP  → SL=2.0×ATR, TP=4.0×ATR (laisser courir)
+        BREAKOUT + any      → SL=1.8×ATR, TP=3.6×ATR (momentum fort)
+        """
+        # Valeurs par défaut
+        sl_mult = 1.5
+        tp_mult = 3.0
+
+        regime_low = (regime or '').lower()
+        session_up = (session or '').upper()
+
+        # Ajustement par régime
+        if 'ranging' in regime_low:
+            sl_mult, tp_mult = 1.2, 1.8
+        elif 'breakout' in regime_low:
+            sl_mult, tp_mult = 1.8, 3.6
+        elif 'high_vol' in regime_low or 'volatile' in regime_low:
+            sl_mult, tp_mult = 2.0, 4.0
+        elif 'trending' in regime_low:
+            sl_mult, tp_mult = 1.5, 3.0
+
+        # Ajustement supplémentaire par session
+        if session_up == 'OVERLAP':
+            sl_mult *= 1.1
+            tp_mult *= 1.1
+        elif session_up in ('OFF_HOURS', 'ASIA'):
+            sl_mult *= 0.9
+            tp_mult *= 0.85
+
+        # Ajustement par asset class
+        if asset_class == 'crypto':
+            sl_mult *= 1.3
+            tp_mult *= 1.3
+        elif asset_class == 'forex_jpy':
+            sl_mult *= 1.25
+            tp_mult *= 1.25
+
+        return {
+            'sl_atr_mult': round(sl_mult, 2),
+            'tp_atr_mult': round(tp_mult, 2),
+        }
+
+
 
 # Fonctions utilitaires pour une utilisation facile
 def calculate_position_size_from_risk(account_balance: float, risk_pct: float,
