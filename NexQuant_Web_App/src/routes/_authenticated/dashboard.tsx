@@ -150,39 +150,7 @@ function Dashboard() {
     navigate({ to: "/auth", replace: true });
   }
 
-  if (isLoading || !data) {
-    return (
-      <div className="min-h-screen grid place-items-center">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <Activity className="w-5 h-5 animate-pulse text-primary" />
-          {t.init}
-        </div>
-      </div>
-    );
-  }
-
-  const status = data.status;
-  const running = status?.is_running ?? false;
-  const equity = data.equity;
-  const last = equity[equity.length - 1];
-  const first = equity[0];
-  const pnlTotal = last && first ? last.equity - first.equity : 0;
-  const pnlPct = last && first ? ((last.equity - first.equity) / first.equity) * 100 : 0;
-  const maxDd = equity.reduce((m: number, p: {drawdown: number}) => Math.max(m, p.drawdown), 0);
-
-  const openTotal = data.openPositions.reduce((s: number, p: {pnl: unknown}) => s + Number(p.pnl), 0);
-
-  // BUG-D03 FIX: Trouver le snapshot le plus proche de il y a 24h au lieu d'utiliser
-  // les 2 derniers points (qui peuvent être séparés de 15 minutes seulement)
-  const target24h = Date.now() - 86400000;
-  const snap24h = equity.reduce((best: typeof equity[0] | null, p: typeof equity[0]) => {
-    if (!best) return p;
-    return Math.abs(new Date(p.ts).getTime() - target24h) <
-           Math.abs(new Date(best.ts).getTime() - target24h) ? p : best;
-  }, null as typeof equity[0] | null);
-  const day = last && snap24h ? last.equity - snap24h.equity : 0;
-  const dayPct = last && snap24h && snap24h.equity > 0
-    ? (day / snap24h.equity) * 100 : 0;
+  const equity = data?.equity || [];
 
   // BUG-D10 FIX: Factoriser le calcul isRed avec useMemo (avant dupliqué ~40 lignes x2)
   const isRedArray = useMemo(() => {
@@ -206,6 +174,39 @@ function Dashboard() {
     }
     return isRed;
   }, [equity]);
+
+  if (isLoading || !data) {
+    return (
+      <div className="min-h-screen grid place-items-center">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Activity className="w-5 h-5 animate-pulse text-primary" />
+          {t.init}
+        </div>
+      </div>
+    );
+  }
+
+  const status = data.status;
+  const running = status?.is_running ?? false;
+  const last = equity[equity.length - 1];
+  const first = equity[0];
+  const pnlTotal = last && first ? last.equity - first.equity : 0;
+  const pnlPct = last && first ? ((last.equity - first.equity) / first.equity) * 100 : 0;
+  const maxDd = equity.reduce((m: number, p: {drawdown: number}) => Math.max(m, p.drawdown), 0);
+
+  const openTotal = data.openPositions.reduce((s: number, p: {pnl: unknown}) => s + Number(p.pnl), 0);
+
+  // BUG-D03 FIX: Trouver le snapshot le plus proche de il y a 24h au lieu d'utiliser
+  // les 2 derniers points (qui peuvent être séparés de 15 minutes seulement)
+  const target24h = Date.now() - 86400000;
+  const snap24h = equity.reduce((best: typeof equity[0] | null, p: typeof equity[0]) => {
+    if (!best) return p;
+    return Math.abs(new Date(p.ts).getTime() - target24h) <
+           Math.abs(new Date(best.ts).getTime() - target24h) ? p : best;
+  }, null as typeof equity[0] | null);
+  const day = last && snap24h ? last.equity - snap24h.equity : 0;
+  const dayPct = last && snap24h && snap24h.equity > 0
+    ? (day / snap24h.equity) * 100 : 0;
 
 
   return (

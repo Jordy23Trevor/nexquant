@@ -107,11 +107,22 @@ function HistoryPage() {
   const PAGE_SIZE = 20;
   const [page, setPage] = useState(1);
 
+  const closed = (data?.closedPositions || []) as any[];
+
+  // BUG-D08 FIX: Filtrage et pagination côté client
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const filtered = useMemo(() =>
+    closed.filter((p) => {
+      const brokerOk = !filterBroker || p.broker === filterBroker;
+      const sideOk = !filterSide || p.side === filterSide;
+      const searchOk = !search || String(p.symbol ?? "").toLowerCase().includes(search.toLowerCase());
+      return brokerOk && sideOk && searchOk;
+    }), [closed, filterBroker, filterSide, search]);
+
   if (isLoading || !data) {
     return <div className="p-6 text-muted-foreground animate-pulse font-mono text-sm">{t.loading}</div>;
   }
 
-  const closed = data.closedPositions || [];
   const totalTrades = closed.length;
   const winners = closed.filter((p: {pnl: unknown}) => Number(p.pnl) > 0);
   const winRate = totalTrades > 0 ? ((winners.length / totalTrades) * 100).toFixed(1) : "0.0";
@@ -132,16 +143,6 @@ function HistoryPage() {
   const totalFees = closedAny.reduce((acc: number, p) => acc + (Number(p.commission) || 0), 0);
   const feesStr = totalFees > 0 ? `$${totalFees.toFixed(2)}` : "N/A";
 
-
-  // BUG-D08 FIX: Filtrage et pagination côté client
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const filtered = useMemo(() =>
-    (closed as any[]).filter((p) => {
-      const brokerOk = !filterBroker || p.broker === filterBroker;
-      const sideOk = !filterSide || p.side === filterSide;
-      const searchOk = !search || String(p.symbol ?? "").toLowerCase().includes(search.toLowerCase());
-      return brokerOk && sideOk && searchOk;
-    }), [closed, filterBroker, filterSide, search]);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
