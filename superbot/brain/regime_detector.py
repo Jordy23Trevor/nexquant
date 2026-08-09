@@ -192,8 +192,19 @@ class MarketRegimeDetector:
         volume = self._safe_float(last, 'volume', 0)
 
         # Volume moyen sur 20 bougies
-        vol_avg = float(df['volume'].iloc[-20:].mean()) if 'volume' in df.columns else volume
-        volume_factor = volume / max(vol_avg, 1) if vol_avg > 0 else 1.0
+        # BUG-I3 FIX: En Forex MT5, le volume est du tick-volume (souvent 0 ou incohérent).
+        # Si volume = 0 ou vol_avg < 1, on marque volume_factor = None pour ignorer les votes volume.
+        _vol_data_valid = False
+        if 'volume' in df.columns:
+            vol_avg = float(df['volume'].iloc[-20:].mean())
+            if volume > 0 and vol_avg >= 1:
+                volume_factor = volume / vol_avg
+                _vol_data_valid = True
+            else:
+                volume_factor = 1.0  # valeur neutre (les votes seront ignorés)
+        else:
+            vol_avg = 0.0
+            volume_factor = 1.0  # pas de colonne volume : votes ignorés
 
         # Largeur des BB en % du prix
         bb_width_pct = ((bb_upper - bb_lower) / close * 100) if close > 0 and bb_upper > 0 else 0
@@ -235,7 +246,11 @@ class MarketRegimeDetector:
             votes['ranging'] += 10
 
         # EMA Alignment (direction macro)
-        factors['ema_aligned'] = ema_fast > ema_slow > ema_trend if ema_trend > 0 else ema_fast > ema_slow
+        # BUG-M1 FIX: Clarification de l'expression pour une meilleure lisibilité
+        if ema_trend > 0:
+            factors['ema_aligned'] = (ema_fast > ema_slow) and (ema_slow > ema_trend)
+        else:
+            factors['ema_aligned'] = (ema_fast > ema_slow)
         if ema_fast > 0 and ema_slow > 0:
             if ema_fast > ema_slow:
                 votes['trending_bull'] += 20
@@ -286,12 +301,17 @@ class MarketRegimeDetector:
             votes['pre_breakout'] += 5
 
         # Volume spike
-        factors['volume_factor'] = volume_factor
-        if volume_factor > thresholds['volume_spike']:
-            votes['breakout'] += 20
-            votes['high_volatility'] += 10
-        elif volume_factor < 0.5:
-            votes['ranging'] += 10
+        # BUG-I3 FIX: Ne voter que si les données de volume sont fiables.
+        # Forex MT5 tick-volume = 0 faisait voter 'ranging' à tort à chaque cycle.
+        factors['volume_factor'] = volume_factor if _vol_data_valid else None
+        if _vol_data_valid:
+            if volume_factor > thresholds['volume_spike']:
+                votes['breakout'] += 20
+                votes['high_volatility'] += 10
+            elif volume_factor < 0.5:
+                votes['ranging'] += 10
+        else:
+            log.debug(f"[Régime] Vote volume ignoré pour {symbol} : données volume non disponibles ou nulles (Forex tick-vol=0)")
 
         # RSI (sentiment de momentum)
         factors['rsi'] = rsi

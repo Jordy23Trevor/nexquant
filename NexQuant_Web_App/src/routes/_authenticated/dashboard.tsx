@@ -6,15 +6,14 @@ import {
   Activity, ArrowDown, ArrowUp, LogOut, Pause, Play, RefreshCw, TrendingUp,
   TrendingDown, Zap, Brain, Newspaper, Cpu, Settings, Shield, Key, Clock
 } from "lucide-react";
-import {
-  Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from "recharts";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { MetricCard } from "@/components/MetricCard";
 import { BotStatusIndicator } from "@/components/BotStatusIndicator";
 import { ControlPanel } from "@/components/ControlPanel";
 import { getDashboardData, toggleBot, updateRisk, saveBrokerCredentials } from "@/lib/nexquant.functions";
+import { useMemo } from "react";
 
 const translations = {
   fr: {
@@ -169,11 +168,45 @@ function Dashboard() {
   const first = equity[0];
   const pnlTotal = last && first ? last.equity - first.equity : 0;
   const pnlPct = last && first ? ((last.equity - first.equity) / first.equity) * 100 : 0;
-  const day = equity.length >= 2 ? equity[equity.length - 1].equity - equity[equity.length - 2].equity : 0;
-  const dayPct = equity.length >= 2 ? (day / equity[equity.length - 2].equity) * 100 : 0;
-  const maxDd = equity.reduce((m, p) => Math.max(m, p.drawdown), 0);
+  const maxDd = equity.reduce((m: number, p: {drawdown: number}) => Math.max(m, p.drawdown), 0);
 
-  const openTotal = data.openPositions.reduce((s, p) => s + Number(p.pnl), 0);
+  const openTotal = data.openPositions.reduce((s: number, p: {pnl: unknown}) => s + Number(p.pnl), 0);
+
+  // BUG-D03 FIX: Trouver le snapshot le plus proche de il y a 24h au lieu d'utiliser
+  // les 2 derniers points (qui peuvent être séparés de 15 minutes seulement)
+  const target24h = Date.now() - 86400000;
+  const snap24h = equity.reduce((best: typeof equity[0] | null, p: typeof equity[0]) => {
+    if (!best) return p;
+    return Math.abs(new Date(p.ts).getTime() - target24h) <
+           Math.abs(new Date(best.ts).getTime() - target24h) ? p : best;
+  }, null as typeof equity[0] | null);
+  const day = last && snap24h ? last.equity - snap24h.equity : 0;
+  const dayPct = last && snap24h && snap24h.equity > 0
+    ? (day / snap24h.equity) * 100 : 0;
+
+  // BUG-D10 FIX: Factoriser le calcul isRed avec useMemo (avant dupliqué ~40 lignes x2)
+  const isRedArray = useMemo(() => {
+    const N = equity.length;
+    const isRed = new Array(N).fill(false);
+    if (N > 1) {
+      let runStart = -1;
+      for (let i = 1; i < N; i++) {
+        const isDown = equity[i].equity < equity[i - 1].equity;
+        if (isDown) {
+          if (runStart === -1) runStart = i;
+        } else {
+          if (runStart !== -1) {
+            if (i - runStart >= 3) for (let k = runStart; k < i; k++) isRed[k] = true;
+            runStart = -1;
+          }
+        }
+      }
+      if (runStart !== -1 && N - runStart >= 3)
+        for (let k = runStart; k < N; k++) isRed[k] = true;
+    }
+    return isRed;
+  }, [equity]);
+
 
   return (
     <div className="min-h-screen">
@@ -231,84 +264,32 @@ function Dashboard() {
                 <AreaChart data={equity} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorEqStroke" x1="0" y1="0" x2="1" y2="0">
-                      {(() => {
-                        const stops = [];
-                        const N = equity.length;
-                        if (N > 1) {
-                          const isRed = new Array(N).fill(false);
-                          let runStart = -1;
-                          for (let i = 1; i < N; i++) {
-                            const isDown = equity[i].equity < equity[i - 1].equity;
-                            if (isDown) {
-                              if (runStart === -1) runStart = i;
-                            } else {
-                              if (runStart !== -1) {
-                                const runLength = i - runStart;
-                                if (runLength >= 3) {
-                                  for (let k = runStart; k < i; k++) isRed[k] = true;
-                                }
-                                runStart = -1;
-                              }
-                            }
-                          }
-                          if (runStart !== -1) {
-                            const runLength = N - runStart;
-                            if (runLength >= 3) {
-                              for (let k = runStart; k < N; k++) isRed[k] = true;
-                            }
-                          }
-
-                          for (let i = 1; i < N; i++) {
-                            const color = isRed[i] ? "#f87171" : "#34d399"; // red / green soft accents
-                            const offsetPrev = ((i - 1) / (N - 1)) * 100;
-                            const offsetCurr = (i / (N - 1)) * 100;
-                            stops.push(<stop key={`start-${i}`} offset={`${offsetPrev}%`} stopColor={color} />);
-                            stops.push(<stop key={`end-${i}`} offset={`${offsetCurr}%`} stopColor={color} />);
-                          }
-                        }
-                        return stops;
-                      })()}
+                      {/* BUG-D10 FIX: isRedArray factorisé, plus de code dupliqué */}
+                      {equity.length > 1 && equity.map((_: unknown, i: number) => {
+                        if (i === 0) return null;
+                        const color = isRedArray[i] ? "#f87171" : "#34d399";
+                        const offsetPrev = ((i - 1) / (equity.length - 1)) * 100;
+                        const offsetCurr = (i / (equity.length - 1)) * 100;
+                        return [
+                          <stop key={`s-${i}`} offset={`${offsetPrev}%`} stopColor={color} />,
+                          <stop key={`e-${i}`} offset={`${offsetCurr}%`} stopColor={color} />,
+                        ];
+                      })}
                     </linearGradient>
                     <linearGradient id="colorEqFill" x1="0" y1="0" x2="1" y2="0">
-                      {(() => {
-                        const stops = [];
-                        const N = equity.length;
-                        if (N > 1) {
-                          const isRed = new Array(N).fill(false);
-                          let runStart = -1;
-                          for (let i = 1; i < N; i++) {
-                            const isDown = equity[i].equity < equity[i - 1].equity;
-                            if (isDown) {
-                              if (runStart === -1) runStart = i;
-                            } else {
-                              if (runStart !== -1) {
-                                const runLength = i - runStart;
-                                if (runLength >= 3) {
-                                  for (let k = runStart; k < i; k++) isRed[k] = true;
-                                }
-                                runStart = -1;
-                              }
-                            }
-                          }
-                          if (runStart !== -1) {
-                            const runLength = N - runStart;
-                            if (runLength >= 3) {
-                              for (let k = runStart; k < N; k++) isRed[k] = true;
-                            }
-                          }
-
-                          for (let i = 1; i < N; i++) {
-                            const color = isRed[i] ? "#f87171" : "#34d399";
-                            const offsetPrev = ((i - 1) / (N - 1)) * 100;
-                            const offsetCurr = (i / (N - 1)) * 100;
-                            stops.push(<stop key={`start-${i}`} offset={`${offsetPrev}%`} stopColor={color} stopOpacity={0.2} />);
-                            stops.push(<stop key={`end-${i}`} offset={`${offsetCurr}%`} stopColor={color} stopOpacity={0.2} />);
-                          }
-                        }
-                        return stops;
-                      })()}
+                      {equity.length > 1 && equity.map((_: unknown, i: number) => {
+                        if (i === 0) return null;
+                        const color = isRedArray[i] ? "#f87171" : "#34d399";
+                        const offsetPrev = ((i - 1) / (equity.length - 1)) * 100;
+                        const offsetCurr = (i / (equity.length - 1)) * 100;
+                        return [
+                          <stop key={`sf-${i}`} offset={`${offsetPrev}%`} stopColor={color} stopOpacity={0.2} />,
+                          <stop key={`ef-${i}`} offset={`${offsetCurr}%`} stopColor={color} stopOpacity={0.2} />,
+                        ];
+                      })}
                     </linearGradient>
                   </defs>
+
                   <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="ts" tick={{ fontSize: 10, fill: "#71717a" }}
                     tickFormatter={(v) => new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
@@ -329,10 +310,11 @@ function Dashboard() {
             <ControlPanel
               initialIsRunning={running}
               onToggleStatus={async (r) => { await toggleMut.mutateAsync(r); }}
-              initialRiskPct={1.5}
+              initialRiskPct={((data.status ?? {}) as Record<string, unknown>).risk_pct as number ?? 1.5}
               onRiskChange={async (r) => { await riskMut.mutateAsync(r); }}
             />
           </section>
+
         </div>
 
         {/* Positions ouvertes */}

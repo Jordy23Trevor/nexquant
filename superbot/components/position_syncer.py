@@ -66,13 +66,18 @@ def sync_positions_with_broker(bot):
                                     trade_time = datetime.fromisoformat(trade_time.replace('Z', '+00:00'))
                                 if isinstance(pos_time, str):
                                     pos_time = datetime.fromisoformat(pos_time.replace('Z', '+00:00'))
-                                
-                                # Handle tzinfo difference
-                                if trade_time.tzinfo is None and pos_time.tzinfo is not None:
+
+                                # BUG-A08 FIX: Normaliser TOUJOURS les deux timestamps en UTC
+                                # pour éviter les TypeError aware vs naïves et les erreurs de comparaison
+                                if trade_time.tzinfo is None:
                                     trade_time = trade_time.replace(tzinfo=timezone.utc)
-                                elif trade_time.tzinfo is not None and pos_time.tzinfo is None:
+                                else:
+                                    trade_time = trade_time.astimezone(timezone.utc)
+                                if pos_time.tzinfo is None:
                                     pos_time = pos_time.replace(tzinfo=timezone.utc)
-                                    
+                                else:
+                                    pos_time = pos_time.astimezone(timezone.utc)
+
                                 if trade_time >= pos_time:
                                     matching_trade = t
                                     break
@@ -122,6 +127,17 @@ def sync_positions_with_broker(bot):
                     }
                     trade_record.update(features_at_open)
                     bot.risk_manager.record_trade(trade_record)
+
+                    # BUG-A03 FIX: Mettre à jour daily_pnl et monthly_pnl immédiatement après la clôture.
+                    # Sans ce fix, _can_take_new_trade() utilise des valeurs périmées pendant tout
+                    # le cycle suivant et peut laisser passer un trade alors que la limite est atteinte.
+                    try:
+                        new_balance = float(bot.broker.get_balance())
+                        bot.risk_manager.update_account_balance(new_balance)
+                        bot._cached_balance = new_balance
+                        log.debug(f"[BUG-A03] Solde mis à jour post-clôture {symbol}: {new_balance:.2f}")
+                    except Exception as _e:
+                        log.debug(f"[BUG-A03] Impossible de rafraîchir le solde post-clôture: {_e}")
 
                     # 🧠 V3 : Apprentissage en ligne
                     if getattr(bot, 'online_learner', None):

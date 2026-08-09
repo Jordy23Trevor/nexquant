@@ -78,6 +78,9 @@ from superbot.config import (
     TRAIL_ATR_MULT, BE_ATR_MULT, MIN_POSITION_SIZE, MAX_POSITION_SIZE,
     COOLDOWN_SECONDS,  # ✅ BUG FIX #5
     MAX_FOREX_CURRENCY_EXPOSURE, MAX_SPREAD_PIPS, BE_DYN_RR, BE_DYN_RR_RATIO,
+    # BUG-03/15 FIX: Importer MAX_DAILY_LOSS_AMOUNT et les seuils de drawdown
+    MAX_DAILY_LOSS_AMOUNT,
+    DRAWDOWN_THRESH_1, DRAWDOWN_THRESH_2, DRAWDOWN_REDUCE_5PCT, DRAWDOWN_REDUCE_10PCT,
 
     
     # Strategy / Indicators
@@ -577,9 +580,10 @@ class SuperBot:
             actual_min_pos = float(env_min_pos) if env_min_pos else default_min_pos
             actual_max_pos = float(env_max_pos) if env_max_pos else default_max_pos
 
-            # Déterminer le nombre maximum de positions selon le broker
-            broker_type = BROKER_TYPE
-            max_pos_key = f"MAX_OPEN_POSITIONS_{broker_type.upper()}"
+            # BUG-06 FIX: Utiliser active_broker_type (peut être mis à jour depuis le cloud)
+            # au lieu de la constante globale BROKER_TYPE (fixée au démarrage)
+            active_broker_type = getattr(self, '_active_broker_type', BROKER_TYPE)
+            max_pos_key = f"MAX_OPEN_POSITIONS_{active_broker_type.upper()}"
             env_max_pos_broker = os.getenv(max_pos_key)
             if env_max_pos_broker:
                 try:
@@ -606,6 +610,13 @@ class SuperBot:
                 'MIN_POSITION_SIZE': actual_min_pos,
                 'MAX_POSITION_SIZE': actual_max_pos,
                 'COOLDOWN_SECONDS': COOLDOWN_SECONDS,  # ✅ BUG FIX #5
+                # BUG-03 FIX: Passer MAX_DAILY_LOSS_AMOUNT pour activer le hard cap absolu
+                'MAX_DAILY_LOSS_AMOUNT': MAX_DAILY_LOSS_AMOUNT,
+                # Phase 3 §3 — Drawdown protection thresholds
+                'DRAWDOWN_THRESH_1': DRAWDOWN_THRESH_1,
+                'DRAWDOWN_THRESH_2': DRAWDOWN_THRESH_2,
+                'DRAWDOWN_REDUCE_5PCT': DRAWDOWN_REDUCE_5PCT,
+                'DRAWDOWN_REDUCE_10PCT': DRAWDOWN_REDUCE_10PCT,
             })
             log.info("Gestionnaire de risques initialisé")
 
@@ -915,7 +926,16 @@ class SuperBot:
 
         # Fermer les connexions du broker
         try:
-            log.info("Connexions broker fermées")
+            # BUG-17 FIX: Appeler disconnect() explicitement pour libérer la connexion broker
+            # (MT5 maintient une connexion COM qui reste ouverte si on ne la ferme pas)
+            if hasattr(self.broker, 'disconnect'):
+                self.broker.disconnect()
+                log.info("Connexions broker fermées")
+            elif hasattr(self.broker, 'close'):
+                self.broker.close()
+                log.info("Connexions broker fermées")
+            else:
+                log.info("Connexions broker fermées (pas de méthode explicite)")
         except Exception as e:
             log.error(f"Erreur lors de la fermeture des connexions broker : {e}")
 
@@ -933,6 +953,16 @@ class SuperBot:
                 log.info("KnowledgeFeeder arrêté")
             except Exception as e:
                 log.debug(f"Erreur arrêt KnowledgeFeeder: {e}")
+
+        # BUG-14 FIX: Forcer la sauvegarde du modèle ML avant fermeture DB
+        # Le modèle ne se sauvegarde que toutes les 50 trades — sans ce flush(),
+        # les apprentissages des 49 derniers trades sont perdus à l'arrêt.
+        if getattr(self, 'online_learner', None):
+            try:
+                self.online_learner.flush()
+                log.info("🧠 OnlineLearner sauvegardé à l'arrêt")
+            except Exception as e:
+                log.debug(f"Erreur flush OnlineLearner: {e}")
 
         if getattr(self, 'db', None):
             try:
@@ -1117,7 +1147,17 @@ class SuperBot:
                         regime_result = self.regime_detector.detect(
                             df_with_indicators, symbol=symbol, asset_class=asset_class, store_in_db=False
                         )
+                        # BUG-18 FIX: Stocker le label HMM BRUT séparément de market_regime
+                        # BUG-A02 FIX: Ne PAS écraser hmm_label déjà défini par strategy.analyze_market()
+                        # strategy.py injecte le label HMM brut ('HIGH_VOL_RANGE', 'LOW_VOL_TREND')
+                        # que stop_manager et position_sizer utilisent pour les multiplicateurs ATR.
+                        # Le brain V3 retourne 'high_volatility'/'ranging' — format incompatible.
+                        # On stocke le brain V3 séparément dans 'brain_regime'.
+                        signal_data['brain_regime'] = regime_result.regime  # label brain V3 (ex: 'high_volatility')
                         signal_data['market_regime'] = regime_result.regime
+                        # hmm_label : ne mettre à jour que si non encore défini par la strategy
+                        if 'hmm_label' not in signal_data or signal_data.get('hmm_label') in ('UNKNOWN', '', None):
+                            signal_data['hmm_label'] = regime_result.regime
                         signal_data['regime_confidence'] = regime_result.confidence
                         signal_data['regime_risk_mult'] = self.regime_detector.get_risk_multiplier(regime_result.regime)
 

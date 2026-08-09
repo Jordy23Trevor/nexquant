@@ -394,9 +394,13 @@ class MarketRegimeDetector:
             }
 
         self._state_labels = {}
-        
-        if len(state_stats) < 4:
-            # Fallback en cas de non convergence sur 4 états (ex: peu de données)
+
+        # BUG-A12 FIX: Vérifier les états SANS observations (count=0), pas juste le nombre de clés
+        # Le dict a toujours 4 entrées (0 à N_STATES-1), mais certaines peuvent avoir count=0
+        empty_states = [s for s, st in state_stats.items() if st.get('count', 0) == 0]
+        if empty_states:
+            # Fallback si certains états n'ont pas d'observations (modèle mal convergé)
+            log.warning(f"[HMM] États sans observations: {empty_states} — fallback labels génériques")
             for s in state_stats:
                 self._state_labels[s] = f"STATE_{s}"
             return

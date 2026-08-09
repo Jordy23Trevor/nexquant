@@ -210,6 +210,16 @@ MAX_MONTHLY_LOSS_PCT = float(os.getenv("MAX_MONTHLY_LOSS_PCT", "6.0"))  # Max mo
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "6"))  # Max concurrent positions across fleet
 
 # =============================================================================
+# 🗡️ PROTECTION PAR DRAWDOWN (Phase 3 §3)
+# =============================================================================
+# Seuils de drawdown (en %) déclenchant la réduction progressive du risque par trade.
+# BUG-15 FIX: Ces variables étaient dans __all__ mais pas définies dans config.py.
+DRAWDOWN_THRESH_1       = float(os.getenv("DRAWDOWN_THRESH_1",       "5.0"))   # % DD niveau 1
+DRAWDOWN_THRESH_2       = float(os.getenv("DRAWDOWN_THRESH_2",       "10.0"))  # % DD niveau 2
+DRAWDOWN_REDUCE_5PCT    = float(os.getenv("DRAWDOWN_REDUCE_5PCT",    "0.20"))  # -20% risque à 5% DD
+DRAWDOWN_REDUCE_10PCT   = float(os.getenv("DRAWDOWN_REDUCE_10PCT",   "0.50"))  # -50% risque à 10% DD
+
+# =============================================================================
 # 🌙 PROTECTION NOCTURNE (Recommandation #3 — post-analyse Mer-Ven 22-24/07)
 # =============================================================================
 # Limite de positions ouvertes en session nocturne (heure UTC)

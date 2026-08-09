@@ -121,7 +121,8 @@ def run_main_loop(bot):
     # ─────────────────────────────────────────────────────────────────────────
 
     while bot.running and not bot.shutdown_event.is_set():
-        cycle_start_time = time.time()
+        cycle_start = time.time()
+        now_time = time.time()
 
         try:
             # ── Heartbeat watchdog ────────────────────────────────────────────
@@ -130,7 +131,8 @@ def run_main_loop(bot):
             bot._last_cycle_heartbeat = time.time()
             # ─────────────────────────────────────────────────────────────────
 
-            # Réinitialiser le cache des données de marché pour ce cycle
+            # BUG-A11 FIX: Réinitialiser tous les caches de données à chaque cycle
+            # Sans ce reset, _fetch_market_data retourne les données stales du cycle précédent
             bot._market_data_cache = {}
             bot._indicators_cache = {}
             bot._strategy_cache = {}
@@ -162,7 +164,14 @@ def run_main_loop(bot):
                     
                     threading.Thread(target=walk_forward_task, daemon=True).start()
             # 📡 TÉLÉMÉTRIE CLOUD : Synchronisation et heartbeat (fréquence réduite)
-            if bot.telemetry.enabled and (now_time - bot._last_cloud_sync >= bot.CLOUD_SYNC_INTERVAL):
+            # BUG-11 FIX: Utiliser getattr pour éviter AttributeError si l'attribut n'est pas encore initialisé
+            _last_cloud_sync = getattr(bot, '_last_cloud_sync', 0.0)
+            if bot.telemetry.enabled and (now_time - _last_cloud_sync >= bot.CLOUD_SYNC_INTERVAL):
+                # BUG-I5 FIX: Mettre à jour _last_cloud_sync ICI (dans le thread principal) AVANT de lancer
+                # le thread de sync, pas à l'intérieur du thread. Sinon, si la réponse API prend plusieurs
+                # cycles (>15s), un nouveau thread de sync est lancé à chaque cycle → N threads parallèles.
+                bot._last_cloud_sync = now_time
+
                 def sync_config_task():
                     res = bot.telemetry.sync_config(current_version="v1.0.0")
                     if res:
@@ -185,8 +194,6 @@ def run_main_loop(bot):
                             log.info("▶️ Commande de REPRISE reçue depuis le Cloud.")
                             bot.is_paused = False
 
-                        bot._last_cloud_sync = now_time
-
                         if old_risk_pct != bot.adaptive_risk_pct or old_score_min != bot.adaptive_score_min:
                             log.info(f"Configuration cloud mise à jour : risque {old_risk_pct:.2f}% -> {bot.adaptive_risk_pct:.2f}%, score min {old_score_min:.1f} -> {bot.adaptive_score_min:.1f}")
 
@@ -200,7 +207,9 @@ def run_main_loop(bot):
                 )
             
             # 📡 TÉLÉMÉTRIE CLOUD : Envoi périodique des métriques du compte et des positions actives
-            if bot.telemetry.enabled and (now_time - bot._last_telemetry_push >= bot.TELEMETRY_INTERVAL):
+            # BUG-11 FIX: Utiliser getattr pour éviter AttributeError si l'attribut n'est pas encore initialisé
+            _last_telemetry_push = getattr(bot, '_last_telemetry_push', 0.0)
+            if bot.telemetry.enabled and (now_time - _last_telemetry_push >= bot.TELEMETRY_INTERVAL):
                 bot._last_telemetry_push = now_time
                 try:
                     acc_summary = bot.broker.get_account_summary()
@@ -276,7 +285,7 @@ def run_main_loop(bot):
 
             if bot.is_paused:
                 log.info("😴 Bot en pause. En attente du signal de démarrage depuis la plateforme web...")
-                cycle_duration = time.time() - cycle_start_time
+                cycle_duration = time.time() - cycle_start
                 if cycle_duration < target_cycle_time:
                     sleep_time = target_cycle_time - cycle_duration
                     slept = 0
@@ -451,7 +460,7 @@ def run_main_loop(bot):
             bot._detect_model_drift()
             bot._run_walk_forward_calibration()
 
-            cycle_duration = time.time() - cycle_start_time
+            cycle_duration = time.time() - cycle_start
             
             # ── Phase 3.3 : Alimentation Prometheus ──────────────────────────────
             if getattr(bot, 'prometheus', None) and bot.prometheus.is_running:

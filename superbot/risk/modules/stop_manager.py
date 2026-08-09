@@ -111,9 +111,13 @@ def _check_trailing_stop(rm, symbol: str, position: Dict[str, Any], current_pric
         else:  # SHORT
             # Pour une position courte, le trailing stop descend quand le prix descend
             new_sl = current_price + (rm.TRAIL_ATR_MULT * atr_value)
-            # Ne jamais monter le stop loss pour une position courte
-            if new_sl < position.get('stop_loss', float('inf')) or position.get('stop_loss', 0) == 0:
-                old_sl = position.get('stop_loss', 0)
+            # BUG-10 FIX: Uniformiser le fallback — utiliser float('inf') uniquement
+            # Un stop_loss == 0 est invalide et doit être initialisé sans condition
+            current_sl = position.get('stop_loss', 0)
+            sl_not_set = (current_sl == 0 or current_sl is None)
+            # Ne jamais monter le stop loss pour une position courte (new_sl doit être < current_sl)
+            if sl_not_set or new_sl < current_sl:
+                old_sl = current_sl
                 position['stop_loss'] = new_sl
                 log.info(f"Trailing stop mis à jour pour {symbol} (SHORT): {old_sl:.4f} -> {new_sl:.4f}")
 
@@ -169,7 +173,9 @@ def _check_break_even(rm, symbol: str, position: Dict[str, Any], current_price: 
                 else:
                     log.info(f"Break-even activé pour {symbol} (LONG) mais le trailing stop actuel ({old_sl:.4f}) est meilleur que BE ({new_sl:.4f})")
             else:  # SHORT
-                old_sl = position.get('stop_loss', float('inf'))
+                # BUG-A06 FIX: Utiliser `or float('inf')` car position.get('stop_loss', float('inf'))
+                # retourne 0 si la clé existe avec valeur 0 — le break-even ne s'activerait jamais
+                old_sl = position.get('stop_loss') or float('inf')
                 new_sl = position['entry_price'] * 0.9995  # Légèrement en-dessous pour couvrir les frais
                 if new_sl < old_sl or old_sl == 0:
                     position['stop_loss'] = new_sl

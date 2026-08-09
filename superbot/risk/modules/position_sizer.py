@@ -17,6 +17,7 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
     Calcule la taille de position optimale basée sur le risque, Kelly, et divers facteurs.
 
     Args:
+        rm: Instance du RiskManager
         account_balance: Solde du compte
         entry_price: Prix d'entrée proposé
         stop_loss: Niveau de stop loss proposé
@@ -27,13 +28,6 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
         broker: Instance du courtier actif
         hmm_regime: Label du régime HMM (ex: 'HIGH_VOL_RANGE', 'TRENDING')
                     Utilisé pour la Phase 3 §1 — dimensionnement dynamique par régime.
-        entry_price: Prix d'entrée proposé
-        stop_loss: Niveau de stop loss proposé
-        symbol: Symbole de l'instrument
-        sentiment_factor: Facteur de sentiment des nouvelles (0-2, où 1 = neutre)
-        volatility_data: Données de volatilité pour ajustement
-        correlation_data: Données de corrélation pour ajustement de portefeuille
-        broker: Instance du courtier actif
 
     Returns:
         Tuple de (taille_de_position, détails_du_calcul)
@@ -266,7 +260,8 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
             'free_margin': free_margin,
             'leverage': leverage,
             'max_size_by_margin': max_size_by_margin,
-            'timestamp': datetime.now().isoformat()
+            # BUG-A09 FIX: Utiliser datetime.now(timezone.utc) pour cohérence timezone
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
         position_size = float(position_size)

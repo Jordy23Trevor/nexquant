@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Play, Square, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +20,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const [isRunning, setIsRunning] = useState(initialIsRunning);
   const [risk, setRisk] = useState(initialRiskPct);
   const [loading, setLoading] = useState(false);
+
+  // BUG-D04 FIX: Resynchroniser l'état local si le serveur rapporte un changement
+  // (ex: bot crashé, arrêté depuis un autre onglet, ou refetch de 15s)
+  useEffect(() => { setIsRunning(initialIsRunning); }, [initialIsRunning]);
+  useEffect(() => { setRisk(initialRiskPct); }, [initialRiskPct]);
 
   const handleToggle = async () => {
     setLoading(true);

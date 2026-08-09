@@ -19,8 +19,9 @@ def record_trade(rm, trade_record: Dict[str, Any]):
     """
     try:
         # Ajouter un timestamp de clôture si pas présent
+        # BUG-A13 FIX: Utiliser datetime.now(timezone.utc) pour cohérence timezone
         if 'timestamp' not in trade_record:
-            trade_record['timestamp'] = datetime.now().isoformat()
+            trade_record['timestamp'] = datetime.now(timezone.utc).isoformat()
         # S'assurer que le timestamp est une string pour la sérialisation JSON
         elif isinstance(trade_record['timestamp'], datetime):
             trade_record['timestamp'] = trade_record['timestamp'].isoformat()
@@ -44,15 +45,18 @@ def record_trade(rm, trade_record: Dict[str, Any]):
                 rm.consecutive_losses[symbol] = 0
                 log.debug(f"📈 Gain enregistré pour {symbol}. Réinitialisation de la série de pertes.")
             # ✅ BUG FIX #5 — Enregistrer l'heure de clôture pour le cooldown
-            rm.last_trade_close_time[symbol] = datetime.now()
+            # BUG-01 FIX: Utiliser datetime.now(timezone.utc) pour cohérence avec le cooldown check
+            rm.last_trade_close_time[symbol] = datetime.now(timezone.utc)
 
-        # Écrire dans le fichier JSON Lines
-        from superbot.config import TRADE_LOG_FILE
-        trades_file = str(TRADE_LOG_FILE)
-        log_dir = os.path.dirname(trades_file)
-        os.makedirs(log_dir, exist_ok=True)
-        with open(trades_file, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(trade_record, ensure_ascii=False, default=str) + '\n')
+        # BUG-09 FIX: Écrire dans le fichier JSON Lines UNIQUEMENT pour les trades clôturés
+        # Les trades ouverts ne doivent pas polluer le fichier JSONL
+        if is_closed:
+            from superbot.config import TRADE_LOG_FILE
+            trades_file = str(TRADE_LOG_FILE)
+            log_dir = os.path.dirname(trades_file)
+            os.makedirs(log_dir, exist_ok=True)
+            with open(trades_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(trade_record, ensure_ascii=False, default=str) + '\n')
 
         log.debug(f"Trade enregistré: {trade_record.get('symbol', 'Unknown')} | P&L: {trade_record.get('pnl', 0):.2f}")
 

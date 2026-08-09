@@ -51,8 +51,14 @@ def _can_take_new_trade(rm, account_balance: float, symbol: str = "") -> bool:
         return False
 
     # ✅ BUG FIX #5 — Cooldown : vérifier le délai depuis la dernière clôture sur ce symbole
+    # BUG-01 FIX: Utiliser datetime.now(timezone.utc) pour éviter TypeError avec datetime naïf/aware mélangés
     if symbol and symbol in rm.last_trade_close_time:
-        elapsed = (datetime.now() - rm.last_trade_close_time[symbol]).total_seconds()
+        last_close = rm.last_trade_close_time[symbol]
+        now_utc = datetime.now(timezone.utc)
+        # Rendre cohérent si last_close est naïf (ancienne données)
+        if last_close.tzinfo is None:
+            last_close = last_close.replace(tzinfo=timezone.utc)
+        elapsed = (now_utc - last_close).total_seconds()
         if elapsed < rm.COOLDOWN_SECONDS:
             remaining_min = (rm.COOLDOWN_SECONDS - elapsed) / 60
             log.info(f"Cooldown actif pour {symbol} : {remaining_min:.0f}min restantes avant prochain trade autorisé")
@@ -117,10 +123,12 @@ def get_risk_metrics(rm, account_balance: float = 0.0) -> Dict[str, Any]:
     try:
         if account_balance <= 0:
             account_balance = getattr(rm, 'starting_balance', 10000.0)
-        # Calculer le drawdown
-        peak_balance = max([rm.starting_balance] +
-                         [t.get('balance_after', rm.starting_balance) for t in rm.trade_history if 'balance_after' in t] +
-                         [account_balance])
+        # BUG-07 FIX: Filtrer les None dans balance_after pour éviter drawdown artificiel
+        balance_after_values = [
+            t['balance_after'] for t in rm.trade_history
+            if t.get('balance_after') is not None and isinstance(t['balance_after'], (int, float))
+        ]
+        peak_balance = max([rm.starting_balance] + balance_after_values + [account_balance])
         drawdown = peak_balance - account_balance
         drawdown_pct = (drawdown / peak_balance) * 100 if peak_balance > 0 else 0
 
@@ -169,11 +177,12 @@ def get_risk_metrics(rm, account_balance: float = 0.0) -> Dict[str, Any]:
             'losing_trades': len(losing_trades),
             'current_risk_pct': current_risk_pct,
             'kelly_fraction': rm._calculate_kelly_fraction(),
-            'timestamp': datetime.now().isoformat()
+            # BUG-13 FIX: Utiliser datetime.now(timezone.utc) pour cohérence timezone
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
         return metrics
 
     except Exception as e:
         log.error(f"Erreur lors du calcul des métriques de risque: {e}")
-        return {'error': str(e), 'timestamp': datetime.now().isoformat()}
+        return {'error': str(e), 'timestamp': datetime.now(timezone.utc).isoformat()}

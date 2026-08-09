@@ -248,19 +248,37 @@ class SessionManager:
     # API PUBLIQUE
     # ─────────────────────────────────────────────────────────────────────────
     
-    def reset_daily(self, balance: float):
-        """Réinitialise les compteurs journaliers (appelé à minuit)."""
+    def reset_daily(self, balance_start: float = 0.0):
+        """
+        Reset journalier — appelé à minuit UTC.
+
+        BUG-A01 FIX: Il y avait deux définitions de reset_daily() (L251 et L356).
+        La seconde écrasait la première silencieusement en Python. Cette version
+        unique combine les deux comportements : reset des compteurs de session
+        ET mise à jour de daily_target_eur via _compute_daily_target().
+        """
         with self._lock:
+            # Reset PnL et compteurs (ancienne version L356)
+            self._daily_pnl_start = balance_start
             self._daily_pnl = 0.0
-            self._daily_pnl_start = balance
-            self.daily_target_eur = self._compute_daily_target(balance)
-            log.info(f"🔄 SessionManager journalier réinitialisé | Nouveau target: {self.daily_target_eur:.2f}€")
-            # Enregistrer la cible dans la BD
-            if self._db:
-                try:
-                    self._db.set_daily_target(balance, self.daily_target_eur)
-                except Exception as e:
-                    log.debug(f"Erreur DB set_daily_target: {e}")
+            self._session_pnl = 0.0
+            self._session_trades = 0
+
+            # Recalculer l'objectif journalier (ancienne version L251)
+            self.daily_target_eur = self._compute_daily_target(balance_start)
+
+        if self._db:
+            try:
+                self._db.set_daily_target(balance_start, self.daily_target_eur)
+            except Exception as e:
+                log.debug(f"Erreur DB set_daily_target: {e}")
+
+        log.info(
+            f"📅 Reset journalier | Solde={balance_start:.2f}€ | "
+            f"Target={self.daily_target_eur:.2f}€ | Session PnL reseté"
+        )
+
+
 
     def tick(self):
         """
@@ -353,25 +371,6 @@ class SessionManager:
             f"Daily={self._daily_pnl:+.2f}€"
         )
 
-    def reset_daily(self, balance_start: float = 0.0):
-        """Reset journalier — appelé à minuit UTC."""
-        with self._lock:
-            self._daily_pnl_start = balance_start
-            self._daily_pnl = 0.0
-            self._session_pnl = 0.0
-            self._session_trades = 0
-
-        # Créer l'objectif du jour adapté au solde
-        adapted_target = self._compute_daily_target(balance_start)
-        self.daily_target_eur = adapted_target
-
-        if self._db:
-            try:
-                self._db.set_daily_target(balance_start, adapted_target)
-            except Exception:
-                pass
-
-        log.info(f"📅 Reset journalier | Solde={balance_start:.2f}€ | Target={adapted_target:.2f}€")
 
     def _compute_daily_target(self, balance: float) -> float:
         """
@@ -409,24 +408,53 @@ class SessionManager:
         }
 
     def _apply_session_params_to_bot(self):
-        """Applique les paramètres de session au bot (si disponible)."""
+        """
+        Applique les paramètres de session au bot (si disponible).
+
+        BUG-A14 FIX: Cette méthode ne faisait que logger les paramètres sans les appliquer.
+        Les multiplicateurs de session (risk_multiplier, score_multiplier) sont maintenant
+        effectivement propagés au RiskManager et à la stratégie.
+        """
         if not self.bot:
             return
         try:
             session = self._current_session
-            # Adapter le score_min
-            base_score = getattr(self.bot, 'adaptive_score_min', 6)
-            adapted_score = self.get_adapted_score_min(base_score)
+            risk_mult = session.get('risk_multiplier', 1.0)
+            pos_ratio = session.get('max_positions_ratio', 1.0)
+
+            # Appliquer risk_multiplier au RiskManager
+            if hasattr(self.bot, 'risk_manager') and self.bot.risk_manager:
+                rm = self.bot.risk_manager
+                base_risk = getattr(rm, '_base_risk_pct', rm.RISK_PCT)
+                # Sauvegarder le risque de base une seule fois pour éviter la dérive
+                if not hasattr(rm, '_base_risk_pct'):
+                    rm._base_risk_pct = rm.RISK_PCT
+                rm.RISK_PCT = round(rm._base_risk_pct * risk_mult, 3)
+
+                # Adapter MAX_OPEN_POSITIONS selon la session
+                base_max = getattr(rm, '_base_max_positions', rm.MAX_OPEN_POSITIONS)
+                if not hasattr(rm, '_base_max_positions'):
+                    rm._base_max_positions = rm.MAX_OPEN_POSITIONS
+                rm.MAX_OPEN_POSITIONS = max(1, int(round(rm._base_max_positions * pos_ratio)))
+
+            # Adapter le score_min de la stratégie
+            adapted_score = None
             if hasattr(self.bot, 'strategy') and self.bot.strategy:
-                # On n'écrase pas, on notifie seulement via log
-                log.info(
-                    f"🎯 Paramètres session {self._current_session_name} : "
-                    f"score_min_adapté={adapted_score} | "
-                    f"risk×{session.get('risk_multiplier', 1.0):.1f} | "
-                    f"positions×{session.get('max_positions_ratio', 1.0):.1f}"
-                )
+                strat = self.bot.strategy
+                base_score = getattr(strat, '_base_score_min', getattr(strat, 'score_min', 6))
+                if not hasattr(strat, '_base_score_min'):
+                    strat._base_score_min = getattr(strat, 'score_min', 6)
+                score_mult = session.get('score_multiplier', 1.0)
+                adapted_score = max(base_score, int(round(base_score * score_mult)))
+                strat.score_min = adapted_score
+
+            log.info(
+                f"🎯 Paramètres session {self._current_session_name} appliqués : "
+                f"score_min={adapted_score} | risk×{risk_mult:.1f} | positions×{pos_ratio:.1f}"
+            )
         except Exception as e:
             log.debug(f"Erreur apply session params : {e}")
+
 
     def get_session_summary(self) -> str:
         """Retourne un résumé textuel de la session pour les logs."""

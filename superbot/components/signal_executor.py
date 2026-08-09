@@ -3,6 +3,13 @@ import time
 from datetime import datetime, timezone
 from superbot.config import MAX_SPREAD_PIPS, MAX_FOREX_CURRENCY_EXPOSURE, BROKER_TYPE
 
+# BUG-M3 FIX: Imports déplacés depuis la hot path (execute_signal_trade) vers le haut du fichier
+from superbot.risk.modules.risk_monitor import _is_night_session
+try:
+    from superbot.config import SCORE_MIN_NIGHT, NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC
+except ImportError:
+    SCORE_MIN_NIGHT, NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC = 8, 20, 6
+
 log = logging.getLogger("signal_executor")
 
 def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators):
@@ -68,11 +75,6 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     # 1b. Filtre de score nocturne (fix sur-exposition 23-24/07/2026) ─────────
     # En session nocturne (20h-06h UTC), exiger un score minimum plus élevé
     # pour éviter les entrées sur des signaux de qualité marginale.
-    from superbot.risk.modules.risk_monitor import _is_night_session
-    try:
-        from superbot.config import SCORE_MIN_NIGHT, NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC
-    except ImportError:
-        SCORE_MIN_NIGHT, NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC = 8, 20, 6
 
     if _is_night_session(NIGHT_SESSION_START_UTC, NIGHT_SESSION_END_UTC):
         current_score = signal_data.get('total_score', 0)
@@ -85,8 +87,20 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     # ─────────────────────────────────────────────────────────────────────────
 
     # 2. Récupérer le solde et le prix d'entrée
-    account_balance = float(bot.broker.get_balance())
-    bot._cached_balance = account_balance
+    # BUG-C2 FIX: get_balance() protégé contre les timeouts réseau/déconnexion broker.
+    # En cas d'échec, on utilise le cache du cycle précédent plutôt que de crasher tout le cycle.
+    try:
+        account_balance = float(bot.broker.get_balance())
+        if account_balance <= 0:
+            raise ValueError(f"Solde invalide reçu du broker: {account_balance}")
+        bot._cached_balance = account_balance
+    except Exception as e:
+        log.error(f"⚠️ [BUG-C2] get_balance() a échoué pour {symbol}: {e}")
+        account_balance = bot._cached_balance
+        if account_balance <= 0:
+            log.error(f"⚠️ [BUG-C2] Aucun solde disponible (cache vide). Trade {symbol} annulé.")
+            return
+        log.warning(f"↩️ [BUG-C2] Utilisation du solde cache: {account_balance:.2f} pour {symbol}")
     entry_price = float(signal_data['entry_price'])
 
     # 2d. Filtres avancés Forex (Session, Spread, Corrélation, Pivots Obstacles, News)
@@ -179,6 +193,12 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         sl_price = signal_data.get('sl_price') or (entry_price * 0.98 if signal_data['should_long'] else entry_price * 1.02)
         tp_price = signal_data.get('tp_price') or (entry_price * 1.04 if signal_data['should_long'] else entry_price * 0.96)
 
+    # BUG-05 FIX: Vérifier les limites de risque AVANT le calcul de position size (corrélation + broker margin)
+    # Cela évite des appels API broker coûteux si le trade va être rejeté de toute façon.
+    if not bot.risk_manager._can_take_new_trade(account_balance, symbol):
+        log.info(f"Limites de risque ou limite par symbole atteintes, pas de nouvel ordre pour {symbol}")
+        return
+
     # ── Phase 3 §4 : Corrélation dynamique avancée ──
     # Bloquer ou réduire la taille si corrélation > 70% avec une position ouverte
     max_open_corr = 0.0
@@ -228,7 +248,12 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     # du risk management (le sizing final est toujours borné par la marge dispo).
     conviction_boost = 1.0
     score_raw_val = signal_data.get('total_score', 0)
-    score_min_val = signal_data.get('score_min', bot.strategy.score_min)
+    # BUG-I2 FIX: score_min peut être None si PerformanceLearner l'a modifié sans mettre à jour strategy.
+    # Fallback explicite sur 6 pour éviter TypeError dans la comparaison.
+    _raw_score_min = signal_data.get('score_min', None)
+    if _raw_score_min is None:
+        _raw_score_min = getattr(bot.strategy, 'score_min', None)
+    score_min_val = int(_raw_score_min) if _raw_score_min is not None else 6
     adx_val = float(df_with_indicators.iloc[-1].get('adx', 0))
     regime_val = signal_data.get('market_regime', '').upper()
 
@@ -261,8 +286,16 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
 
     # Appliquer le boost de conviction (après le calcul de base)
     if conviction_boost > 1.0 and position_size > 0:
+        size_before_boost = position_size
         boosted_size = position_size * conviction_boost
-        log.info(f"[ConvictionBoost] Taille {symbol} : {position_size:.6f} × {conviction_boost:.2f} = {boosted_size:.6f}")
+        # BUG-16 FIX: Le boost sera cappé par max_size_by_margin dans position_sizer
+        # On logue la taille demandée vs ce qui sera réellement appliqué après le sizing final
+        # BUG-A10 FIX: Re-capper après boost par MAX_POSITION_SIZE pour éviter les ordres surdimensionnés
+        boosted_size = min(boosted_size, bot.risk_manager.MAX_POSITION_SIZE)
+        log.info(
+            f"[ConvictionBoost] Taille {symbol} demandée : {size_before_boost:.6f} × {conviction_boost:.2f} = "
+            f"{boosted_size:.6f} (cappé à MAX_POSITION_SIZE={bot.risk_manager.MAX_POSITION_SIZE})"
+        )
         position_size = boosted_size
 
     log.info(f"Risk sizing {symbol}: size={position_size:.6f} | details={size_details}")
@@ -273,10 +306,8 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
 
     log.info(f"Taille de position calculée pour {symbol} : {position_size:.6f} | Risque : {size_details.get('actual_risk_pct', 0.0):.2f}% du compte")
 
-    # 4. Vérifier les limites de risque globales avant d'envoyer l'ordre
-    if not bot.risk_manager._can_take_new_trade(account_balance, symbol):
-        log.info(f"Limites de risque ou limite par symbole atteintes, pas de nouvel ordre pour {symbol}")
-        return
+    # 4. (Anciennement) Vérification des limites de risque globales — maintenant effectuée AVANT le sizing (BUG-05 FIX)
+    # La vérification a déjà eu lieu à la ligne 180, on ne la répète pas ici.
 
     # 5. Exécuter le trade chez le courtier
     side = "buy" if signal_data['should_long'] else "sell"

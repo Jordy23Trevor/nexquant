@@ -3329,9 +3329,13 @@ def create_dashboard_data_func(broker, strategy, risk_manager, news_manager,
 
                     # Régime de marché (dernier connu)
                     rd = getattr(bot, 'regime_detector', None)
-                    if rd and hasattr(rd, '_last_regime'):
-                        last_reg = rd._last_regime
-                        if last_reg:
+                    if rd and hasattr(rd, '_cache') and rd._cache:
+                        # Trouver le régime le plus récemment détecté parmi tous les symboles en cache
+                        recent_regs = list(rd._cache.values())
+                        if recent_regs:
+                            # Trie par date de détection (s'il y en a une), sinon on prend juste le dernier
+                            recent_regs.sort(key=lambda x: getattr(x, 'detected_at', ''), reverse=True)
+                            last_reg = recent_regs[0]
                             brain_data['regime'] = {
                                 'regime': last_reg.regime,
                                 'confidence': last_reg.confidence,
@@ -3354,9 +3358,11 @@ def create_dashboard_data_func(broker, strategy, risk_manager, news_manager,
                     pl = getattr(bot, 'performance_learner', None)
                     if pl:
                         brain_data['learner_params'] = pl.get_current_params()
+                        # Correction: _blocked_symbols n'est pas un attribut mais une méthode _get_blocked_symbols()
+                        blocked_syms = getattr(pl, '_get_blocked_symbols', lambda: set())()
                         brain_data['blocked_symbols'] = [
                             {'symbol': sym, 'reason': '3 pertes consécutives'}
-                            for sym in pl._blocked_symbols
+                            for sym in blocked_syms
                         ]
                         brain_data['recent_decisions'] = getattr(pl, '_decisions_log', [])
 

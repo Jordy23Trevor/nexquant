@@ -101,9 +101,22 @@ function AuthenticatedLayout() {
   });
 
   const running = data?.status?.is_running ?? false;
-  const trialEnd = data?.profile?.trial_end;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const profile = data?.profile as any;
+  const trialEnd = profile?.trial_end as string | undefined;
   const daysLeft = trialEnd ? Math.max(0, Math.ceil((new Date(trialEnd).getTime() - Date.now()) / (24 * 3600 * 1000))) : 0;
-  
+  // BUG-D09 FIX: Lire la latence depuis bot_status au lieu d'un '12ms' hardcodé
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cycleLatency = (data?.status as any)?.cycle_latency_ms;
+  const latencyLabel = cycleLatency != null ? `· ${Math.round(cycleLatency)}ms` : "";
+  // BUG-D12 FIX: Badge notification conditionnel sur erreurs récentes (< 30 min)
+  const recentErrors = (data?.logs ?? []).filter((l: { level: string; created_at: string }) => {
+    const isAlert = l.level === "error" || l.level === "warn";
+    const isRecent = (Date.now() - new Date(l.created_at).getTime()) < 30 * 60 * 1000;
+    return isAlert && isRecent;
+  });
+  const hasAlerts = recentErrors.length > 0;
+
   const t = translations[lang] || translations.fr;
 
   const TABS = [
@@ -167,14 +180,18 @@ function AuthenticatedLayout() {
 
           <Link to="/settings" className="relative cursor-pointer text-zinc-400 hover:text-zinc-200 transition">
             <Bell className="w-4 h-4" />
-            <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-indigo-500 border border-zinc-950"></span>
+            {/* BUG-D12 FIX: Badge conditionnel sur erreurs/warnings récents (< 30min) */}
+            {hasAlerts && (
+              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-indigo-500 border border-zinc-950"></span>
+            )}
           </Link>
           <div className={`flex items-center gap-1.5 text-[11px] font-medium ${running ? 'text-emerald-400' : 'text-zinc-500'}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${running ? 'bg-emerald-400' : 'bg-zinc-500'}`}></span>
-            Bot {running ? t.botActive : t.botInactive} {running && '· 12ms'}
+            {/* BUG-D09 FIX: latence dynamique depuis bot_status.cycle_latency_ms */}
+            Bot {running ? t.botActive : t.botInactive} {running && latencyLabel}
           </div>
           <div className="w-7 h-7 rounded-full bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-[11px] text-indigo-300 font-bold">
-            {data?.profile?.display_name?.charAt(0).toUpperCase() || 'U'}
+            {profile?.display_name?.charAt(0).toUpperCase() || 'U'}
           </div>
         </div>
       </div>

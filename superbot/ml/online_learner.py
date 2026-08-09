@@ -143,3 +143,33 @@ class OnlineLearner:
         except Exception as e:
             log.error(f"OnlineLearner.batch_train error: {e}")
             return False
+
+    def flush(self) -> bool:
+        """
+        Force la sauvegarde immédiate du modèle, quelle que soit la progression.
+
+        BUG-14 FIX: Le modèle était sauvegardé seulement toutes les 50 trades.
+        Si le bot s'arrête après 49 trades, tous les apprentissages sont perdus.
+        Appeler cette méthode dans SuperBot.stop() pour garantir la persistance.
+
+        Returns:
+            True si la sauvegarde a réussi
+        """
+        if self.scorer is None:
+            return False
+        if self._trades_since_save == 0:
+            log.debug("OnlineLearner.flush: aucun apprentissage non sauvegardé, rien à faire")
+            return True
+        with self._lock:
+            try:
+                self.scorer.save()
+                log.info(
+                    f"OnlineLearner.flush: modèle sauvegardé à l'arrêt "
+                    f"({self._trades_since_save} trades non sauvegardés persistance forcée) | "
+                    f"Total: {self._total_trades_learned} trades appris"
+                )
+                self._trades_since_save = 0
+                return True
+            except Exception as e:
+                log.error(f"OnlineLearner.flush error: {e}")
+                return False
