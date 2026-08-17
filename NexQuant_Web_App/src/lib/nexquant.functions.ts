@@ -125,14 +125,11 @@ export const getDashboardData = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
-    const [status, equity, openPositions, closedPositions, regime, logs, profile, userBroker] = await Promise.all([
+    const [status, equity, positions, regime, logs, profile, userBroker] = await Promise.all([
       supabase.from("bot_status").select("*").eq("user_id", userId).maybeSingle(),
       supabase.from("equity_snapshots").select("ts, equity, pnl_total, drawdown")
         .eq("user_id", userId).order("ts", { ascending: true }).limit(500),
-      supabase.from("positions").select("*").eq("user_id", userId).eq("status", "open")
-        .order("opened_at", { ascending: false }),
-      supabase.from("positions").select("*").eq("user_id", userId).eq("status", "closed")
-        .order("closed_at", { ascending: false }).limit(30),
+      supabase.from("positions").select("*").eq("user_id", userId),
       supabase.from("market_regime").select("*").eq("user_id", userId)
         .order("updated_at", { ascending: false }),
       supabase.from("bot_logs").select("*").eq("user_id", userId)
@@ -141,6 +138,9 @@ export const getDashboardData = createServerFn({ method: "GET" })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase as any).from("user_brokers").select("broker_type, asset_type").eq("user_id", userId).maybeSingle(),
     ]);
+
+    const openPositions = positions.data?.filter(p => p.status === 'open') || [];
+    const closedPositions = positions.data?.filter(p => p.status === 'closed').sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 50) || [];
 
     // BUG-D02 FIX: Vérifier les erreurs Supabase sur les requêtes critiques.
     // Sans ce check, les erreurs réseau ou RLS retournent data=null silencieusement.
@@ -174,17 +174,34 @@ export const getDashboardData = createServerFn({ method: "GET" })
   });
 
 
+import { startBotProcess, stopBotProcess } from "./bot_process_manager";
+
 export const toggleBot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) => z.object({ run: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const { data: existing } = await supabase.from("bot_status").select("*").eq("user_id", userId).maybeSingle();
     const patch = {
+      user_id: userId,
       is_running: data.run,
       last_heartbeat: new Date().toISOString(),
       ...(data.run ? { started_at: new Date().toISOString() } : {}),
+      broker_type: existing?.broker_type ?? "binance",
+      testnet: existing?.testnet ?? true,
     };
-    await supabase.from("bot_status").update(patch).eq("user_id", userId);
+    const { error } = await supabase.from("bot_status").upsert(patch, { onConflict: "user_id" });
+    if (error) {
+      console.error("[toggleBot] error:", error);
+      throw new Error(`Failed to toggle bot: ${error.message}`);
+    }
+
+    if (data.run) {
+      await startBotProcess();
+    } else {
+      await stopBotProcess();
+    }
+
     await supabase.from("bot_logs").insert({
       user_id: userId,
       level: data.run ? "success" : "warn",
@@ -202,10 +219,14 @@ export const updateRisk = createServerFn({ method: "POST" })
     // BUG-D01 FIX: Persister risk_pct dans bot_status pour que le bot Python le lise
     // L'ancienne ligne était commentée → le changement de risque était purement décoratif.
     // Cast en any: risk_pct sera ajouté via migration Supabase (pas encore dans les types générés)
+    const { data: existing } = await supabase.from("bot_status").select("*").eq("user_id", userId).maybeSingle();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase.from("bot_status") as any)
-      .update({ risk_pct: data.risk })
-      .eq("user_id", userId);
+    const { error } = await (supabase.from("bot_status") as any).upsert({
+      user_id: userId,
+      risk_pct: data.risk,
+      broker_type: existing?.broker_type ?? "binance",
+      testnet: existing?.testnet ?? true,
+    }, { onConflict: "user_id" });
 
     if (error) {
       console.error("[updateRisk] Erreur mise à jour risk_pct:", error.message);
@@ -216,6 +237,34 @@ export const updateRisk = createServerFn({ method: "POST" })
       level: "info",
       source: "control",
       message: `Risque modifié à ${data.risk}% (Pris en compte au prochain cycle)`,
+    });
+    return { ok: true };
+  });
+
+export const updateBrokerConfig = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ brokerType: z.string(), testnet: z.boolean() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const { data: existing } = await supabase.from("bot_status").select("*").eq("user_id", userId).maybeSingle();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from("bot_status") as any).upsert({
+      user_id: userId,
+      broker_type: data.brokerType,
+      testnet: data.testnet,
+      is_running: existing?.is_running ?? false,
+      risk_pct: existing?.risk_pct ?? 1.0,
+    }, { onConflict: "user_id" });
+
+    if (error) {
+      console.error("[updateBrokerConfig] Erreur mise à jour broker:", error.message);
+      throw new Error(`Impossible de sauvegarder le broker: ${error.message}`);
+    }
+    await supabase.from("bot_logs").insert({
+      user_id: userId,
+      level: "info",
+      source: "control",
+      message: `Broker changé pour ${data.brokerType} (${data.testnet ? "Testnet" : "Live"}). Pris en compte au prochain cycle.`,
     });
     return { ok: true };
   });

@@ -191,9 +191,8 @@ class MarketRegimeDetector:
         st_dir = self._safe_float(last, 'supertrend_direction', 0)
         volume = self._safe_float(last, 'volume', 0)
 
-        # Volume moyen sur 20 bougies
-        # BUG-I3 FIX: En Forex MT5, le volume est du tick-volume (souvent 0 ou incohérent).
-        # Si volume = 0 ou vol_avg < 1, on marque volume_factor = None pour ignorer les votes volume.
+        # Volume moyen sur 20 bougies. En Forex MT5, le volume est du tick-volume (souvent 0) :
+        # si volume = 0 ou vol_avg < 1, on ignore les votes volume.
         _vol_data_valid = False
         if 'volume' in df.columns:
             vol_avg = float(df['volume'].iloc[-20:].mean())
@@ -246,7 +245,6 @@ class MarketRegimeDetector:
             votes['ranging'] += 10
 
         # EMA Alignment (direction macro)
-        # BUG-M1 FIX: Clarification de l'expression pour une meilleure lisibilité
         if ema_trend > 0:
             factors['ema_aligned'] = (ema_fast > ema_slow) and (ema_slow > ema_trend)
         else:
@@ -300,9 +298,8 @@ class MarketRegimeDetector:
             votes['ranging'] += 15
             votes['pre_breakout'] += 5
 
-        # Volume spike
-        # BUG-I3 FIX: Ne voter que si les données de volume sont fiables.
-        # Forex MT5 tick-volume = 0 faisait voter 'ranging' à tort à chaque cycle.
+        # Volume spike — ne voter que si les données de volume sont fiables
+        # (le tick-volume Forex = 0 faisait voter 'ranging' à tort).
         factors['volume_factor'] = volume_factor if _vol_data_valid else None
         if _vol_data_valid:
             if volume_factor > thresholds['volume_spike']:

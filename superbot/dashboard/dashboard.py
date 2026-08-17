@@ -4,16 +4,35 @@ Fournit une interface web moderne et dynamique pour visualiser les métriques, p
 """
 
 import json
+import math
 import os
 import threading
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import logging
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 
 log = logging.getLogger("dashboard")
+
+
+def _is_displayable_closed_trade(trade: Dict[str, Any]) -> bool:
+    """Retourne True pour une clôture exploitable dans l'historique.
+
+    Les événements ``GHOST_CLEANUP`` sont des événements de synchronisation,
+    pas des trades clôturés : ils n'ont ni prix de sortie ni P&L. Les afficher
+    comme des trades créait les lignes à 50 000 / 0,00 visibles dans le dashboard.
+    """
+    if not isinstance(trade, dict) or trade.get("close_reason") == "GHOST_CLEANUP":
+        return False
+    try:
+        entry_price = float(trade.get("entry_price"))
+        exit_price = float(trade.get("exit_price"))
+        pnl = float(trade.get("pnl"))
+    except (TypeError, ValueError):
+        return False
+    return all(math.isfinite(value) for value in (entry_price, exit_price, pnl)) and entry_price > 0 and exit_price > 0
 
 
 def load_global_trades():
@@ -158,7 +177,10 @@ def load_global_trades():
             t['broker'] = infer_broker(symbol)
             
         if t.get('status') == 'closed':
-            closed_history.append(t)
+            # Ne jamais afficher les marqueurs de nettoyage comme des trades :
+            # ils n'ont pas de sortie ni de P&L réel.
+            if _is_displayable_closed_trade(t):
+                closed_history.append(t)
             key = (symbol, t.get('side'))
             if key in active_positions:
                 del active_positions[key]
@@ -169,7 +191,7 @@ def load_global_trades():
                 t_closed = dict(t)
                 t_closed['status'] = 'closed'
                 t_closed['pnl'] = t.get('pnl')  # None si pas de PnL
-                if t_closed.get('pnl') is not None:
+                if _is_displayable_closed_trade(t_closed):
                     closed_history.append(t_closed)
                 # Ne pas les ajouter dans active_positions
             else:
@@ -2543,16 +2565,21 @@ function buildSeries(rawData) {
     .map(c => ({ x: c.t, y: [parseFloat(c.o), parseFloat(c.h), parseFloat(c.l), parseFloat(c.c)] }));
 }
 
+function renderEmptyChart(message) {
+  const el = document.getElementById('nexchart');
+  if (chart) { try { chart.destroy(); } catch (_) {} chart = null; }
+  chartReady = false;
+  if (el) el.innerHTML = '<div class="empty">' + escapeHtml(message) + '</div>';
+}
+
 function renderChart(rawData, symbol) {
   if (typeof ApexCharts === 'undefined') {
-    document.getElementById('nexchart').innerHTML =
-      '<div class="empty">ApexCharts indisponible — vérifiez votre connexion.</div>';
+    renderEmptyChart('Graphique indisponible — vérifiez la connexion au fournisseur de graphiques.');
     return;
   }
   const seriesData = buildSeries(rawData);
   if (!seriesData.length) {
-    document.getElementById('nexchart').innerHTML =
-      '<div class="empty">En attente de données de marché pour ' + symbol + '…</div>';
+    renderEmptyChart(symbol ? 'En attente de données de marché pour ' + symbol + '…' : 'Aucune donnée de marché disponible.');
     return;
   }
 
@@ -3055,6 +3082,14 @@ async function fetchData() {
       if (needInit) activeSymbol = syms[0];
       renderSymbolTabs(syms);
       if (needInit || !chartReady) renderChart(md[activeSymbol], activeSymbol);
+    } else {
+      // Ne pas laisser le placeholder « Initialisation… » indéfiniment
+      // lorsque le broker n'a pas encore fourni de bougies.
+      cachedData = {};
+      activeSymbol = null;
+      const tabs = document.getElementById('sym-tabs');
+      if (tabs) tabs.innerHTML = '';
+      renderEmptyChart('Aucune donnée de marché disponible pour le moment.');
     }
 
     // ── Brain V3 data ──
@@ -3192,7 +3227,10 @@ class DashboardServer:
                                 dashboard_data_func=self.dashboard_data_func,
                                 **kwargs)
 
-        self.server = HTTPServer((self.host, self.port), handler_factory)
+        # Une requête broker lente ne doit pas bloquer l'affichage, le healthcheck
+        # ou les autres clients HTTP. HTTPServer traite sinon toutes les requêtes
+        # séquentiellement.
+        self.server = ThreadingHTTPServer((self.host, self.port), handler_factory)
         self.server_thread = threading.Thread(target=self._run_server, daemon=True)
         self.server_thread.start()
         self.running = True
@@ -3358,7 +3396,7 @@ def create_dashboard_data_func(broker, strategy, risk_manager, news_manager,
                     pl = getattr(bot, 'performance_learner', None)
                     if pl:
                         brain_data['learner_params'] = pl.get_current_params()
-                        # Correction: _blocked_symbols n'est pas un attribut mais une méthode _get_blocked_symbols()
+                        # _blocked_symbols est une méthode (_get_blocked_symbols()), pas un attribut.
                         blocked_syms = getattr(pl, '_get_blocked_symbols', lambda: set())()
                         brain_data['blocked_symbols'] = [
                             {'symbol': sym, 'reason': '3 pertes consécutives'}

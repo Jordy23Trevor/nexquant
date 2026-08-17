@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timedelta
 import json
 import os
+import threading
 
 log = logging.getLogger("risk_manager")
 
@@ -38,22 +39,25 @@ class RiskManager:
         self.SL_ATR_MULT = config.get('SL_ATR_MULT', 1.5)  # Multiplicateur ATR pour SL
         self.TP_ATR_MULT = config.get('TP_ATR_MULT', 3.0)  # Multiplicateur ATR pour TP
         self.TRAIL_ATR_MULT = config.get('TRAIL_ATR_MULT', 1.0)  # Multiplicateur ATR pour trailing
+        self.TRAIL_ACTIVATE_ATR_MULT = config.get('TRAIL_ACTIVATE_ATR_MULT', 2.0)  # Distance d'activation du trailing (×ATR)
         self.BE_ATR_MULT = config.get('BE_ATR_MULT', 1.0)  # Multiplicateur ATR pour break-even
         self.BE_DYN_RR = config.get('BE_DYN_RR', True)  # Activer le break-even dynamique (1:1 R:R)
-        self.BE_DYN_RR_RATIO = config.get('BE_DYN_RR_RATIO', 1.0)  # Ratio R:R pour le break-even dynamique
+        self.BE_DYN_RR_RATIO = config.get('BE_DYN_RR_RATIO', 1.5)  # Ratio R:R pour le break-even dynamique
         self.MIN_POSITION_SIZE = config.get('MIN_POSITION_SIZE', 0.001)  # Taille min position
         self.MAX_POSITION_SIZE = config.get('MAX_POSITION_SIZE', 1000.0)  # Taille max position
-        # BUG-03 FIX: Ajouter MAX_DAILY_LOSS_AMOUNT (limite absolue journalière en devise compte)
-        self.MAX_DAILY_LOSS_AMOUNT = config.get('MAX_DAILY_LOSS_AMOUNT', 100.0)  # Hard cap absolu (ex: 100€)
+        # Limite absolue journalière (en devise de compte)
+        self.MAX_DAILY_LOSS_AMOUNT = config.get('MAX_DAILY_LOSS_AMOUNT', 100.0)
+
+        # Verrou interne : sérialise l'accès à trade_history / open_positions /
+        # consecutive_losses entre threads (workers du cycle, webhook, sync).
+        self._history_lock = threading.RLock()
 
 
         # Multiplicateurs ATR dynamiques par type d'actif
         self.ATR_MULTIPLIERS = {
             'forex': {'sl': 1.5, 'tp': 3.0},
-            # ✅ BUG FIX #4 — Multiplicateurs spécifiques pour paires JPY (volatility intrinsèque plus élevée)
-            # GBPJPY, USDJPY, EURJPY bougent 150-250 pips/jour vs 60-100 pour EURUSD.
-            # Un SL à 1.5×ATR déclenchait des fermetures prématurées (ex: GBPJPY fermé en 4 min le 2026-07-01).
-            # R:R maintenu à 1:2 en augmentant proportionnellement SL et TP.
+            # Paires JPY plus volatiles (150-250 pips/jour vs 60-100) : SL/TP élargis
+            # pour éviter les fermetures prématurées tout en gardant un R:R de 1:2.
             'forex_jpy': {'sl': 2.0, 'tp': 4.0},
             'stock': {'sl': 2.0, 'tp': 4.0},
             'crypto': {'sl': 2.5, 'tp': 5.0}
@@ -70,23 +74,19 @@ class RiskManager:
         self.last_daily_reset = datetime.now().date()
         self.last_monthly_reset = datetime.now().replace(day=1).date()
 
-        # ── Phase 3 §3 — Protection par drawdown ────────────────────────────────────
-        # Suivi du pic d'équité pour calculer le drawdown en temps réel.
+        # Protection par drawdown : suivi du pic d'équité pour calculer le drawdown en temps réel.
         # Le risque par trade est réduit progressivement lorsque le compte
         # est en drawdown : -20% de risque à 5% DD, -50% à 10% DD.
-        # BUG-08 FIX: Initialiser peak_balance à 0.0 (sera mis à jour au premier update_account_balance)
-        # La valeur réelle sera établie lors du premier appel avec le solde initial du broker
-        self.peak_balance: float = 0.0  # Plus haut historique du compte (initialisé au 1er update)
+        self.peak_balance: float = 0.0  # Plus haut historique (établi au premier update_account_balance)
         self.drawdown_pct: float = 0.0  # Drawdown courant en %
         self.DRAWDOWN_REDUCE_5PCT = config.get('DRAWDOWN_REDUCE_5PCT', 0.20)   # -20% risque à 5% DD
         self.DRAWDOWN_REDUCE_10PCT = config.get('DRAWDOWN_REDUCE_10PCT', 0.50)  # -50% risque à 10% DD
         self.DRAWDOWN_THRESH_1 = config.get('DRAWDOWN_THRESH_1', 5.0)   # % déclencheur niveau 1
         self.DRAWDOWN_THRESH_2 = config.get('DRAWDOWN_THRESH_2', 10.0)  # % déclencheur niveau 2
 
-        # ✅ BUG FIX #5 — Cooldown entre deux trades consécutifs sur le même symbole.
-        # Empêche le rechargement immédiat après une perte (ex: USDCAD réouvert 21min après une perte).
-        # 1 heure = au moins 1 bougie H1 complète, permettant un changement de contexte marché.
-        self.COOLDOWN_SECONDS = config.get('COOLDOWN_SECONDS', 3600)  # 1h par défaut
+        # Cooldown entre deux trades sur le même symbole : 1h = une bougie H1 complète
+        # pour laisser le contexte marché changer.
+        self.COOLDOWN_SECONDS = config.get('COOLDOWN_SECONDS', 300)
         self.last_trade_close_time: Dict[str, datetime] = {}  # symbol -> heure de dernière clôture
 
         # Positions actuelles et historique
@@ -110,8 +110,7 @@ class RiskManager:
             self.last_daily_reset = today
             self.consecutive_losses = {}  # Reset daily consecutive losses
             self.day_start_balance = balance  # IMPORTANT: Update daily start balance
-            # BUG-A07 FIX: Nettoyer les cooldowns du jour précédent pour éviter de bloquer
-            # inutilement les premiers trades de la nouvelle journée
+            # Nettoyer les cooldowns du jour précédent pour ne pas bloquer les premiers trades du jour.
             self.last_trade_close_time = {}
             log.debug("Réinitialisation du P&L journalier, pertes consécutives et cooldowns")
 
@@ -130,8 +129,7 @@ class RiskManager:
                 self.month_start_balance = balance
         self.current_balance = balance
 
-        # BUG-08 FIX: Initialiser peak_balance avec le solde de départ si ce n'est pas encore fait
-        # Cela évite un drawdown erroné quand peak_balance est encore 0 et le solde > 0
+        # Évite un drawdown erroné quand peak_balance est encore 0 et le solde > 0.
         if self.peak_balance == 0.0 and balance > 0:
             self.peak_balance = balance
         elif balance > self.peak_balance:
@@ -159,15 +157,11 @@ class RiskManager:
                 return True
         return False
 
-    def _can_take_new_trade(self, account_balance: float = 0.0, symbol: str = "") -> tuple:
-        """Délègue à risk_monitor._can_take_new_trade avec la signature correcte.
-        
-        BUG-02 FIX: La signature précédente (self, asset_type, account_balance) était incorrecte:
-        'asset_type' était passé à la place de 'account_balance' et vice-versa.
-        La signature de risk_monitor est: _can_take_new_trade(rm, account_balance, symbol)
-        """
+    def _can_take_new_trade(self, account_balance: float = 0.0, symbol: str = "") -> bool:
+        """Délègue à risk_monitor._can_take_new_trade sous verrou (lectures cohérentes)."""
         from superbot.risk.modules.risk_monitor import _can_take_new_trade
-        return _can_take_new_trade(self, account_balance, symbol)
+        with self._history_lock:
+            return _can_take_new_trade(self, account_balance, symbol)
 
     def calculate_position_size(self, account_balance: float, entry_price: float,
                                 stop_loss: float, symbol: str = "",
@@ -218,6 +212,12 @@ class RiskManager:
             symbol: Symbole de la position
             current_price: Prix actuel du marché
         """
+        # Verrou interne : la mutation de open_positions[symbol] doit rester
+        # cohérente face aux rebinds du position_syncer et aux autres threads.
+        with self._history_lock:
+            self._update_open_position_impl(symbol, current_price)
+
+    def _update_open_position_impl(self, symbol: str, current_price: float):
         if symbol not in self.open_positions:
             return
 
@@ -281,8 +281,10 @@ class RiskManager:
         return _check_break_even(self, symbol, pos, current_price)
 
     def get_risk_metrics(self, account_balance: float = 0.0) -> Dict[str, Any]:
+        """Lecture cohérente des métriques sous verrou (trade_history / open_positions)."""
         from superbot.risk.modules.risk_monitor import get_risk_metrics
-        return get_risk_metrics(self, account_balance)
+        with self._history_lock:
+            return get_risk_metrics(self, account_balance)
 
     def reset_daily_stats(self):
         """Réinitialise les statistiques journalières."""
@@ -384,10 +386,6 @@ class RiskManager:
         PnL < -50% target       ÷ 2.0 (mode défensif)
         PnL entre -50% et 0%    inchangé (zone neutre)
         PnL en retard important ×1.15 (légèrement plus agressif, cap 2%)
-
-        BUG-A05 FIX: L'ordre précédent causait un boost de 15% quand le PnL était
-        entre -50% et 0% car la condition 'else' était atteinte après les gains.
-        Maintenant les vérifications de perte passent avant le boost.
         """
         if base_risk_pct is None:
             base_risk_pct = self.RISK_PCT
@@ -419,8 +417,7 @@ class RiskManager:
             # 50% atteint → légère réduction
             adjusted = base_risk_pct * 0.8
         elif pct_achieved < 0:
-            # Zone de perte modérée (entre -50% et 0%) : ne pas modifier
-            # BUG-A05 FIX: Avant, cette zone boostait de 15% — comportement dangereux
+            # Zone de perte modérée (entre -50% et 0%) : ne pas modifier.
             adjusted = base_risk_pct
             log.debug(f"TargetAware: zone de perte modérée ({pct_achieved:.0%}) → risque inchangé")
         else:

@@ -124,7 +124,7 @@ class TelemetryClient:
             self._telemetry_queue.put(None)
             self._worker_thread.join(timeout=2.0)
 
-    def push_heartbeat(self, is_running: bool, broker_type: str, testnet: bool) -> bool:
+    def push_heartbeat(self, is_running: bool, broker_type: str, testnet: bool, kelly_fraction: float = 0.0, news_sentiment: float = 0.0, fear_greed: float = 50.0, uptime_seconds: int = 0, regime: str = "", regime_confidence: float = 0.0, daily_achieved_eur: float = 0.0, daily_target_eur: float = 0.0, win_rate: float = 0.0, profit_factor: float = 1.0) -> bool:
         """Envoie un signal de présence (heartbeat) du bot de manière synchrone."""
         payload = {
             "kind": "heartbeat",
@@ -132,7 +132,17 @@ class TelemetryClient:
             "payload": {
                 "is_running": is_running,
                 "broker_type": broker_type,
-                "testnet": testnet
+                "testnet": testnet,
+                "kelly_fraction": float(kelly_fraction),
+                "news_sentiment": float(news_sentiment),
+                "fear_greed": float(fear_greed),
+                "uptime_seconds": int(uptime_seconds),
+                "regime": regime,
+                "regime_confidence": float(regime_confidence),
+                "daily_achieved_eur": float(daily_achieved_eur),
+                "daily_target_eur": float(daily_target_eur),
+                "win_rate": float(win_rate),
+                "profit_factor": float(profit_factor)
             }
         }
         res = self._post_immediate("ingest", payload)

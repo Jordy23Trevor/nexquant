@@ -85,17 +85,32 @@ export const Route = createFileRoute("/api/public/config")({
 
         try {
           // 4. Récupérer la configuration de trading du bot
-          const { data: botConfig } = await supabaseAdmin
-            .from("bot_config")
-            .select("risk_pct, score_min, is_running")
+          const { data: botStatus } = await supabaseAdmin
+            .from("bot_status")
+            .select("risk_pct, is_running, broker_type, testnet")
             .eq("user_id", user_id)
             .maybeSingle();
+
+          const activeBrokerType = botStatus?.broker_type ?? "binance";
+
+          const { data: botConfig } = await supabaseAdmin
+            .from("bot_config")
+            .select("score_min")
+            .eq("user_id", user_id)
+            .maybeSingle();
+
+          const combinedConfig = {
+            is_running: botStatus?.is_running ?? false,
+            risk_pct: botStatus?.risk_pct ?? 1.0,
+            score_min: botConfig?.score_min ?? 6.0,
+          };
 
           // 5. Récupérer le broker configuré et ses clés API associées
           const { data: userBroker } = await supabaseAdmin
             .from("user_brokers")
             .select("broker_type, encrypted_api_key, encrypted_api_secret, asset_type")
             .eq("user_id", user_id)
+            .eq("broker_type", activeBrokerType)
             .maybeSingle();
 
           // Déchiffrer les clés API à la volée avant transmission en mémoire
@@ -145,7 +160,7 @@ export const Route = createFileRoute("/api/public/config")({
           return json({
             ok: true,
             is_expired: false,
-            config: botConfig || { is_running: false, risk_pct: 1.0, score_min: 6.0 },
+            config: combinedConfig,
             broker: brokerData,
             update: {
               available: updateAvailable,

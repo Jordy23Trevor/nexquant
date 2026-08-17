@@ -46,10 +46,11 @@ class Trade:
     position_size: float    # En unités de base
     pnl: float              # PnL brut en devise de compte
     pnl_pct: float          # PnL en % du capital au moment de l'entrée
-    result: str             # 'TP' | 'SL' | 'BREAK_EVEN' | 'CLOSE_END'
+    result: str             # 'TP' | 'SL' | 'BREAK_EVEN' | 'TRAILING' | 'CLOSE_END'
     score: float            # Score de la stratégie au moment de l'entrée
     market_regime: str      # Régime de marché détecté
     commission: float       # Coûts de transaction payés
+    entry_details: Dict[str, Any] = field(default_factory=dict)  # Votes du score à l'entrée
 
     def is_winner(self) -> bool:
         return self.pnl > 0
@@ -140,13 +141,24 @@ class BacktestEngine:
     Moteur de simulation de trading réaliste sur données OHLCV historiques.
     """
 
+    # Coûts par défaut (commission % par côté, spread/slippage %) selon la classe d'actif.
+    # Forex (mt5) : commission faible mais spread réel non négligeable.
+    # Crypto (binance) : taker ~0.04%, slippage ~0.01%.
+    # Actions/ETF (alpaca) : commission ~0, spread serré.
+    _COST_DEFAULTS = {
+        'binance':  (0.04, 0.01),
+        'mt5':      (0.01, 0.02),
+        'alpaca':   (0.02, 0.01),
+        'yfinance': (0.04, 0.01),
+    }
+
     def __init__(
         self,
         df: pd.DataFrame,
         config: Dict[str, Any],
         initial_balance: float = 10_000.0,
-        commission_pct: float = 0.04,   # 0.04% par trade (Binance maker/taker moyen)
-        spread_pct: float = 0.01,        # 0.01% spread additionnel simulé
+        commission_pct: Optional[float] = None,  # % par côté ; défaut selon broker_type
+        spread_pct: Optional[float] = None,       # % spread/slippage additionnel simulé
         symbol: str = 'UNKNOWN',
         timeframe: str = '1h',
         broker_type: str = 'unknown',
@@ -156,8 +168,10 @@ class BacktestEngine:
             df             : DataFrame OHLCV complet (index DatetimeIndex)
             config         : Configuration de la stratégie (SCORE_MIN, RISK_PCT, etc.)
             initial_balance: Capital de départ en USD
-            commission_pct : Commission par trade en % (appliquer à l'entrée ET à la sortie)
-            spread_pct     : Spread additionnel simulé en %
+            commission_pct : Commission par trade en % (appliquer à l'entrée ET à la sortie).
+                             None = valeur par défaut selon broker_type.
+            spread_pct     : Spread additionnel simulé en %.
+                             None = valeur par défaut selon broker_type.
             symbol         : Nom de l'instrument (pour les rapports)
             timeframe      : Intervalle de temps (pour les rapports)
             broker_type    : Type de broker utilisé (pour les rapports)
@@ -165,8 +179,23 @@ class BacktestEngine:
         self.df = df.copy()
         self.config = config
         self.initial_balance = initial_balance
+
+        broker = (broker_type or 'unknown').lower()
+        default_comm, default_spread = self._COST_DEFAULTS.get(broker, (0.04, 0.01))
+        if commission_pct is None:
+            commission_pct = default_comm
+        if spread_pct is None:
+            spread_pct = default_spread
+
         self.commission_pct = commission_pct / 100.0
         self.spread_pct = spread_pct / 100.0
+        # Tampon de coût pour le break-even : couvre l'aller-retour (commission
+        # ×2) + spread, pour qu'une sortie BE soit au moins nulle. En live, le SL
+        # est déplacé à entry × 1.0005 (couvre les frais) — on reproduit cela ici
+        # au lieu de remonter le SL exactement à l'entrée (qui comptait le BE en
+        # perte à cause de la commission).
+        self.be_cost_buffer = 2 * self.commission_pct + self.spread_pct
+
         self.symbol = symbol
         self.timeframe = timeframe
         self.broker_type = broker_type
@@ -176,6 +205,9 @@ class BacktestEngine:
         self.tp_atr_mult = config.get('TP_ATR_MULT', 3.0)
         self.risk_pct = config.get('RISK_PCT', 1.0) / 100.0
         self.be_enabled = config.get('BE_DYN_RR', True)  # Break-even
+        self.be_rr_ratio = config.get('BE_DYN_RR_RATIO', 1.5)  # R:R de déclenchement du BE
+        self.trail_atr_mult = config.get('TRAIL_ATR_MULT', 1.5)  # Distance du trailing (×ATR)
+        self.trail_activate_atr = config.get('TRAIL_ACTIVATE_ATR_MULT', 2.0)  # Activation trailing (×ATR)
 
     def run(self, strategy, warmup_bars: int = 50) -> BacktestResults:
         """
@@ -190,10 +222,15 @@ class BacktestEngine:
         """
         log.info(f"[BacktestEngine] Démarrage : {self.symbol} | {len(self.df)} bougies | warmup={warmup_bars}")
 
-        # Pré-calculer tous les indicateurs une seule fois
+        # Pré-calculer tous les indicateurs une seule fois.
+        # Sûr (sans look-ahead) uniquement parce que les indicateurs utilisés par la
+        # stratégie sont CAUSALS (rolling/ewm sur le passé). Le seul indicateur
+        # non-causal historique (Ichimoku chikou = close.shift(-26)) a été corrigé
+        # en causale dans knowledge_base.calculate_ichimoku.
         df_full = strategy.indicators.calculate_all_indicators(self.df.copy())
 
-        # Override de calculate_all_indicators pour éviter le recalcul à chaque bougie
+        # Override de calculate_all_indicators pour éviter le recalcul à chaque bougie.
+        # Chaque tranche df_slice récupère les valeurs déjà calculées (fenêtre passée).
         original_calc = strategy.indicators.calculate_all_indicators
         strategy.indicators.calculate_all_indicators = lambda df_slice: df_full.loc[df_slice.index]
 
@@ -259,10 +296,13 @@ class BacktestEngine:
         entry_bar_idx = 0
         sl = 0.0
         tp = 0.0
+        initial_risk = 0.0
         be_triggered = False
+        trail_triggered = False
         position_size = 0.0
         entry_score = 0.0
         entry_regime = 'UNKNOWN'
+        entry_details: Dict[str, Any] = {}
 
         trades: List[Trade] = []
         equity_curve: List[float] = [self.initial_balance]
@@ -280,33 +320,62 @@ class BacktestEngine:
                 float_equity = balance
             equity_curve.append(float_equity)
 
-            # ── Gestion Break-Even (déplacer SL à l'entrée au R:R 1:1) ────────
-            if self.be_enabled and position is not None and not be_triggered:
-                risk = abs(entry_price - sl)
-                if position == 'LONG' and current_price >= entry_price + risk:
-                    sl = entry_price
+            # ── Gestion Break-Even (déplacer SL à l'entrée au R:R configuré) ──
+            # Le SL est placé légèrement au-delà de l'entrée (be_cost_buffer) pour
+            # couvrir les frais : une sortie BE est alors un petit gain, pas une perte.
+            if self.be_enabled and position is not None and not be_triggered and initial_risk > 0:
+                if position == 'LONG' and current_price >= entry_price + initial_risk * self.be_rr_ratio:
+                    sl = entry_price * (1 + self.be_cost_buffer)
                     be_triggered = True
-                    log.debug(f"[BE] LONG Break-Even déclenché à {current_price:.4f}")
-                elif position == 'SHORT' and current_price <= entry_price - risk:
-                    sl = entry_price
+                    log.debug(f"[BE] LONG Break-Even déclenché à {current_price:.4f} (SL={sl:.4f})")
+                elif position == 'SHORT' and current_price <= entry_price - initial_risk * self.be_rr_ratio:
+                    sl = entry_price * (1 - self.be_cost_buffer)
                     be_triggered = True
-                    log.debug(f"[BE] SHORT Break-Even déclenché à {current_price:.4f}")
+                    log.debug(f"[BE] SHORT Break-Even déclenché à {current_price:.4f} (SL={sl:.4f})")
+
+            # ── Trailing stop (activation à TRAIL_ACTIVATE_ATR_MULT × ATR) ────
+            if position is not None and self.trail_atr_mult > 0:
+                atr_val = bar.get('atr', 0)
+                if atr_val and atr_val > 0:
+                    if position == 'LONG':
+                        favorable = bar['high'] - entry_price
+                        if favorable >= self.trail_activate_atr * atr_val:
+                            new_sl = bar['high'] - self.trail_atr_mult * atr_val
+                            if new_sl > sl:
+                                sl = new_sl
+                                trail_triggered = True
+                                log.debug(f"[TRAIL] LONG SL -> {sl:.4f}")
+                    else:  # SHORT
+                        favorable = entry_price - bar['low']
+                        if favorable >= self.trail_activate_atr * atr_val:
+                            new_sl = bar['low'] + self.trail_atr_mult * atr_val
+                            if new_sl < sl:
+                                sl = new_sl
+                                trail_triggered = True
+                                log.debug(f"[TRAIL] SHORT SL -> {sl:.4f}")
 
             # ── Vérification sortie SL/TP ─────────────────────────────────────
+            # Ordre intra-bougie EXPLICITE : si SL et TP sont touchés dans la même
+            # bougie, on suppose le pire cas (SL en premier) — convention prudente.
             if position == 'LONG':
                 hit_sl = bar['low'] <= sl
                 hit_tp = bar['high'] >= tp
                 if hit_sl or hit_tp:
                     exit_price = sl if hit_sl else tp
-                    result_type = 'SL' if hit_sl else ('BREAK_EVEN' if be_triggered and hit_sl else 'TP')
                     if hit_tp:
                         result_type = 'TP'
+                    elif be_triggered:
+                        result_type = 'BREAK_EVEN'
+                    elif trail_triggered:
+                        result_type = 'TRAILING'
+                    else:
+                        result_type = 'SL'
                     trade = self._close_trade(
                         direction='LONG', entry_price=entry_price, exit_price=exit_price,
                         sl=sl, tp=tp, position_size=position_size,
                         entry_time=entry_time, exit_time=bar.name,
                         balance=balance, result=result_type,
-                        score=entry_score, regime=entry_regime,
+                        score=entry_score, regime=entry_regime, details=entry_details,
                         entry_bar=entry_bar_idx, exit_bar=i,
                     )
                     balance += trade.pnl - trade.commission
@@ -319,13 +388,20 @@ class BacktestEngine:
                 hit_tp = bar['low'] <= tp
                 if hit_sl or hit_tp:
                     exit_price = sl if hit_sl else tp
-                    result_type = 'SL' if hit_sl else 'TP'
+                    if hit_tp:
+                        result_type = 'TP'
+                    elif be_triggered:
+                        result_type = 'BREAK_EVEN'
+                    elif trail_triggered:
+                        result_type = 'TRAILING'
+                    else:
+                        result_type = 'SL'
                     trade = self._close_trade(
                         direction='SHORT', entry_price=entry_price, exit_price=exit_price,
                         sl=sl, tp=tp, position_size=position_size,
                         entry_time=entry_time, exit_time=bar.name,
                         balance=balance, result=result_type,
-                        score=entry_score, regime=entry_regime,
+                        score=entry_score, regime=entry_regime, details=entry_details,
                         entry_bar=entry_bar_idx, exit_bar=i,
                     )
                     balance += trade.pnl - trade.commission
@@ -357,9 +433,12 @@ class BacktestEngine:
                         position = 'LONG'
                         entry_time = bar.name
                         entry_bar_idx = i
+                        initial_risk = risk_per_unit
                         be_triggered = False
+                        trail_triggered = False
                         entry_score = signal.get('total_score', 0)
                         entry_regime = signal.get('market_regime', 'UNKNOWN')
+                        entry_details = signal.get('details', {}) or {}
 
                 elif signal.get('should_short'):
                     entry_price = current_price * (1 - self.spread_pct / 2)
@@ -372,9 +451,12 @@ class BacktestEngine:
                         position = 'SHORT'
                         entry_time = bar.name
                         entry_bar_idx = i
+                        initial_risk = risk_per_unit
                         be_triggered = False
+                        trail_triggered = False
                         entry_score = signal.get('total_score', 0)
                         entry_regime = signal.get('market_regime', 'UNKNOWN')
+                        entry_details = signal.get('details', {}) or {}
 
         # Fermer la position ouverte à la fin du backtest
         if position is not None:
@@ -385,7 +467,7 @@ class BacktestEngine:
                 sl=sl, tp=tp, position_size=position_size,
                 entry_time=entry_time, exit_time=final_bar.name,
                 balance=balance, result='CLOSE_END',
-                score=entry_score, regime=entry_regime,
+                score=entry_score, regime=entry_regime, details=entry_details,
                 entry_bar=entry_bar_idx, exit_bar=len(df_full) - 1,
             )
             balance += trade.pnl - trade.commission
@@ -397,7 +479,8 @@ class BacktestEngine:
         self, direction: str, entry_price: float, exit_price: float,
         sl: float, tp: float, position_size: float,
         entry_time, exit_time, balance: float, result: str,
-        score: float, regime: str, entry_bar: int, exit_bar: int,
+        score: float, regime: str, details: Optional[Dict[str, Any]] = None,
+        entry_bar: int = 0, exit_bar: int = 0,
     ) -> Trade:
         """Calcule le PnL et crée un objet Trade."""
         if direction == 'LONG':
@@ -427,6 +510,7 @@ class BacktestEngine:
             score=score,
             market_regime=regime,
             commission=commission,
+            entry_details=details or {},
         )
 
     # ─── Calcul des métriques ─────────────────────────────────────────────────

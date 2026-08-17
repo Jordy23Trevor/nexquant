@@ -13,8 +13,8 @@ const translations = {
     strategies: "Stratégies",
     billing: "Facturation",
     settings: "Paramètres",
-    botActive: "ACTIF",
-    botInactive: "INACTIF",
+    botActive: "Bot ACTIF",
+    botInactive: "Bot INACTIF",
     trialBanner: "Il reste {days} jours avant obligation de licence.",
     activateSub: "Activer un abonnement →"
   },
@@ -24,8 +24,8 @@ const translations = {
     strategies: "Strategies",
     billing: "Billing",
     settings: "Settings",
-    botActive: "ACTIVE",
-    botInactive: "INACTIVE",
+    botActive: "Bot ACTIVE",
+    botInactive: "Bot INACTIVE",
     trialBanner: "{days} days left before license is required.",
     activateSub: "Activate subscription →"
   },
@@ -35,8 +35,8 @@ const translations = {
     strategies: "Estrategias",
     billing: "Facturación",
     settings: "Configuración",
-    botActive: "ACTIVO",
-    botInactive: "INACTIVO",
+    botActive: "Bot ACTIVO",
+    botInactive: "Bot INACTIVO",
     trialBanner: "Quedan {days} días antes del requisito de licencia.",
     activateSub: "Activar suscripción →"
   }
@@ -56,21 +56,17 @@ function AuthenticatedLayout() {
   const loc = useLocation();
   const fetchData = useServerFn(getDashboardData);
 
-  const [theme, setTheme] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("theme") || "dark";
-    }
-    return "dark";
-  });
+  const [theme, setTheme] = useState("dark");
 
-  const [lang, setLang] = useState<"fr" | "en" | "es">(() => {
-    if (typeof window !== "undefined") {
-      return (localStorage.getItem("lang") as "fr" | "en" | "es") || "fr";
-    }
-    return "fr";
-  });
+  const [lang, setLang] = useState<"fr" | "en" | "es">("fr");
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const storedTheme = localStorage.getItem("theme");
+      if (storedTheme && storedTheme !== theme) setTheme(storedTheme);
+      const storedLang = localStorage.getItem("lang") as "fr" | "en" | "es";
+      if (storedLang && storedLang !== lang) setLang(storedLang);
+    }
     const root = window.document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
@@ -188,7 +184,7 @@ function AuthenticatedLayout() {
           <div className={`flex items-center gap-1.5 text-[11px] font-medium ${running ? 'text-emerald-400' : 'text-zinc-500'}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${running ? 'bg-emerald-400' : 'bg-zinc-500'}`}></span>
             {/* BUG-D09 FIX: latence dynamique depuis bot_status.cycle_latency_ms */}
-            Bot {running ? t.botActive : t.botInactive} {running && latencyLabel}
+            {running ? t.botActive : t.botInactive} {running && latencyLabel}
           </div>
           <div className="w-7 h-7 rounded-full bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-[11px] text-indigo-300 font-bold">
             {profile?.display_name?.charAt(0).toUpperCase() || 'U'}

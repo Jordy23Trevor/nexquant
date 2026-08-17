@@ -25,7 +25,9 @@ const translations = {
     thStrat: "Stratégie",
     thBroker: "Broker",
     empty: "Aucun historique disponible.",
-    loading: "Chargement de l'historique..."
+    loading: "Chargement de l'historique...",
+    tradesCount: "{count} trades",
+    pageText: "Page {page} / {total}"
   },
   en: {
     title: "Trade History",
@@ -46,7 +48,9 @@ const translations = {
     thStrat: "Strategy",
     thBroker: "Broker",
     empty: "No history available.",
-    loading: "Loading history..."
+    loading: "Loading history...",
+    tradesCount: "{count} trades",
+    pageText: "Page {page} / {total}"
   },
   es: {
     title: "Historial de operaciones",
@@ -67,7 +71,9 @@ const translations = {
     thStrat: "Estrategia",
     thBroker: "Broker",
     empty: "Sin historial disponible.",
-    loading: "Cargando historial..."
+    loading: "Cargando historial...",
+    tradesCount: "{count} operaciones",
+    pageText: "Página {page} / {total}"
   }
 };
 
@@ -78,19 +84,20 @@ export const Route = createFileRoute("/_authenticated/history")({
 
 function HistoryPage() {
   const fetchData = useServerFn(getDashboardData);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => fetchData(),
   });
 
-  const [lang, setLang] = useState<"fr" | "en" | "es">(() => {
-    if (typeof window !== "undefined") {
-      return (localStorage.getItem("lang") as "fr" | "en" | "es") || "fr";
-    }
-    return "fr";
-  });
+  const [lang, setLang] = useState<"fr" | "en" | "es">("fr");
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("lang") as "fr" | "en" | "es";
+      if (stored && stored !== lang) {
+        setLang(stored);
+      }
+    }
     const handleLangChange = () => {
       setLang((localStorage.getItem("lang") as "fr" | "en" | "es") || "fr");
     };
@@ -118,6 +125,10 @@ function HistoryPage() {
       const searchOk = !search || String(p.symbol ?? "").toLowerCase().includes(search.toLowerCase());
       return brokerOk && sideOk && searchOk;
     }), [closed, filterBroker, filterSide, search]);
+
+  if (isError) {
+    return <div className="p-6 text-destructive font-mono text-sm">Erreur de chargement: {error?.message || "Accès non autorisé"}</div>;
+  }
 
   if (isLoading || !data) {
     return <div className="p-6 text-muted-foreground animate-pulse font-mono text-sm">{t.loading}</div>;
@@ -268,7 +279,7 @@ function HistoryPage() {
         {/* BUG-D08 FIX: pagination fonctionnelle */}
         <div className="p-3 border-t border-border flex justify-between items-center bg-background/50">
           <span className="text-[11px] text-muted-foreground">
-            {filtered.length} trades · Page {page} / {totalPages || 1}
+            {t.tradesCount.replace("{count}", filtered.length.toString())} · {t.pageText.replace("{page}", page.toString()).replace("{total}", (totalPages || 1).toString())}
           </span>
           <div className="flex gap-1.5">
             <button

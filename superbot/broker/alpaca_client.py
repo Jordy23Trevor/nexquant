@@ -52,6 +52,7 @@ class AlpacaClient(Broker):
         key = api_key or ALPACA_API_KEY
         secret = api_secret or ALPACA_API_SECRET
         url = base_url or ALPACA_BASE_URL
+        self._base_url = url
         self._api = tradeapi.REST(
             key,
             secret,
@@ -82,9 +83,9 @@ class AlpacaClient(Broker):
 
     def _normalize_symbol(self, symbol: str) -> str:
         """
-        Normalise un symbole pour Alpaca.
+        Normalise un symbole pour Alpaca (ticker brut, pas de suffixe Yahoo).
         """
-        return symbol.upper().replace("/", "")
+        return symbol.strip().upper().replace("/", "")
 
     def _get_min_size(self, symbol: str) -> float:
         """Retourne la taille minimale d'ordre pour Alpaca."""
@@ -138,7 +139,7 @@ class AlpacaClient(Broker):
                 "status":         account.status,
                 "trading_blocked": account.trading_blocked,
                 "transfers_blocked": account.transfers_blocked,
-                "account_type":   "PAPER" if 'paper' in ALPACA_BASE_URL else "LIVE",
+                "account_type":   "PAPER" if 'paper' in (self._base_url or '') else "LIVE",
             }
         return self._call_api(run, {})
 
@@ -152,7 +153,7 @@ class AlpacaClient(Broker):
         timeframe_map = {
             "1m": "1Min", "5m": "5Min", "15m": "15Min", "30m": "30Min",
             "1h": "1Hour", "2h": "2Hour", "4h": "4Hour", "6h": "6Hour",
-            "1d": "1Day", "1w": "1Week", "1M": "1Day"
+            "1d": "1Day", "1w": "1Week"
         }
         alpaca_timeframe = timeframe_map.get(timeframe, timeframe)
         alpaca_symbol = self._normalize_symbol(symbol)
@@ -173,7 +174,7 @@ class AlpacaClient(Broker):
         else:
             days_needed = limit * 2
             
-        start_date = (datetime.now() - timedelta(days=days_needed)).strftime('%Y-%m-%d')
+        start_date = (datetime.now(timezone.utc) - timedelta(days=days_needed)).strftime('%Y-%m-%d')
 
         try:
             bars = self._api.get_bars(
@@ -211,12 +212,12 @@ class AlpacaClient(Broker):
         except Exception as e:
             log.warning(f"️  Impossible d'obtenir le prix actuel pour {symbol} : {e}")
             try:
-                from datetime import datetime, timedelta
-                start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+                from datetime import timedelta
+                start_date = (datetime.now(timezone.utc) - timedelta(days=7)).strftime('%Y-%m-%d')
                 bars = self._api.get_bars(alpaca_symbol, "1Min", start=start_date, limit=1).df
                 if not bars.empty:
                     return float(bars['close'].iloc[-1])
-            except:
+            except Exception:
                 pass
             return 0.0
 
@@ -292,13 +293,19 @@ class AlpacaClient(Broker):
         base_size = risk_amount / risk_per_unit
         leveraged_size = base_size
 
-        # Appliquer les limites
         target_symbol = symbol if symbol else "SPY"
         min_size = self.get_min_order_size(symbol=target_symbol)
-        max_size = self.get_step_size(symbol=target_symbol) * 1000000
-
-        final_size = max(min(leveraged_size, max_size), min_size)
-        return self._round_qty(target_symbol, final_size)
+        # Arrondir à l'action entière SANS forcer le minimum : si le sizing de
+        # risque donne moins d'une action, on refuse (0) au lieu de sur-allouer
+        # (ex: compte 200 € → 1 SPY ≈ 600 € = 3× le capital).
+        final_size = self._round_qty(target_symbol, min(leveraged_size, MAX_POSITION_SIZE))
+        if final_size < min_size:
+            log.warning(
+                f"Taille calculée ({leveraged_size:.4f}) < taille minimale ({min_size}) "
+                f"pour {target_symbol} — ordre rejeté."
+            )
+            return 0.0
+        return final_size
 
     def place_order(self, symbol: str, side: str, amount: float,
                    sl: float, tp: float, reduce_only: bool = False,
@@ -458,16 +465,9 @@ class AlpacaClient(Broker):
 
     def normalize_symbol(self, symbol: str) -> str:
         """
-        Normalise un symbole selon le format attendu par Alpaca.
+        Normalise un symbole selon le format attendu par Alpaca (ticker brut).
         """
-        normalized = symbol.strip().upper()
-
-        if "/" not in normalized and "=X" not in normalized:
-            if len(normalized) == 6 and normalized.isalpha():
-                return f"{normalized}=X"
-            return normalized
-
-        return normalized.replace("/", "")
+        return self._normalize_symbol(symbol)
 
     def cancel_all_orders(self, symbol: str) -> bool:
         """Annule tous les ordres ouverts (standards et OCO) sur le symbole."""

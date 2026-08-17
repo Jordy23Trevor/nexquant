@@ -217,8 +217,10 @@ class NewsManager:
                 self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour du Fear & Greed: {e}")
-            # Étendre le cache pour éviter les retry en boucle rapide
-            self._cache_timestamps[cache_key] = datetime.now() - timedelta(minutes=self.update_interval / 60 - 60)
+            # Backoff fixe de 60 min en cas d'erreur réseau : l'ancienne formule
+            # mélangeait secondes (update_interval) et minutes et produisait des
+            # timestamps incohérents.
+            self._cache_timestamps[cache_key] = datetime.now() + timedelta(minutes=60)
 
     def _update_forex_factory_news(self):
         """Met à jour les nouvelles de Forex Factory."""
@@ -305,9 +307,9 @@ class NewsManager:
                 self._cache_timestamps[cache_key] = datetime.now()
         except Exception as e:
             log.error(f"Erreur lors de la mise à jour des nouvelles Forex Factory: {e}")
-            # ⚠️ En cas d'erreur réseau, étendre le cache à 60min pour éviter les
-            # retry frénétiques qui peuvent bloquer le cycle (fix freeze 24/07/2026)
-            self._cache_timestamps[cache_key] = datetime.now() - timedelta(minutes=self.update_interval / 60 - 60)
+            # Backoff fixe de 60 min en cas d'erreur réseau pour éviter les retry
+            # frénétiques qui peuvent bloquer le cycle (fix freeze 24/07/2026).
+            self._cache_timestamps[cache_key] = datetime.now() + timedelta(minutes=60)
 
     def _update_crypto_news(self):
         """Met à jour les nouvelles crypto depuis CoinGecko et CryptoCompare."""
@@ -615,10 +617,10 @@ class NewsManager:
         # 1. Ajuster basé sur le sentiment général
         # Sentiment très négatif -> réduire le risque
         # Sentiment très positif -> on pourrait augmenter légèrement, mais on reste conservateur
-        if sentiment < -0.3:  # Sentiment négatif modéré
-            risk_factor *= (1.0 + sentiment)  # Entre 0.7 et 1.0 pour sentiment entre -0.3 et 0
-        elif sentiment < -0.6:  # Sentiment négatif fort
+        if sentiment < -0.6:  # Sentiment négatif fort
             risk_factor *= 0.5  # Réduire de moitié
+        elif sentiment < -0.3:  # Sentiment négatif modéré
+            risk_factor *= (1.0 + sentiment)  # Entre 0.4 et 0.7 pour sentiment entre -0.6 et -0.3
         elif sentiment > 0.3:  # Sentiment positif modéré
             # On reste conservateur, on n'augmente pas beaucoup le risque
             risk_factor *= (1.0 + min(sentiment * 0.5, 0.2))  # Max +20%

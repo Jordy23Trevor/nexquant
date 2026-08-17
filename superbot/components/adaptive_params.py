@@ -55,4 +55,6 @@ def update_adaptive_parameters(bot):
         bot.adaptive_score_min = min(bot.adaptive_score_min + 0.5, 8.0)  # max 8.0
         if old_risk != bot.adaptive_risk_pct or old_score != bot.adaptive_score_min:
             log.info(f"Adaptation paramètres : risque {old_risk:.2f}% -> {bot.adaptive_risk_pct:.2f}%, score min {old_score:.1f} -> {bot.adaptive_score_min:.1f}")
-    # else: garder les paramètres actuels
+    # Sinon : garder les paramètres actuels
+
+    bot._apply_adaptive_params()

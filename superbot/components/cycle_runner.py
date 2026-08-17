@@ -120,9 +120,17 @@ def run_main_loop(bot):
     _PERF_LOG_INTERVAL = 600       # Log de performance toutes les 10 min
     # ─────────────────────────────────────────────────────────────────────────
 
+    # Laisser le terminal MT5 charger les symboles du Market Watch avant le premier cycle.
+    # Interruptible et surchargeable (WARMUP_SECONDS) pour que l'arrêt reste réactif.
+    warmup_seconds = getattr(bot, 'WARMUP_SECONDS', 5)
+    log.info(f"⏳ Warmup initial de {warmup_seconds}s pour permettre au broker de charger les symboles...")
+    _warmup_elapsed = 0
+    while _warmup_elapsed < warmup_seconds and bot.running and not bot.shutdown_event.is_set():
+        time.sleep(min(0.5, warmup_seconds - _warmup_elapsed))
+        _warmup_elapsed += 0.5
+
     while bot.running and not bot.shutdown_event.is_set():
         cycle_start = time.time()
-        now_time = time.time()
 
         try:
             # ── Heartbeat watchdog ────────────────────────────────────────────
@@ -131,16 +139,15 @@ def run_main_loop(bot):
             bot._last_cycle_heartbeat = time.time()
             # ─────────────────────────────────────────────────────────────────
 
-            # BUG-A11 FIX: Réinitialiser tous les caches de données à chaque cycle
-            # Sans ce reset, _fetch_market_data retourne les données stales du cycle précédent
+            # Réinitialiser les caches à chaque cycle (sinon les données du cycle précédent resservent).
             bot._market_data_cache = {}
             bot._indicators_cache = {}
             bot._strategy_cache = {}
-            bot._cached_balance = 0.0  # sera mis à jour au premier appel get_balance()
+            # Ne PAS réinitialiser _cached_balance : il sert de fallback si get_balance() échoue.
 
             now_time = time.time()
             
-            # Phase 3.2 : Déclencheur Walk-Forward Adaptatif Asynchrone
+            # Déclencheur Walk-Forward adaptatif asynchrone
             if not hasattr(bot, 'walk_forward_optimizer'):
                 try:
                     from superbot.ml.walk_forward import WalkForwardOptimizer
@@ -164,12 +171,10 @@ def run_main_loop(bot):
                     
                     threading.Thread(target=walk_forward_task, daemon=True).start()
             # 📡 TÉLÉMÉTRIE CLOUD : Synchronisation et heartbeat (fréquence réduite)
-            # BUG-11 FIX: Utiliser getattr pour éviter AttributeError si l'attribut n'est pas encore initialisé
             _last_cloud_sync = getattr(bot, '_last_cloud_sync', 0.0)
             if bot.telemetry.enabled and (now_time - _last_cloud_sync >= bot.CLOUD_SYNC_INTERVAL):
-                # BUG-I5 FIX: Mettre à jour _last_cloud_sync ICI (dans le thread principal) AVANT de lancer
-                # le thread de sync, pas à l'intérieur du thread. Sinon, si la réponse API prend plusieurs
-                # cycles (>15s), un nouveau thread de sync est lancé à chaque cycle → N threads parallèles.
+                # Marquer le timestamp AVANT de lancer le thread de sync, sinon une réponse
+                # lente (>1 cycle) déclencherait plusieurs threads de sync en parallèle.
                 bot._last_cloud_sync = now_time
 
                 def sync_config_task():
@@ -196,18 +201,95 @@ def run_main_loop(bot):
 
                         if old_risk_pct != bot.adaptive_risk_pct or old_score_min != bot.adaptive_score_min:
                             log.info(f"Configuration cloud mise à jour : risque {old_risk_pct:.2f}% -> {bot.adaptive_risk_pct:.2f}%, score min {old_score_min:.1f} -> {bot.adaptive_score_min:.1f}")
+                            bot._apply_adaptive_params()
 
                 sync_thread = threading.Thread(target=sync_config_task, daemon=True)
                 sync_thread.start()
 
+                kelly_fraction = getattr(bot.strategy, 'kelly_fraction', 0.0) if getattr(bot, 'strategy', None) else 0.0
+                news_sentiment = bot.news_manager.latest_sentiment.overall if getattr(bot, 'news_manager', None) and bot.news_manager.latest_sentiment else 0.0
+                fear_greed = bot.news_manager.latest_sentiment.fear_greed if getattr(bot, 'news_manager', None) and bot.news_manager.latest_sentiment else 50.0
+                uptime_seconds = 0
+                if bot.stats and bot.stats.get('start_time'):
+                    start = bot.stats['start_time']
+                    if hasattr(start, 'timestamp'):
+                        uptime_seconds = int(now_time - start.timestamp())
+                    else:
+                        try:
+                            uptime_seconds = int(now_time - float(start))
+                        except Exception:
+                            uptime_seconds = 0
+
+                # Extraction des métriques V3 (Regime, Progress, Stats)
+                rd = getattr(bot, 'regime_detector', None)
+                regime_str = ""
+                regime_conf = 0.0
+                if rd and hasattr(rd, '_cache') and rd._cache:
+                    recent_regs = list(rd._cache.values())
+                    recent_regs.sort(key=lambda x: getattr(x, 'detected_at', ''), reverse=True)
+                    if recent_regs:
+                        regime_str = recent_regs[0].regime
+                        regime_conf = recent_regs[0].confidence
+
+                sm = getattr(bot, 'session_manager', None)
+                daily_achieved = 0.0
+                daily_target = 0.0
+                if sm:
+                    try:
+                        progress = sm.get_daily_progress()
+                        daily_achieved = progress.get('achieved_eur', 0.0)
+                        daily_target = progress.get('target_eur', 0.0)
+                    except Exception:
+                        pass
+
+                total_trades = bot.stats.get('total_trades', 0) if bot.stats else 0
+                win_trades = bot.stats.get('win_trades', 0) if bot.stats else 0
+                win_rate = (win_trades / total_trades) if total_trades > 0 else 0.0
+                
+                risk_metrics = getattr(bot, 'risk_metrics', {})
+                profit_factor = risk_metrics.get('profit_factor', 1.0) if isinstance(risk_metrics, dict) else 1.0
+
                 bot.telemetry.push_heartbeat(
                     is_running=bot.running and not bot.is_paused,
                     broker_type=bot.broker.get_asset_type(),
-                    testnet=getattr(bot.broker, 'testnet', True) or getattr(bot.broker, 'account_type', 'PAPER') == 'PAPER' or 'demo' in str(getattr(bot.broker, 'server', '')).lower() or 'demo' in str(getattr(bot.broker, 'company', '')).lower()
+                    testnet=getattr(bot.broker, 'testnet', True) or getattr(bot.broker, 'account_type', 'PAPER') == 'PAPER' or 'demo' in str(getattr(bot.broker, 'server', '')).lower() or 'demo' in str(getattr(bot.broker, 'company', '')).lower(),
+                    kelly_fraction=kelly_fraction,
+                    news_sentiment=news_sentiment,
+                    fear_greed=fear_greed,
+                    uptime_seconds=uptime_seconds,
+                    regime=regime_str,
+                    regime_confidence=regime_conf,
+                    daily_achieved_eur=daily_achieved,
+                    daily_target_eur=daily_target,
+                    win_rate=win_rate,
+                    profit_factor=profit_factor
                 )
             
+            # 💰 Mise à jour périodique du solde + kill-switch journalier.
+            # Indépendant de la télémétrie : sans ceci, le kill-switch resterait inerte
+            # si telemetry.enabled=false.
+            _last_balance_update = getattr(bot, '_last_balance_update', 0.0)
+            if now_time - _last_balance_update >= bot.TELEMETRY_INTERVAL:
+                bot._last_balance_update = now_time
+                try:
+                    acc_summary = bot.broker.get_account_summary()
+                    equity = 0.0
+                    if acc_summary:
+                        equity = float(acc_summary.get("equity") or acc_summary.get("balance") or 0.0)
+                    if equity <= 0.0:
+                        bal = bot.broker.get_balance()
+                        if bal > 0.0:
+                            equity = bal
+                    if equity > 0.0 and bot.risk_manager:
+                        bot.risk_manager.update_account_balance(equity)
+                        if bot.risk_manager.check_kill_switch(equity):
+                            log.critical("🛑 KILL-SWITCH ACTIVÉ : Auto-pause d'urgence déclenchée pour protéger le capital.")
+                            bot.is_paused = True
+                            bot._save_cooldowns()
+                except Exception as e:
+                    log.debug(f"Erreur mise à jour solde/kill-switch : {e}")
+
             # 📡 TÉLÉMÉTRIE CLOUD : Envoi périodique des métriques du compte et des positions actives
-            # BUG-11 FIX: Utiliser getattr pour éviter AttributeError si l'attribut n'est pas encore initialisé
             _last_telemetry_push = getattr(bot, '_last_telemetry_push', 0.0)
             if bot.telemetry.enabled and (now_time - _last_telemetry_push >= bot.TELEMETRY_INTERVAL):
                 bot._last_telemetry_push = now_time
@@ -216,28 +298,17 @@ def run_main_loop(bot):
                     equity = 0.0
                     if acc_summary:
                         equity = float(acc_summary.get("equity") or acc_summary.get("balance") or 0.0)
-                    
                     if equity <= 0.0:
                         bal = bot.broker.get_balance()
                         if bal > 0.0:
                             equity = bal
-                            
                     if equity > 0.0:
                         pnl_total = equity - bot.initial_balance
                         bot.telemetry.push_equity(equity=equity, pnl_total=pnl_total, drawdown=0.0)
-                        
-                        # 🛑 Phase 3 : Kill-Switch Drawdown Journalier
-                        if bot.risk_manager:
-                            bot.risk_manager.update_account_balance(equity)
-                            if bot.risk_manager.check_kill_switch(equity):
-                                log.critical("🛑 KILL-SWITCH ACTIVÉ : Auto-pause d'urgence déclenchée pour protéger le capital.")
-                                bot.is_paused = True
-                                bot._save_cooldowns()
-                                
                     else:
                         log.warning("⚠️ Impossible de pousser l'équité à la télémétrie : valeur invalide ou nulle.")
                 except Exception as e:
-                    log.debug(f"Erreur télémétrie/kill-switch : {e}")
+                    log.debug(f"Erreur envoi équité télémétrie : {e}")
 
                 try:
                     for symbol, pos in bot.positions.items():
@@ -262,7 +333,7 @@ def run_main_loop(bot):
                 except Exception as e:
                     log.debug(f"Erreur envoi positions télémétrie : {e}")
 
-            # ── Trailing Profit Circuit Breaker (Formulation 2) ──────────────
+            # Trailing Profit Circuit Breaker
             if getattr(bot, 'profit_circuit_breaker', None):
                 try:
                     cb_balance = getattr(bot, '_cached_balance', 0.0)
@@ -398,12 +469,20 @@ def run_main_loop(bot):
             except Exception as e:
                 log.warning(f"Erreur de synchronisation des positions au cycle #{cycle_count} : {e}")
 
-            try:
-                bot._select_and_rotate_crypto()
-            except Exception as e:
-                log.warning(f"Erreur lors de la sélection/rotation crypto au cycle #{cycle_count} : {e}")
+            # ── 📈 Mode TSMOM : allocation mensuelle au lieu du scan intraday ──
+            if getattr(bot, 'TSMOM_ENABLED', False):
+                try:
+                    bot._tsmom_cycle()
+                except Exception as e:
+                    log.error(f"Erreur cycle TSMOM : {e}")
+                scanned_instruments = []
+            else:
+                try:
+                    bot._select_and_rotate_crypto()
+                except Exception as e:
+                    log.warning(f"Erreur lors de la sélection/rotation crypto au cycle #{cycle_count} : {e}")
 
-            scanned_instruments = list(bot.instruments)
+                scanned_instruments = list(bot.instruments)
             random.shuffle(scanned_instruments)
 
             def _process_symbol_safe(bot, sym, timeout):
@@ -462,7 +541,7 @@ def run_main_loop(bot):
 
             cycle_duration = time.time() - cycle_start
             
-            # ── Phase 3.3 : Alimentation Prometheus ──────────────────────────────
+            # Alimentation Prometheus
             if getattr(bot, 'prometheus', None) and bot.prometheus.is_running:
                 try:
                     bot.prometheus.bot_cycle_duration_seconds.observe(cycle_duration)
@@ -484,9 +563,7 @@ def run_main_loop(bot):
                 except Exception as e:
                     log.debug(f"Erreur mise à jour Prometheus : {e}")
 
-            # ⚡ V3 : Sleep jusqu'au prochain cycle (target_cycle_time lu depuis config)
-            # BUG FIX : 'target_cycle_time = 60' était ici avant → écrasait la valeur de la config !
-            # La valeur correcte est définie une seule fois au début de run_main_loop().
+            # Sleep jusqu'au prochain cycle. target_cycle_time est lu une seule fois au début de run_main_loop().
             if cycle_duration < target_cycle_time:
                 sleep_time = target_cycle_time - cycle_duration
                 slept = 0
@@ -516,7 +593,8 @@ def run_main_loop(bot):
         except Exception as e:
             log.error(f"Erreur dans la boucle principale : {e}")
             log.error(traceback.format_exc())
-            bot.stats['errors_count'] += 1
+            with bot._state_lock:
+                bot.stats['errors_count'] += 1
             time.sleep(5)
 
     log.info("Boucle principale de trading terminée")

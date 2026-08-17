@@ -61,30 +61,25 @@ FOREX_DATA_PROVIDER = os.getenv("FOREX_DATA_PROVIDER", "twelvedata")
 INSTRUMENTS_STR = os.getenv("INSTRUMENTS", "BTC/USDT")
 INSTRUMENTS = [s.strip() for s in INSTRUMENTS_STR.split(",")]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 📊 RAPPORT CRYPTO (2026-07-02) — Corrections appliquées
-# ─────────────────────────────────────────────────────────────────────────────
-# P0-2 : SOL/USDT retiré (0% WR, −484 USD sur 4 trades) jusqu'à correction
-#         du filtre dominance BTC. Ajouter dans CRYPTO_BLACKLIST pour le bloquer
-#         même s'il est présent dans INSTRUMENTS.
-# P2-1 : ADA/USDT (20% WR, −51 USD) remplacé par XRP/USDT (corrélation BTC < ADA)
+# Corrections crypto
+# SOL/USDT blacklisté (0% WR) tant que le filtre de dominance BTC n'est pas corrigé.
+# ADA/USDT remplacé par XRP/USDT (corrélation BTC plus faible).
 CRYPTO_BLACKLIST_STR = os.getenv("CRYPTO_BLACKLIST", "SOL/USDT")
 CRYPTO_BLACKLIST: list = [s.strip() for s in CRYPTO_BLACKLIST_STR.split(",") if s.strip()]
 
-# P1-2 : Score minimum plus strict pour les paires crypto en période de faible ADX.
-#         Default = 7 (vs 6 global). Le bot générait trop de signaux BNB en range (38% WR).
+# Score minimum plus strict pour la crypto : le bot générait trop de signaux BNB en range.
 CRYPTO_SCORE_MIN = int(os.getenv("CRYPTO_SCORE_MIN", "7"))
 
-# P1-1 : Si BTC a baissé de > X% sur 24h, bloquer TOUS les signaux BUY sur les altcoins.
-#         Cible les crash copycat observés sur SOL/ADA/BNB les 29-30 juin 2026.
+# Si BTC baisse de plus de X% sur 24h, bloquer tous les BUY sur les altcoins
+# (crash copycat observé sur SOL/ADA/BNB).
 CRYPTO_BUY_BLOCK_BTC_DROP = float(os.getenv("CRYPTO_BUY_BLOCK_BTC_DROP", "2.0"))
 
-# P2-1 : Volume minimum BNB/USDT — 150% de la moyenne mobile 20 périodes.
-#         Réduit l'overtrading en période de range directionnel faible.
+# Volume minimum BNB/USDT : 150% de la moyenne mobile 20 périodes
+# pour réduire l'overtrading en range.
 CRYPTO_BNB_VOLUME_FACTOR = float(os.getenv("CRYPTO_BNB_VOLUME_FACTOR", "1.5"))
 
 # =============================================================================
-# TRANSACTION COSTS (Phase 2 - Realism Modeling)
+# TRANSACTION COSTS
 # =============================================================================
 COMMISSION_PCT = float(os.getenv("COMMISSION_PCT", "0.1"))
 SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.05"))
@@ -190,18 +185,62 @@ RISK_PCT = float(os.getenv("RISK_PCT", "1.5"))
 # Stop Loss and Take Profit multiples of ATR
 SL_ATR_MULT = float(os.getenv("SL_ATR_MULT", "1.5"))  # Stop Loss = 1.5 × ATR
 TP_ATR_MULT = float(os.getenv("TP_ATR_MULT", "3.5"))  # Take Profit = 3.5 × ATR (Asymmetric R:R > 2.3:1)
-TRAIL_ATR_MULT = float(os.getenv("TRAIL_ATR_MULT", "1.0"))  # Trailing stop distance
+TRAIL_ATR_MULT = float(os.getenv("TRAIL_ATR_MULT", "1.5"))  # Trailing stop distance (×ATR)
+# Distance d'activation du trailing : le stop suiveur ne démarre qu'une fois le
+# trade à +N×ATR en faveur (sinon il écrase les winners naissants au point d'entrée).
+TRAIL_ACTIVATE_ATR_MULT = float(os.getenv("TRAIL_ACTIVATE_ATR_MULT", "2.0"))
 BE_ATR_MULT = float(os.getenv("BE_ATR_MULT", "1.0"))  # Breakeven activation threshold
 
 # Forex filters
 MAX_FOREX_CURRENCY_EXPOSURE = int(os.getenv("MAX_FOREX_CURRENCY_EXPOSURE", "2"))
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))
+# Seuils de spread par classe d'actif : les cryptos/commodities s'expriment en points
+# (valeurs naturellement plus élevées que le forex).
+MAX_SPREAD_PIPS_CRYPTO = float(os.getenv("MAX_SPREAD_PIPS_CRYPTO", "500.0"))
+MAX_SPREAD_PIPS_COMMODITY = float(os.getenv("MAX_SPREAD_PIPS_COMMODITY", "30.0"))
 BE_DYN_RR = os.getenv("BE_DYN_RR", "true").lower() == "true"
-BE_DYN_RR_RATIO = float(os.getenv("BE_DYN_RR_RATIO", "1.0"))
+# Break-even déclenché à 1.5R (au lieu de 1.0R) : laisse plus de place au trade
+# avant de remonter le SL à l'entrée, réduisant les scratches sur les gagnants.
+BE_DYN_RR_RATIO = float(os.getenv("BE_DYN_RR_RATIO", "1.5"))
 
 
 # Score thresholds
 SCORE_MIN = int(os.getenv("SCORE_MIN", "6"))  # Minimum score to enter (out of 10 max base score)
+# Mode de calcul du score TRENDING :
+#   "votes"   -> score historique (9 votes d'indicateurs, largement redondants)
+#   "signals" -> score expérimental reconstruit sur 4 signaux indépendants (mesurés)
+# Le backtest (BTC/ETH 1h) n'a PAS montré de gain robuste du mode "signals" :
+# il améliore ETH mais dégrade BTC. Conservé en opt-in expérimental, défaut "votes".
+SCORE_MODE = os.getenv("SCORE_MODE", "votes")
+
+# =============================================================================
+# 📈 TIME-SERIES MOMENTUM (stratégie daily/monthly — l'edge validé)
+# =============================================================================
+# Momentum « L-1 » mensuel sur un univers d'actifs liquides, avec ciblage de
+# volatilité. Validé sur 2020→2026 (backtest artifacts/backtest_tsmom.py) :
+# portefeuille SPY+XAUUSD+BTCUSD à lookback 3 → Sharpe ~1.2, PF ~2.6, MaxDD ~-7%.
+# EURUSD est exclu (pas d'edge momentum mesuré sur le FX).
+TSMOM_ENABLED = os.getenv("TSMOM_ENABLED", "false").lower() == "true"
+TSMOM_LOOKBACK = int(os.getenv("TSMOM_LOOKBACK", "3"))
+TSMOM_SKIP = int(os.getenv("TSMOM_SKIP", "1"))
+TSMOM_TARGET_VOL = float(os.getenv("TSMOM_TARGET_VOL", "0.15"))
+TSMOM_MAX_LEVERAGE = float(os.getenv("TSMOM_MAX_LEVERAGE", "1.5"))
+TSMOM_VOL_WINDOW = int(os.getenv("TSMOM_VOL_WINDOW", "63"))
+# Univers : symbole -> (long_only, coût aller-retour, périodes/an)
+TSMOM_UNIVERSE = {
+    "SPY":    {"long_only": True,  "cost": 0.0005, "periods_per_year": 252},
+    "XAUUSD": {"long_only": False, "cost": 0.0005, "periods_per_year": 252},
+    "BTCUSD": {"long_only": False, "cost": 0.0010, "periods_per_year": 365},
+}
+# Placement d'ordres réel. Par défaut false = dry-run (log de l'allocation cible
+# sans exécution). Mettre true uniquement après avoir validé en paper trading.
+TSMOM_PLACE_ORDERS = os.getenv("TSMOM_PLACE_ORDERS", "false").lower() == "true"
+# Mapping univers -> symbole du broker actif (un seul broker à la fois).
+TSMOM_BROKER_SYMBOLS = {
+    "alpaca":  {"SPY": "SPY"},
+    "mt5":     {"XAUUSD": "XAUUSD"},
+    "binance": {"BTCUSD": "BTC/USDT"},
+}
 
 # Drawdown limits (Elder's rules & Hard Daily Cap)
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))  # Max daily drawdown %
@@ -210,10 +249,9 @@ MAX_MONTHLY_LOSS_PCT = float(os.getenv("MAX_MONTHLY_LOSS_PCT", "6.0"))  # Max mo
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "6"))  # Max concurrent positions across fleet
 
 # =============================================================================
-# 🗡️ PROTECTION PAR DRAWDOWN (Phase 3 §3)
+# 🗡️ PROTECTION PAR DRAWDOWN
 # =============================================================================
 # Seuils de drawdown (en %) déclenchant la réduction progressive du risque par trade.
-# BUG-15 FIX: Ces variables étaient dans __all__ mais pas définies dans config.py.
 DRAWDOWN_THRESH_1       = float(os.getenv("DRAWDOWN_THRESH_1",       "5.0"))   # % DD niveau 1
 DRAWDOWN_THRESH_2       = float(os.getenv("DRAWDOWN_THRESH_2",       "10.0"))  # % DD niveau 2
 DRAWDOWN_REDUCE_5PCT    = float(os.getenv("DRAWDOWN_REDUCE_5PCT",    "0.20"))  # -20% risque à 5% DD
@@ -394,10 +432,10 @@ LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / f"superbot_{BROKER_TYPE}.log"
 TRADE_LOG_FILE = LOG_DIR / f"trades_{BROKER_TYPE}.jsonl"  # Structured trade logs for analysis
 ERROR_LOG_FILE = LOG_DIR / f"errors_{BROKER_TYPE}.log"
-BUG_LOG_FILE   = LOG_DIR / "bug_log.md"                   # Bug Watchdog journal (Formulation 2)
+BUG_LOG_FILE   = LOG_DIR / "bug_log.md"                   # Bug Watchdog journal
 
 # =============================================================================
-# 🐛 BUG WATCHDOG CONFIGURATION (Formulation 2 — agent de supervision technique)
+# 🐛 BUG WATCHDOG CONFIGURATION
 # =============================================================================
 # Intervalle de vérification du watchdog (secondes)
 BUG_WATCHDOG_INTERVAL = int(os.getenv("BUG_WATCHDOG_INTERVAL", "60"))
@@ -407,7 +445,7 @@ BUG_WATCHDOG_ENABLED  = os.getenv("BUG_WATCHDOG_ENABLED", "true").lower() == "tr
 BUG_WATCHDOG_MAX_LATENCY = float(os.getenv("BUG_WATCHDOG_MAX_LATENCY", "5.0"))
 
 # =============================================================================
-# 📈 TRAILING PROFIT CIRCUIT BREAKER (Formulation 2 — protection des gains en série)
+# 📈 TRAILING PROFIT CIRCUIT BREAKER
 # =============================================================================
 # Profit minimal (€) à partir duquel le circuit breaker est actif
 PROFIT_CB_TRIGGER_EUR      = float(os.getenv("PROFIT_CB_TRIGGER_EUR",      "200.0"))
@@ -485,6 +523,11 @@ def validate_config():
     if not (1 <= SCORE_MIN <= 10):
         errors.append(f"SCORE_MIN ({SCORE_MIN}) doit être compris entre 1 et 10.")
 
+    if not (0 < TSMOM_TARGET_VOL <= 1.0):
+        errors.append(f"TSMOM_TARGET_VOL ({TSMOM_TARGET_VOL}) doit être compris entre 0 et 1.")
+    if not (0 <= TSMOM_MAX_LEVERAGE <= 10):
+        errors.append(f"TSMOM_MAX_LEVERAGE ({TSMOM_MAX_LEVERAGE}) doit être compris entre 0 et 10.")
+
     if errors:
         error_msg = (
             "\n" + "="*80 + "\n"
@@ -543,12 +586,16 @@ __all__ = [
     "SL_ATR_MULT_STOCK", "TP_ATR_MULT_STOCK", "ALLOW_SHORT_STOCK",
 
     # Risk Management
-    "RISK_PCT", "SL_ATR_MULT", "TP_ATR_MULT", "TRAIL_ATR_MULT", "BE_ATR_MULT",
-    "SCORE_MIN", "MAX_DAILY_LOSS_PCT", "MAX_MONTHLY_LOSS_PCT", "MAX_OPEN_POSITIONS",
+    "RISK_PCT", "SL_ATR_MULT", "TP_ATR_MULT", "TRAIL_ATR_MULT", "TRAIL_ACTIVATE_ATR_MULT", "BE_ATR_MULT",
+    "SCORE_MIN", "SCORE_MODE", "MAX_DAILY_LOSS_PCT", "MAX_MONTHLY_LOSS_PCT", "MAX_OPEN_POSITIONS",
+    "TSMOM_ENABLED", "TSMOM_LOOKBACK", "TSMOM_SKIP", "TSMOM_TARGET_VOL",
+    "TSMOM_MAX_LEVERAGE", "TSMOM_VOL_WINDOW", "TSMOM_UNIVERSE",
+    "TSMOM_PLACE_ORDERS", "TSMOM_BROKER_SYMBOLS",
     "MAX_DAILY_LOSS_AMOUNT",
     "MIN_POSITION_SIZE", "MAX_POSITION_SIZE", "KELLY_FRACTION", "MIN_TRADES_FOR_KELLY",
     "COOLDOWN_SECONDS",
-    "MAX_FOREX_CURRENCY_EXPOSURE", "MAX_SPREAD_PIPS", "BE_DYN_RR", "BE_DYN_RR_RATIO",
+    "MAX_FOREX_CURRENCY_EXPOSURE", "MAX_SPREAD_PIPS", "MAX_SPREAD_PIPS_CRYPTO", "MAX_SPREAD_PIPS_COMMODITY",
+    "BE_DYN_RR", "BE_DYN_RR_RATIO",
     "DRAWDOWN_REDUCE_5PCT", "DRAWDOWN_REDUCE_10PCT", "DRAWDOWN_THRESH_1", "DRAWDOWN_THRESH_2",
 
     # Protection nocturne

@@ -50,7 +50,7 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
         # 2. Calculer le risque par unité en devise de compte
         raw_price_risk = abs(entry_price - stop_loss)
 
-        # Phase 2: Intégrer les coûts de transaction dans le risque par unité
+        # Intégrer les coûts de transaction dans le risque par unité
         from superbot.config import COMMISSION_PCT, SLIPPAGE_PCT
         cost_pct = (COMMISSION_PCT * 2) + SLIPPAGE_PCT
         cost_abs = entry_price * (cost_pct / 100.0)
@@ -73,8 +73,7 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
         
         risk_pct = base_risk / 100.0  # Convertir en décimal
 
-        # ── Phase 3 §1 — Dimensionnement dynamique par régime HMM ────────────
-        # Le risque par trade est ajusté selon le régime détecté :
+        # Dimensionnement dynamique par régime HMM : le risque par trade est ajusté :
         # - TRENDING / LOW_VOL_TREND : +20% (tendance claire, alpha plus élevé)
         # - LOW_VOL_RANGE / RANGING  : -30% (range, moins de certitude)
         # - HIGH_VOL_RANGE           : -50% (chaos, protection maximale)
@@ -91,8 +90,7 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
             log.info(f"[Régime-Risk] HIGH_VOL_RANGE → risque ×0.50 pour {symbol} (protection haute volatilité)")
         risk_pct *= regime_risk_multiplier
 
-        # ── Phase 3 §3 — Réduction du risque selon le drawdown courant ────────
-        # Progressive : -20% de risque à 5% DD, -50% à 10% DD.
+        # Réduction du risque selon le drawdown courant : -20% à 5% DD, -50% à 10% DD.
         # Se réinitialise automatiquement quand le capital récupère.
         drawdown_multiplier = 1.0
         if rm.drawdown_pct >= rm.DRAWDOWN_THRESH_2:
@@ -130,12 +128,18 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
         risk_amount = account_balance * adjusted_risk_pct * correlation_adjustment
         base_position_size = risk_amount / risk_per_unit
 
-        # 7. Appliquer la fraction de Kelly si on a suffisamment de données historiques
+        # 7. Appliquer la fraction de Kelly si on a suffisamment de données historiques.
+        # ⚠️ Clarification d'unités : `kelly_fraction` est une fraction du bankroll.
+        # On l'interprète ici comme la fraction du capital à RISQUER par trade pour
+        # rester homogène avec `base_position_size` (les deux termes sont des unités
+        # d'actif = capital_risqué / risk_per_unit). Le Kelly pur pouvant atteindre
+        # 50 % du bankroll, on plafonne sa contribution à 5 % — le même plafond de
+        # risque que le sizing fixe (voir `max_allowed_risk_pct` plus bas).
         kelly_fraction = rm._calculate_kelly_fraction()
         if kelly_fraction is not None and len(rm.trade_history) >= rm.MIN_TRADES_FOR_KELLY:
-            # Kelly suggère la fraction optimale du bankroll à miser
-            kelly_position_size = account_balance * kelly_fraction / risk_per_unit
-            # Combiner approche risque fixe et Kelly
+            kelly_risk_pct = min(max(kelly_fraction, 0.0), 0.05)
+            kelly_position_size = account_balance * kelly_risk_pct / risk_per_unit
+            # Combiner approche risque fixe et Kelly (mêmes unités : taille d'actif)
             position_size = (base_position_size * (1 - rm.KELLY_FRACTION) +
                            kelly_position_size * rm.KELLY_FRACTION)
             log.debug(f"Kelly appliqué: base={base_position_size:.4f}, kelly={kelly_position_size:.4f}, final={position_size:.4f}")
@@ -260,7 +264,6 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
             'free_margin': free_margin,
             'leverage': leverage,
             'max_size_by_margin': max_size_by_margin,
-            # BUG-A09 FIX: Utiliser datetime.now(timezone.utc) pour cohérence timezone
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
@@ -281,6 +284,12 @@ def _calculate_kelly_fraction(rm) -> Optional[float]:
     Returns:
         Fraction de Kelly (0 à 1) ou None si pas assez de données
     """
+    # Verrou partagé avec record_trade pour une lecture cohérente de trade_history.
+    with rm._history_lock:
+        return _calculate_kelly_fraction_impl(rm)
+
+
+def _calculate_kelly_fraction_impl(rm) -> Optional[float]:
     if len(rm.trade_history) < rm.MIN_TRADES_FOR_KELLY:
         return None
 

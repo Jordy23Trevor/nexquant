@@ -50,8 +50,7 @@ def _can_take_new_trade(rm, account_balance: float, symbol: str = "") -> bool:
         log.info(f"Symbole {symbol} bloqué (3 pertes consécutives atteintes).")
         return False
 
-    # ✅ BUG FIX #5 — Cooldown : vérifier le délai depuis la dernière clôture sur ce symbole
-    # BUG-01 FIX: Utiliser datetime.now(timezone.utc) pour éviter TypeError avec datetime naïf/aware mélangés
+    # Cooldown : délai depuis la dernière clôture sur ce symbole.
     if symbol and symbol in rm.last_trade_close_time:
         last_close = rm.last_trade_close_time[symbol]
         now_utc = datetime.now(timezone.utc)
@@ -123,7 +122,7 @@ def get_risk_metrics(rm, account_balance: float = 0.0) -> Dict[str, Any]:
     try:
         if account_balance <= 0:
             account_balance = getattr(rm, 'starting_balance', 10000.0)
-        # BUG-07 FIX: Filtrer les None dans balance_after pour éviter drawdown artificiel
+        # Filtrer les None dans balance_after pour éviter un drawdown artificiel.
         balance_after_values = [
             t['balance_after'] for t in rm.trade_history
             if t.get('balance_after') is not None and isinstance(t['balance_after'], (int, float))
@@ -177,7 +176,6 @@ def get_risk_metrics(rm, account_balance: float = 0.0) -> Dict[str, Any]:
             'losing_trades': len(losing_trades),
             'current_risk_pct': current_risk_pct,
             'kelly_fraction': rm._calculate_kelly_fraction(),
-            # BUG-13 FIX: Utiliser datetime.now(timezone.utc) pour cohérence timezone
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 

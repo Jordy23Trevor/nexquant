@@ -243,10 +243,8 @@ class PerformanceLearner:
             # 3. Mettre à jour les stats de stratégies
             self._update_strategy_stats(trades)
 
-            # 4. Pertes consécutives : PAS d'appel à _update_consecutive_losses ici.
-            # BUG-I1 FIX: Les compteurs sont déjà maintenus en temps réel par on_trade_closed().
-            # Rappeler _update_consecutive_losses() ici doublerait chaque perte et bloquerait
-            # les symboles après 2 pertes au lieu de 3.
+            # 4. Pertes consécutives : les compteurs sont déjà maintenus par on_trade_closed() ;
+            # les rappeler ici doublerait chaque perte (blocage après 2 pertes au lieu de 3).
 
         # 5. Générer les insights pour la prochaine session
         next_insights = []
@@ -259,7 +257,7 @@ class PerformanceLearner:
         if not self._defensive_mode:
             # Restaurer progressivement le risk_pct si on avait réduit
             old_risk = self._current_params.get('risk_pct', 1.0)
-            # BUG-M2 FIX: On veut restaurer le risque jusqu'à 1.0 (risque de base)
+            # Restaurer le risque jusqu'à 1.0 (risque de base).
             if old_risk < 1.0:
                 # Restauration volontairement conservatrice (x1.5 par session). 
                 # S'il était tombé à 0.3%, il faudra ~3 sessions positives pour revenir à 1.0%.

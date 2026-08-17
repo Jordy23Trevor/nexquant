@@ -5,6 +5,70 @@ from typing import Tuple, Dict, Any
 log = logging.getLogger('scorer')
 
 
+# ── Poids des votes du score TRENDING ──────────────────────────────────────
+# Le backtest (BTC/ETH 1h, ~137 trades, BE 1.5R) a montré que les votes sont
+# largement redondants : ils mesurent tous la même chose (« c'est une tendance »),
+# et le score ne sépare pas les bons trades des mauvais. Pouvoir prédictif mesuré :
+#
+#   elder_impulse_confirm : +6.1 pts   (seul vote à edge positif)
+#   price_vs_ema200       : -0.8 pts   (~neutre)
+#   ema_cross             : -5.9 pts
+#   volume_confirmation   : -13.9 pts
+#   macd_cross            : -16.9 pts
+#
+# Mais la re-pondération issue de ces edges ne s'est PAS montrée robuste :
+#   - doubler elder_impulse ne change rien (votes corrélés : le score atteint déjà
+#     le seuil quand elder est présent) ;
+#   - retirer macd/volume améliore ETH mais dégrade BTC sous PF 1 (overfit d'un
+#     échantillon de ~137 trades poolés sur deux actifs aux comportements opposés).
+# Les poids restent donc NEUTRES (comportement d'origine). Le tableau ci-dessus
+# sert de documentation pour une future calibration PAR CLASSE D'ACTIF sur un
+# backtest walk-forward plus large.
+TRENDING_VOTE_WEIGHTS = {
+    'ema_cross': 1.0,
+    'price_vs_ema200': 1.0,
+    'htf_alignment': 1.0,
+    'macd_cross': 1.0,
+    'supertrend': 1.0,
+    'adx_strength': 1.0,
+    'trend_momentum': 1.0,
+    'volume_confirmation': 1.0,
+    'elder_impulse_confirm': 1.0,
+}
+
+
+def _append_candidate_signals(details: Dict[str, Any], df: pd.DataFrame,
+                              latest: pd.Series, price: float,
+                              ema_slow: float, adx: float) -> None:
+    """Ajoute les signaux candidats indépendants (mesurés, non notés) à details.
+
+    Ces features sont enregistrées dans entry_details du backtest pour mesurer
+    leur pouvoir prédictif (artifacts/measure_score_signals.py) sans modifier
+    le score lui-même.
+    """
+    _atr = latest.get('atr', 0.0) or 0.0
+    details['sig_adx'] = float(adx or 0.0)
+    details['sig_dist_ema_atr'] = float((price - ema_slow) / _atr) if _atr > 0 else 0.0
+    details['sig_rsi'] = float(latest.get('rsi', 50.0) or 50.0)
+    _bbp = latest.get('bb_percent', 0.5)
+    details['sig_bb_percent'] = float(_bbp) if not pd.isna(_bbp) else 0.5
+    _hist = latest.get('macd_histogram', 0.0) or 0.0
+    _hist_prev = (df.iloc[-4].get('macd_histogram', 0.0) if len(df) >= 4 else 0.0) or 0.0
+    details['sig_macd_hist_slope'] = float((_hist - _hist_prev) / _atr) if _atr > 0 else 0.0
+    _vol_ma = latest.get('volume_ma', 0.0) or 0.0
+    details['sig_vol_ratio'] = float(latest.get('volume', 0.0) / _vol_ma) if _vol_ma > 0 else 0.0
+    if 'atr' in df.columns and len(df) >= 100 and _atr > 0:
+        details['sig_atr_rank'] = float((df['atr'].iloc[-100:] < _atr).mean())
+    else:
+        details['sig_atr_rank'] = 0.5
+    if len(df) >= 20:
+        _hi20 = df['high'].iloc[-20:].max()
+        _lo20 = df['low'].iloc[-20:].min()
+        details['sig_donchian_pos'] = float((price - _lo20) / (_hi20 - _lo20)) if _hi20 != _lo20 else 0.5
+    else:
+        details['sig_donchian_pos'] = 0.5
+
+
 def _calculate_trending_score(
     self, df: pd.DataFrame,
     ema_fast_col: str = 'ema_fast',
@@ -37,13 +101,13 @@ def _calculate_trending_score(
     # Dans une tendance baissière, on veut prix < EMA lente et EMA rapide < EMA lente
     if self.indicators.is_uptrend(df):
         if price_above_ema and ema_cross_bullish:
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['ema_cross']
             details['ema_cross'] = 1
         else:
             details['ema_cross'] = 0
     elif self.indicators.is_downtrend(df):
         if price_below_ema and ema_cross_bearish:
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['ema_cross']
             details['ema_cross'] = 1
         else:
             details['ema_cross'] = 0
@@ -54,13 +118,13 @@ def _calculate_trending_score(
     ema_trend = latest.get('ema_trend', 0)
     if self.indicators.is_uptrend(df):
         if price > ema_trend:
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['price_vs_ema200']
             details['price_vs_ema200'] = 1
         else:
             details['price_vs_ema200'] = 0
     elif self.indicators.is_downtrend(df):
         if price < ema_trend:
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['price_vs_ema200']
             details['price_vs_ema200'] = 1
         else:
             details['price_vs_ema200'] = 0
@@ -73,7 +137,7 @@ def _calculate_trending_score(
     if ema_htf > 0 and ema_d1 > 0:
         htf_aligned = ema_htf > ema_d1 if self.indicators.is_uptrend(df) else ema_htf < ema_d1
         if htf_aligned:
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['htf_alignment']
             details['htf_alignment'] = 1
         else:
             details['htf_alignment'] = 0
@@ -88,13 +152,13 @@ def _calculate_trending_score(
 
     if self.indicators.is_uptrend(df):
         if macd_cross_bullish or (macd > 0 and macd_signal > 0):
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['macd_cross']
             details['macd_cross'] = 1
         else:
             details['macd_cross'] = 0
     elif self.indicators.is_downtrend(df):
         if macd_cross_bearish or (macd < 0 and macd_signal < 0):
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['macd_cross']
             details['macd_cross'] = 1
         else:
             details['macd_cross'] = 0
@@ -105,13 +169,13 @@ def _calculate_trending_score(
     supertrend_trend = latest.get('supertrend_trend', 0)
     if self.indicators.is_uptrend(df):
         if supertrend_trend > 0:
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['supertrend']
             details['supertrend'] = 1
         else:
             details['supertrend'] = 0
     elif self.indicators.is_downtrend(df):
         if supertrend_trend < 0:
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['supertrend']
             details['supertrend'] = 1
         else:
             details['supertrend'] = 0
@@ -120,9 +184,8 @@ def _calculate_trending_score(
 
     # 6. ADX strength (confirmation de tendance) - 1 point
     adx = latest.get('adx', 0)
-    adx_threshold = self.config.get('ADX_TREND', 22.0)
     if adx > adx_threshold:
-        score += 1
+        score += TRENDING_VOTE_WEIGHTS['adx_strength']
         details['adx_strength'] = 1
     else:
         details['adx_strength'] = 0
@@ -132,13 +195,13 @@ def _calculate_trending_score(
     minus_di = latest.get('minus_di', 0)
     if self.indicators.is_uptrend(df):
         if plus_di > minus_di:
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['trend_momentum']
             details['trend_momentum'] = 1
         else:
             details['trend_momentum'] = 0
     elif self.indicators.is_downtrend(df):
         if minus_di > plus_di:
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['trend_momentum']
             details['trend_momentum'] = 1
         else:
             details['trend_momentum'] = 0
@@ -149,13 +212,13 @@ def _calculate_trending_score(
     mfi = latest.get('mfi', 50)
     if self.indicators.is_uptrend(df):
         if mfi > 50:  # Pression d'achat
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['volume_confirmation']
             details['volume_confirmation'] = 1
         else:
             details['volume_confirmation'] = 0
     elif self.indicators.is_downtrend(df):
         if mfi < 50:  # Pression de vente
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['volume_confirmation']
             details['volume_confirmation'] = 1
         else:
             details['volume_confirmation'] = 0
@@ -166,13 +229,13 @@ def _calculate_trending_score(
     elder_impulse = latest.get('elder_impulse', 0)
     if self.indicators.is_uptrend(df):
         if elder_impulse == 1:  # Vert (EMA13 en hausse et MACD histogramme en hausse)
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['elder_impulse_confirm']
             details['elder_impulse_confirm'] = 1
         else:
             details['elder_impulse_confirm'] = 0
     elif self.indicators.is_downtrend(df):
         if elder_impulse == -1:  # Rouge (EMA13 en baisse et MACD histogramme en baisse)
-            score += 1
+            score += TRENDING_VOTE_WEIGHTS['elder_impulse_confirm']
             details['elder_impulse_confirm'] = 1
         else:
             details['elder_impulse_confirm'] = 0
@@ -202,10 +265,118 @@ def _calculate_trending_score(
     score += bonus_score
     details['divergence_bonus'] = bonus_score
 
+    # Signaux candidats indépendants (mesurés, non notés).
+    _append_candidate_signals(details, df, latest, price, ema_slow, adx)
+
     # S'assurer que le score ne dépasse pas 10
     score = min(score, 10)
 
     return score, details
+
+
+def _calculate_trending_score_signals(
+    self, df: pd.DataFrame,
+    ema_fast_col: str = 'ema_fast',
+    ema_slow_col: str = 'ema_slow',
+    adx_threshold: float = 22.0,
+    asset_hint: str = ""
+) -> Tuple[float, Dict[str, Any]]:
+    """Score de tendance reconstruit sur des signaux INDÉPENDANTS (mesurés).
+
+    Remplace les 9 votes redondants de l'ancien score (qui mesuraient tous
+    « c'est une tendance ») par 4 dimensions orthogonales, calibrées sur le
+    backtest (BTC/ETH 1h, 137 trades) :
+
+      1. Elder Impulse (direction + momentum alignés)     — +2 pts
+         (seul vote de l'ancien score à edge positif mesuré, +6.1 pts)
+      2. Volatilité en expansion (percentile ATR > 50 %)  — +2 pts
+         (edge positif mesuré sur BTC ET ETH : +0.29/+0.33 PF)
+      3. Extension vs EMA lente, direction selon l'actif  — +2 pts
+         (BTC = momentum : extension OK ; altcoin = mean-reversion : pullback OK)
+      4. ADX modéré (<= 35, pas d'exhaustion de tendance) — +2 pts
+         (l'ancien vote « ADX > 22 » était anti-prédictif)
+
+    Plus le bonus divergence conservé (0-1 pt). Total max 9.
+    """
+    latest = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else latest
+
+    uptrend = self.indicators.is_uptrend(df)
+    downtrend = self.indicators.is_downtrend(df)
+
+    score = 0.0
+    details = {}
+
+    price = latest['close']
+    ema_slow = latest.get(ema_slow_col, latest.get('ema_slow', price))
+    atr = latest.get('atr', 0.0) or 0.0
+
+    # 1. Elder Impulse — ancre de direction/momentum (+2)
+    elder_impulse = latest.get('elder_impulse', 0)
+    if (uptrend and elder_impulse == 1) or (downtrend and elder_impulse == -1):
+        score += 2.0
+        details['elder_impulse_confirm'] = 1
+    else:
+        details['elder_impulse_confirm'] = 0
+
+    # 2. Volatilité en expansion (+2)
+    if 'atr' in df.columns and len(df) >= 100 and atr > 0:
+        atr_rank = float((df['atr'].iloc[-100:] < atr).mean())
+    else:
+        atr_rank = 0.5
+    if atr_rank > 0.5:
+        score += 2.0
+        details['vol_expansion'] = 1
+    else:
+        details['vol_expansion'] = 0
+
+    # 3. Extension vs EMA lente — direction selon l'actif (+2)
+    dist_ema_atr = (price - ema_slow) / atr if atr > 0 else 0.0
+    if asset_hint == 'BTC':
+        ext_ok = dist_ema_atr > 0.0       # momentum : la tendance s'étend
+    elif asset_hint == 'ALTCOIN':
+        ext_ok = dist_ema_atr <= 1.0      # mean-reversion : pas de sur-extension
+    elif asset_hint == 'STOCK':
+        ext_ok = dist_ema_atr > -1.0      # neutre conservateur
+    else:  # FOREX / inconnu : pas de filtre d'extension
+        ext_ok = True
+    if ext_ok:
+        score += 2.0
+        details['extension_ok'] = 1
+    else:
+        details['extension_ok'] = 0
+
+    # 4. ADX modéré (+2) — ADX élevé signe souvent l'exhaustion de tendance
+    adx = latest.get('adx', 0.0) or 0.0
+    if adx <= 35.0:
+        score += 2.0
+        details['adx_moderate'] = 1
+    else:
+        details['adx_moderate'] = 0
+
+    # Bonus divergence (conservé, 0-1 pt)
+    rsi_div_bull = latest.get('rsi_divergence_bullish', False)
+    rsi_div_bear = latest.get('rsi_divergence_bearish', False)
+    macd_div_bull = latest.get('macd_divergence_bullish', False)
+    macd_div_bear = latest.get('macd_divergence_bearish', False)
+    obv_div_bull = latest.get('obv_divergence_bullish', False)
+    obv_div_bear = latest.get('obv_divergence_bearish', False)
+
+    bonus_score = 0
+    if uptrend and (rsi_div_bull or macd_div_bull or obv_div_bull):
+        bonus_score += 1
+    elif downtrend and (rsi_div_bear or macd_div_bear or obv_div_bear):
+        bonus_score += 1
+
+    score += bonus_score
+    details['divergence_bonus'] = bonus_score
+
+    # Signaux candidats indépendants (mesurés, non notés).
+    _append_candidate_signals(details, df, latest, price, ema_slow, adx)
+
+    score = min(score, 10.0)
+    return score, details
+
 
 def _calculate_ranging_score(self, df: pd.DataFrame) -> Tuple[float, Dict[str, Any]]:
     """
@@ -347,20 +518,21 @@ def calculate_probabilistic_win_rate(score: float, market_regime: str = "TRENDIN
     Estime la probabilité de réussite P(Win) et l'espérance mathématique E(R) du trade.
 
     E(R) = P(Win) * RR - (1 - P(Win)) * 1.0
+
+    L'ancienne formule linéaire (0.35 + score/10*0.40) annonçait 59-75% de gain
+    là où le win rate réalisé est ~25%. Elle est remplacée par une calibration
+    empirique sur les trades réels (WinRateCalibrator), avec un prior prudent
+    en l'absence d'historique. market_regime/adx_value restent dans la signature
+    pour compatibilité mais ne gonflent plus artificiellement la probabilité.
     """
-    base_pwin = 0.35 + (min(score, 10.0) / 10.0) * 0.40  # Score 6 -> 59%, Score 8 -> 67%, Score 10 -> 75%
+    from superbot.ml.win_rate_calibrator import get_calibrator
 
-    if market_regime in ["TRENDING", "HIGH_VOL_TREND"]:
-        if adx_value > 25:
-            base_pwin += 0.05
-        if adx_value > 35:
-            base_pwin += 0.03
-    elif market_regime == "HIGH_VOL_RANGE":
-        base_pwin -= 0.05
+    win_prob = get_calibrator().predict(score)
+    win_prob = max(win_prob, 0.05)
 
-    win_prob = min(max(base_pwin, 0.20), 0.85)
     expected_value = (win_prob * rr_ratio) - ((1.0 - win_prob) * 1.0)
-    has_statistical_edge = expected_value > 0.30 and win_prob >= 0.55
+    # Edge = espérance strictement positive (seuil de rentabilité 1/(1+RR)).
+    has_statistical_edge = expected_value > 0
 
     return {
         'win_prob': round(win_prob, 3),

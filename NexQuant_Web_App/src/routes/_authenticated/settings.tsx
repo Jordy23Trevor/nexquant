@@ -27,7 +27,13 @@ const settingsTranslations = {
     announcement1Text: "Intégration Bêta des webhooks TradingView terminée. Vous pouvez désormais automatiser vos propres scripts via la page Stratégies.",
     announcement2Date: "15 Juin 2026",
     announcement2Text: "Maintenance serveur prévue ce week-end. Le trading ne sera pas affecté, mais l'interface web pourrait subir des latences.",
-    loading: "Chargement des paramètres..."
+    loading: "Chargement des paramètres...",
+    ingestTitle: "Connecter un bot Python local",
+    ingestHide: "Masquer",
+    ingestShow: "Afficher les instructions",
+    ingestDesc: "Le bot pousse ses métriques via un endpoint public en utilisant votre",
+    ingestCopy: "Copier l'URL de l'endpoint",
+    copied: "URL copiée"
   },
   en: {
     title: "Account Settings",
@@ -49,7 +55,13 @@ const settingsTranslations = {
     announcement1Text: "Beta integration of TradingView webhooks completed. You can now automate your own scripts via the Strategies page.",
     announcement2Date: "June 15, 2026",
     announcement2Text: "Server maintenance scheduled for this weekend. Trading will not be affected, but the web interface might experience latency.",
-    loading: "Loading settings..."
+    loading: "Loading settings...",
+    ingestTitle: "Connect a local Python bot",
+    ingestHide: "Hide",
+    ingestShow: "Show instructions",
+    ingestDesc: "The bot pushes its metrics via a public endpoint using your",
+    ingestCopy: "Copy endpoint URL",
+    copied: "URL copied"
   },
   es: {
     title: "Configuración de la cuenta",
@@ -71,7 +83,13 @@ const settingsTranslations = {
     announcement1Text: "Integración Beta de webhooks de TradingView completada. Ahora puede automatizar sus propios scripts a través de la página de Estrategias.",
     announcement2Date: "15 de Junio de 2026",
     announcement2Text: "Mantenimiento del servidor programado para este fin de semana. Las operaciones no se verán afectadas, pero la interfaz web puede experimentar latencia.",
-    loading: "Cargando configuraciones..."
+    loading: "Cargando configuraciones...",
+    ingestTitle: "Conectar un bot Python local",
+    ingestHide: "Ocultar",
+    ingestShow: "Mostrar instrucciones",
+    ingestDesc: "El bot envía sus métricas a través de un endpoint público utilizando su",
+    ingestCopy: "Copiar URL del endpoint",
+    copied: "URL copiada"
   }
 };
 
@@ -82,7 +100,7 @@ export const Route = createFileRoute("/_authenticated/settings")({
 
 function SettingsPage() {
   const fetchData = useServerFn(getDashboardData);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => fetchData(),
   });
@@ -94,16 +112,15 @@ function SettingsPage() {
     return "dark";
   });
 
-  const [lang, setLang] = useState<"fr" | "en" | "es">(() => {
-    if (typeof window !== "undefined") {
-      return (localStorage.getItem("lang") as "fr" | "en" | "es") || "fr";
-    }
-    return "fr";
-  });
+  const [lang, setLang] = useState<"fr" | "en" | "es">("fr");
 
   const [notif, setNotif] = useState(true);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("lang") as "fr" | "en" | "es";
+      if (stored && stored !== lang) setLang(stored);
+    }
     const handleThemeChange = () => {
       setTheme(localStorage.getItem("theme") || "dark");
     };
@@ -132,6 +149,10 @@ function SettingsPage() {
   };
 
   const t = settingsTranslations[lang] || settingsTranslations.fr;
+
+  if (isError) {
+    return <div className="p-6 text-rose-500 font-mono text-sm">Erreur de chargement: {error?.message || "Accès non autorisé"}</div>;
+  }
 
   if (isLoading || !data) {
     return <div className="p-6 text-zinc-500 animate-pulse font-mono text-sm">{t.loading}</div>;
@@ -178,7 +199,7 @@ function SettingsPage() {
           </div>
 
           {/* Ingestion Help */}
-          <IngestHelp userId={data.profile?.id} />
+          <IngestHelp userId={data.profile?.id} lang={lang} />
 
         </div>
 
@@ -253,18 +274,19 @@ function SettingsPage() {
   );
 }
 
-function IngestHelp({ userId }: { userId?: string }) {
+function IngestHelp({ userId, lang }: { userId?: string, lang: string }) {
   const [open, setOpen] = useState(false);
   const url = typeof window !== "undefined" ? `${window.location.origin}/api/public/ingest` : "/api/public/ingest";
+  const t = settingsTranslations[lang as "fr" | "en" | "es"] || settingsTranslations.fr;
   return (
     <details onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)} className="panel p-5 rounded-xl border border-white/10 bg-zinc-900/40 backdrop-blur-md">
       <summary className="cursor-pointer flex items-center justify-between">
-        <span className="font-semibold text-sm text-zinc-100">Connecter un bot Python local</span>
-        <span className="text-xs text-indigo-400 font-medium">{open ? "Masquer" : "Afficher les instructions"}</span>
+        <span className="font-semibold text-sm text-zinc-100">{t.ingestTitle}</span>
+        <span className="text-xs text-indigo-400 font-medium">{open ? t.ingestHide : t.ingestShow}</span>
       </summary>
       <div className="mt-4 space-y-3 text-sm">
         <p className="text-zinc-400 text-xs">
-          Le bot pousse ses métriques via un endpoint public en utilisant votre <code className="font-mono text-[10px] bg-zinc-950 border border-white/10 px-1.5 py-0.5 rounded text-indigo-300">user_id</code>.
+          {t.ingestDesc} <code className="font-mono text-[10px] bg-zinc-950 border border-white/10 px-1.5 py-0.5 rounded text-indigo-300">user_id</code>.
         </p>
         <pre className="font-mono text-[10px] bg-zinc-950/70 border border-white/5 rounded-md p-4 overflow-x-auto text-zinc-400">
 {`POST ${url}
@@ -277,9 +299,9 @@ x-user-id: ${userId || '<votre-uuid>'}
   "payload": { "equity": 12438.20 }
 }`}
         </pre>
-        <button onClick={() => { navigator.clipboard.writeText(url); toast.success("URL copiée"); }}
+        <button onClick={() => { navigator.clipboard.writeText(url); toast.success(t.copied); }}
           className="text-[11px] px-3 py-1.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition">
-          Copier l'URL de l'endpoint
+          {t.ingestCopy}
         </button>
       </div>
     </details>
@@ -403,7 +425,7 @@ function BrokerSettingsForm({ userBroker, lang }: { userBroker: any, lang: strin
           ))}
         </div>
         <div className="mt-2 text-right">
-          {brokerType === "binance" && <a href="https://www.binance.com/fr/my/settings/api-management" target="_blank" rel="noreferrer" className="text-[10px] text-indigo-400 hover:underline">{l.manageBinance}</a>}
+          {brokerType === "binance" && <a href={`https://www.binance.com/${lang}/my/settings/api-management`} target="_blank" rel="noreferrer" className="text-[10px] text-indigo-400 hover:underline">{l.manageBinance}</a>}
           {brokerType === "alpaca" && <a href="https://app.alpaca.markets/api-keys" target="_blank" rel="noreferrer" className="text-[10px] text-indigo-400 hover:underline">{l.manageAlpaca}</a>}
           {brokerType === "mt5" && <span className="text-[10px] text-zinc-500">{l.mt5Info}</span>}
         </div>

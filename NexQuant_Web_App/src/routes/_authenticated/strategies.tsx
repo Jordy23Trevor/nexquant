@@ -28,7 +28,13 @@ const translations = {
     history: "Historique des signaux",
     notGen: "non généré",
     waitingTrades: "En attente",
-    emptySigs: "Aucun signal récent"
+    emptySigs: "Aucun signal récent",
+    fastEma: "Fast EMA",
+    slowEma: "Slow EMA",
+    timeframe: "Unité de temps",
+    rsiPeriod: "Période RSI",
+    oversold: "Survente",
+    overbought: "Surachat"
   },
   en: {
     title: "Strategies & Webhook",
@@ -51,7 +57,13 @@ const translations = {
     history: "Signal History",
     notGen: "not generated",
     waitingTrades: "Waiting",
-    emptySigs: "No recent signals"
+    emptySigs: "No recent signals",
+    fastEma: "Fast EMA",
+    slowEma: "Slow EMA",
+    timeframe: "Timeframe",
+    rsiPeriod: "RSI Period",
+    oversold: "Oversold",
+    overbought: "Overbought"
   },
   es: {
     title: "Estrategias y Webhook",
@@ -74,7 +86,13 @@ const translations = {
     history: "Historial de señales",
     notGen: "no generado",
     waitingTrades: "Esperando",
-    emptySigs: "Sin señales recientes"
+    emptySigs: "Sin señales recientes",
+    fastEma: "EMA Rápida",
+    slowEma: "EMA Lenta",
+    timeframe: "Marco temporal",
+    rsiPeriod: "Periodo RSI",
+    oversold: "Sobrevendida",
+    overbought: "Sobrecomprada"
   }
 };
 
@@ -90,14 +108,16 @@ function StrategiesPage() {
     queryFn: () => fetchData(),
   });
 
-  const [lang, setLang] = useState<"fr" | "en" | "es">(() => {
-    if (typeof window !== "undefined") {
-      return (localStorage.getItem("lang") as "fr" | "en" | "es") || "fr";
-    }
-    return "fr";
-  });
+  const [lang, setLang] = useState<"fr" | "en" | "es">("fr");
+
+  const [webhookUrl, setWebhookUrl] = useState("https://nexquant.io/api/public/webhook");
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("lang") as "fr" | "en" | "es";
+      if (stored && stored !== lang) setLang(stored);
+      setWebhookUrl(`${window.location.origin}/api/public/webhook`);
+    }
     const handleLangChange = () => {
       setLang((localStorage.getItem("lang") as "fr" | "en" | "es") || "fr");
     };
@@ -110,11 +130,11 @@ function StrategiesPage() {
   const token = data?.profile?.ingest_token || t.notGen;
   
   const strategies = [
-    { name: 'EMA Cross', type: t.typeTrend, active: true, params: [['Fast EMA', '9'], ['Slow EMA', '21'], ['Timeframe', '5m']], pair: 'BTC/USDT', trades: '142', wr: '61%' },
-    { name: 'RSI Scalper', type: t.typeCounter, active: false, params: [['RSI Period', '14'], ['Survente', '30'], ['Surachat', '70']], pair: 'ETH/USDT', trades: t.waitingTrades, wr: '—' }
+    { name: 'EMA Cross', type: t.typeTrend, active: true, params: [[t.fastEma, '9'], [t.slowEma, '21'], [t.timeframe, '5m']], pair: 'BTC/USDT', trades: '142', wr: '61%' },
+    { name: 'RSI Scalper', type: t.typeCounter, active: false, params: [[t.rsiPeriod, '14'], [t.oversold, '30'], [t.overbought, '70']], pair: 'ETH/USDT', trades: t.waitingTrades, wr: '—' }
   ];
 
-  const webhookUrl = typeof window !== "undefined" ? `${window.location.origin}/api/public/webhook` : "https://nexquant.io/api/public/webhook";
+
 
   return (
     <div className="p-4 lg:p-6 max-w-7xl mx-auto space-y-6">
@@ -124,7 +144,7 @@ function StrategiesPage() {
           <h1 className="text-[15px] font-bold text-foreground font-technical tracking-tight">{t.title}</h1>
           <p className="text-[11px] text-muted-foreground mt-0.5">{t.desc}</p>
         </div>
-        <button className="px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/10 text-primary text-[12px] flex items-center gap-2 hover:bg-primary/20 transition">
+        <button onClick={() => toast.info("Fonctionnalité en cours de développement")} className="px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/10 text-primary text-[12px] flex items-center gap-2 hover:bg-primary/20 transition">
           <Plus className="w-3.5 h-3.5" />
           {t.newStrat}
         </button>
@@ -164,8 +184,8 @@ function StrategiesPage() {
               </div>
 
               <div className="flex gap-2 mt-4">
-                <button className="flex-1 py-1.5 rounded-lg border border-border text-muted-foreground text-[11px] hover:bg-muted/30 transition">{t.modify}</button>
-                <button className="flex-1 py-1.5 rounded-lg border border-primary/20 bg-primary/10 text-primary text-[11px] hover:bg-primary/20 transition">{t.backtest}</button>
+                <button onClick={() => toast.info("Fonctionnalité en cours de développement")} className="flex-1 py-1.5 rounded-lg border border-border text-muted-foreground text-[11px] hover:bg-muted/30 transition">{t.modify}</button>
+                <button onClick={() => toast.info("Fonctionnalité en cours de développement")} className="flex-1 py-1.5 rounded-lg border border-primary/20 bg-primary/10 text-primary text-[11px] hover:bg-primary/20 transition">{t.backtest}</button>
               </div>
             </div>
           ))}
@@ -204,7 +224,7 @@ function StrategiesPage() {
               <div className="flex-1 bg-muted/50 border border-border rounded-lg py-1.5 px-3 text-[11px] text-foreground font-mono">
                 {token.substring(0, 15)}...
               </div>
-              <button className="py-1.5 px-3 rounded-lg border border-primary/20 bg-primary/10 text-primary text-[11px] hover:bg-primary/20 transition flex items-center gap-1.5">
+              <button onClick={() => toast.info("Fonctionnalité en cours de développement")} className="py-1.5 px-3 rounded-lg border border-primary/20 bg-primary/10 text-primary text-[11px] hover:bg-primary/20 transition flex items-center gap-1.5">
                 <RefreshCw className="w-3 h-3" /> {t.regen}
               </button>
             </div>

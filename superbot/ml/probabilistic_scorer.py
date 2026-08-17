@@ -88,8 +88,8 @@ def _extract_extended_features(df_row: pd.Series, context: dict = None) -> np.nd
     regime_id = float(REGIME_MAP.get(regime_str, 0))
     session_str = str(ctx.get('session', 'LONDON'))
     session_id = float(SESSION_MAP.get(session_str, 3))
-    from datetime import datetime
-    now = datetime.utcnow()
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
     hour_of_day = float(now.hour)
     day_of_week = float(now.weekday())
     spread_pips = float(ctx.get('spread_pips', 0.5) or 0.5)

@@ -228,8 +228,8 @@ class MT5Client(Broker):
             return []
 
         try:
-            from_date = datetime.now() - timedelta(days=days)
-            to_date = datetime.now()
+            from_date = datetime.now(timezone.utc) - timedelta(days=days)
+            to_date = datetime.now(timezone.utc)
 
             deals = self._call_api(lambda: mt5.history_deals_get(from_date, to_date), None)
             if deals is None:
@@ -512,12 +512,15 @@ class MT5Client(Broker):
             price = tick.bid
         else:
             log.error(f"Type d'action d'ordre inconnu : {side}")
-            return False
-
-        # S'assurer que la quantité respecte les contraintes du courtier (calculé en unités)
+            return False        # S'assurer que la quantité respecte les contraintes du courtier (calculé en unités)
         min_units = self.get_min_order_size(symbol)
         step_units = self.get_step_size(symbol)
-        amount = max(amount, min_units)
+
+        # Ne PAS forcer le minimum : si la taille demandée est sous le volume min,
+        # on refuse l'ordre au lieu de sur-allouer sur un petit compte.
+        if amount < min_units:
+            log.warning(f"Quantité {amount:.2f} < volume minimum ({min_units:.2f}) pour {symbol} — ordre rejeté.")
+            return False
         amount = round(amount / step_units) * step_units
 
         # Convertir en lots pour MT5
@@ -548,6 +551,39 @@ class MT5Client(Broker):
             cleaned = f"SBOT-{side_upper}"
         final_comment = cleaned[:29]
         log.debug(f"Commentaire MT5 final : '{final_comment}' (original: '{base_comment}')")
+
+        # Vérification stricte des stops vs prix d'exécution et StopLevel.
+        point = info.point if info else 0.00001
+        stops_level = (info.trade_stops_level or 0) * point if info else 0.0
+        
+        if side_upper in ["BUY", "LONG"]:
+            if tp > 0 and tp <= price:
+                log.warning(f"Prix d'achat {price} a dépassé le TP {tp}. Trade annulé.")
+                return False
+            if sl > 0 and sl >= price:
+                log.warning(f"Prix d'achat {price} a dépassé le SL {sl}. Trade annulé.")
+                return False
+            # Ajustement StopLevel
+            if sl > 0 and price - sl < stops_level:
+                sl = price - stops_level
+                log.debug(f"SL ajusté pour StopLevel MT5: {sl}")
+            if tp > 0 and tp - price < stops_level:
+                tp = price + stops_level
+                log.debug(f"TP ajusté pour StopLevel MT5: {tp}")
+        elif side_upper in ["SELL", "SHORT"]:
+            if tp > 0 and tp >= price:
+                log.warning(f"Prix de vente {price} a dépassé le TP {tp}. Trade annulé.")
+                return False
+            if sl > 0 and sl <= price:
+                log.warning(f"Prix de vente {price} a dépassé le SL {sl}. Trade annulé.")
+                return False
+            # Ajustement StopLevel
+            if sl > 0 and sl - price < stops_level:
+                sl = price + stops_level
+                log.debug(f"SL ajusté pour StopLevel MT5: {sl}")
+            if tp > 0 and price - tp < stops_level:
+                tp = price - stops_level
+                log.debug(f"TP ajusté pour StopLevel MT5: {tp}")
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,

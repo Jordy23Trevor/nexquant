@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import {
   Activity, ArrowDown, ArrowUp, LogOut, Pause, Play, RefreshCw, TrendingUp,
-  TrendingDown, Zap, Brain, Newspaper, Cpu, Settings, Shield, Key, Clock
+  TrendingDown, Zap, Brain, Newspaper, Cpu, Settings, Shield, Key, Clock, Square, Database, History
 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
@@ -12,7 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { MetricCard } from "@/components/MetricCard";
 import { BotStatusIndicator } from "@/components/BotStatusIndicator";
 import { ControlPanel } from "@/components/ControlPanel";
-import { getDashboardData, toggleBot, updateRisk, saveBrokerCredentials } from "@/lib/nexquant.functions";
+import { getDashboardData, toggleBot, updateRisk, saveBrokerCredentials, updateBrokerConfig } from "@/lib/nexquant.functions";
 import { useMemo } from "react";
 
 const translations = {
@@ -107,14 +107,16 @@ function Dashboard() {
   const fetchData = useServerFn(getDashboardData);
   const toggle = useServerFn(toggleBot);
 
-  const [lang, setLang] = useState<"fr" | "en" | "es">(() => {
-    if (typeof window !== "undefined") {
-      return (localStorage.getItem("lang") as "fr" | "en" | "es") || "fr";
-    }
-    return "fr";
-  });
+  const [lang, setLang] = useState<"fr" | "en" | "es">("fr");
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("lang") as "fr" | "en" | "es";
+      if (stored && stored !== lang) {
+        setLang(stored);
+      }
+    }
+
     const handleLangChange = () => {
       setLang((localStorage.getItem("lang") as "fr" | "en" | "es") || "fr");
     };
@@ -124,7 +126,7 @@ function Dashboard() {
 
   const t = translations[lang] || translations.fr;
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => fetchData(),
     refetchInterval: 15000,
@@ -143,6 +145,25 @@ function Dashboard() {
     },
   });
 
+  const updateBrokerFn = useServerFn(updateBrokerConfig);
+  const brokerMut = useMutation({
+    mutationFn: (args: { brokerType: string, testnet: boolean }) => updateBrokerFn({ data: args }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["dashboard"] }); },
+  });
+
+  const handleToggleStatus = async (run: boolean) => {
+    await toggleMut.mutateAsync(run);
+  };
+
+  const handleRiskChange = async (risk: number) => {
+    await riskMut.mutateAsync(risk);
+  };
+
+  const handleBrokerChange = async (brokerType: string, testnet: boolean) => {
+    await brokerMut.mutateAsync({ brokerType, testnet });
+    toast.success("Broker mis à jour !");
+  };
+
   async function signOut() {
     await qc.cancelQueries();
     qc.clear();
@@ -152,7 +173,6 @@ function Dashboard() {
 
   const equity = data?.equity || [];
 
-  // BUG-D10 FIX: Factoriser le calcul isRed avec useMemo (avant dupliqué ~40 lignes x2)
   const isRedArray = useMemo(() => {
     const N = equity.length;
     const isRed = new Array(N).fill(false);
@@ -175,6 +195,18 @@ function Dashboard() {
     return isRed;
   }, [equity]);
 
+  if (isError) {
+    return (
+      <div className="min-h-screen grid place-items-center">
+        <div className="flex flex-col items-center gap-3 text-destructive">
+          <Activity className="w-8 h-8 opacity-50" />
+          <p className="font-semibold">Erreur de chargement</p>
+          <p className="text-sm opacity-80">{error?.message || "Accès non autorisé ou erreur réseau"}</p>
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading || !data) {
     return (
       <div className="min-h-screen grid place-items-center">
@@ -196,8 +228,6 @@ function Dashboard() {
 
   const openTotal = data.openPositions.reduce((s: number, p: {pnl: unknown}) => s + Number(p.pnl), 0);
 
-  // BUG-D03 FIX: Trouver le snapshot le plus proche de il y a 24h au lieu d'utiliser
-  // les 2 derniers points (qui peuvent être séparés de 15 minutes seulement)
   const target24h = Date.now() - 86400000;
   const snap24h = equity.reduce((best: typeof equity[0] | null, p: typeof equity[0]) => {
     if (!best) return p;
@@ -214,7 +244,7 @@ function Dashboard() {
       <main className="max-w-7xl mx-auto px-4 lg:px-6 py-6 space-y-6">
 
         {/* KPIs */}
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <section className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
           <MetricCard 
             title={t.equityTitle} 
             value={`$${(last?.equity ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
@@ -247,6 +277,74 @@ function Dashboard() {
             tooltipText={t.maxDdTT}
             glowColor="rose"
           />
+          <MetricCard 
+            title="Win Rate" 
+            value={`${((status?.win_rate ?? 0) * 100).toFixed(1)}%`}
+            change="Trades Gagnants"
+            isPositive={(status?.win_rate ?? 0) > 0.5}
+            tooltipText="Pourcentage de trades profitables"
+            glowColor={(status?.win_rate ?? 0) > 0.5 ? "emerald" : "rose"}
+          />
+          <MetricCard 
+            title="Profit Factor" 
+            value={`${(status?.profit_factor ?? 0).toFixed(2)}`}
+            change="Ratio Gains/Pertes"
+            isPositive={(status?.profit_factor ?? 0) > 1}
+            tooltipText="Gain brut divisé par la perte brute"
+            glowColor={(status?.profit_factor ?? 0) > 1 ? "emerald" : "rose"}
+          />
+        </section>
+
+        {/* Advanced Metrics / Market Mood */}
+        <section className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
+          <MetricCard 
+            title="Kelly Fraction" 
+            value={`${((status?.kelly_fraction ?? 0) * 100).toFixed(1)}%`}
+            change="Risque suggéré"
+            isPositive={true}
+            tooltipText="La fraction de Kelly actuelle calculée par le bot"
+            glowColor="indigo"
+          />
+          <MetricCard 
+            title="News Sentiment" 
+            value={`${(status?.news_sentiment ?? 0).toFixed(2)}`}
+            change="Score"
+            isPositive={(status?.news_sentiment ?? 0) >= 0}
+            tooltipText="Sentiment global du marché via NLP"
+            glowColor={(status?.news_sentiment ?? 0) >= 0 ? "emerald" : "rose"}
+          />
+          <MetricCard 
+            title="Fear & Greed" 
+            value={`${(status?.fear_greed ?? 50).toFixed(0)}`}
+            change={(status?.fear_greed ?? 50) > 50 ? "Greed" : "Fear"}
+            isPositive={(status?.fear_greed ?? 50) > 50}
+            tooltipText="Indice de peur et d'avidité"
+            glowColor={(status?.fear_greed ?? 50) > 50 ? "emerald" : "rose"}
+          />
+          <MetricCard 
+            title="Bot Uptime" 
+            value={`${((status?.uptime_seconds ?? 0) / 3600).toFixed(1)}h`}
+            change="Temps en ligne"
+            isPositive={true}
+            tooltipText="Durée de fonctionnement de la session actuelle"
+            glowColor="indigo"
+          />
+          <MetricCard 
+            title="Market Regime" 
+            value={`${status?.regime || 'Inconnu'}`}
+            change={`${((status?.regime_confidence ?? 0) * 100).toFixed(0)}% conf`}
+            isPositive={status?.regime?.includes('bull')}
+            tooltipText="Le régime de marché actuellement détecté par l'IA"
+            glowColor={status?.regime?.includes('bull') ? "emerald" : status?.regime?.includes('bear') ? "rose" : "indigo"}
+          />
+          <MetricCard 
+            title="Objectif Jour" 
+            value={`$${(status?.daily_achieved_eur ?? 0).toFixed(2)}`}
+            change={`/ $${(status?.daily_target_eur ?? 0).toFixed(2)}`}
+            isPositive={(status?.daily_achieved_eur ?? 0) >= (status?.daily_target_eur ?? 1)}
+            tooltipText="Progression vers l'objectif journalier"
+            glowColor={(status?.daily_achieved_eur ?? 0) >= (status?.daily_target_eur ?? 1) ? "emerald" : "indigo"}
+          />
         </section>
 
         {/* Main Content Area: Graph & Control Panel */}
@@ -265,7 +363,6 @@ function Dashboard() {
                 <AreaChart data={equity} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorEqStroke" x1="0" y1="0" x2="1" y2="0">
-                      {/* BUG-D10 FIX: isRedArray factorisé, plus de code dupliqué */}
                       {equity.length > 1 && equity.map((_: unknown, i: number) => {
                         if (i === 0) return null;
                         const color = isRedArray[i] ? "#f87171" : "#34d399";
@@ -310,9 +407,12 @@ function Dashboard() {
           <section className="flex flex-col">
             <ControlPanel
               initialIsRunning={running}
-              onToggleStatus={async (r) => { await toggleMut.mutateAsync(r); }}
-              initialRiskPct={((data.status ?? {}) as Record<string, unknown>).risk_pct as number ?? 1.5}
-              onRiskChange={async (r) => { await riskMut.mutateAsync(r); }}
+              onToggleStatus={handleToggleStatus}
+              initialRiskPct={status?.risk_pct ?? 1.0}
+              onRiskChange={handleRiskChange}
+              initialBrokerType={status?.broker_type}
+              initialTestnet={status?.testnet}
+              onBrokerChange={handleBrokerChange}
             />
           </section>
 
@@ -361,6 +461,60 @@ function Dashboard() {
                 )}
               </tbody>
             </table>
+          </div>
+        </section>
+
+        {/* Global History */}
+        <section className="panel p-5 rounded-xl border border-border">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <History className="w-5 h-5 text-indigo-400" />
+              Historique Global des Trades
+            </h2>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <div className="min-w-[800px]">
+              <div className="grid grid-cols-7 gap-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground pb-2 border-b border-border">
+                <div>Actif</div>
+                <div>Side</div>
+                <div>Entrée</div>
+                <div>Sortie</div>
+                <div>Quantité</div>
+                <div>Date</div>
+                <div className="text-right">PnL</div>
+              </div>
+
+              <div className="divide-y divide-border/50 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar mt-2">
+                {!data.closedPositions || data.closedPositions.length === 0 ? (
+                  <div className="py-8 text-center text-muted-foreground bg-background/50 rounded-lg border border-dashed border-border/50">
+                    <p>Aucun trade clôturé pour le moment.</p>
+                  </div>
+                ) : (
+                  data.closedPositions.map((pos: any) => (
+                    <div key={pos.id} className="grid grid-cols-7 gap-4 py-3 items-center hover:bg-white/5 transition-colors rounded px-2 -mx-2">
+                      <div className="font-medium flex items-center gap-2">
+                        {pos.symbol}
+                      </div>
+                      <div>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          pos.side === 'buy' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                        }`}>
+                          {pos.side}
+                        </span>
+                      </div>
+                      <div className="font-mono text-sm">${(pos.entry_price ?? 0).toLocaleString()}</div>
+                      <div className="font-mono text-sm">${(pos.current_price ?? pos.entry_price ?? 0).toLocaleString()}</div>
+                      <div className="font-mono text-sm">{(pos.qty ?? 0).toLocaleString()}</div>
+                      <div className="text-muted-foreground text-xs">{new Date(pos.updated_at).toLocaleString()}</div>
+                      <div className={`text-right font-bold font-mono text-sm ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {pos.pnl >= 0 ? '+' : ''}{pos.pnl?.toFixed(2) || '0.00'}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </section>
 

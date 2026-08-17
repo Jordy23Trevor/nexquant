@@ -32,6 +32,9 @@ class SuperBotScheduler:
         self.scheduler_thread = None
         self.shutdown_event = threading.Event()
         self.job_queue = queue.Queue()
+        # Chaque instance doit posséder son propre calendrier. Le singleton
+        # global de `schedule` mélangeait les tâches de plusieurs bots.
+        self.schedule = schedule.Scheduler()
         self.jobs: Dict[str, Dict[str, Any]] = {}  # Nom du job -> configuration
         self.last_run_times: Dict[str, datetime] = {}  # Nom du job -> dernière exécution
 
@@ -43,6 +46,13 @@ class SuperBotScheduler:
             log.warning("️  Le planificateur est déjà en cours d'exécution")
             return
 
+        # ThreadPoolExecutor ne peut pas être réutilisé après shutdown().
+        # Recréer le pool permet un arrêt/redémarrage propre du scheduler.
+        if getattr(self.executor, "_shutdown", False):
+            self.executor = ThreadPoolExecutor(
+                max_workers=self.max_workers,
+                thread_name_prefix="Scheduler",
+            )
         self.running = True
         self.shutdown_event.clear()
         self.scheduler_thread = threading.Thread(target=self._run_scheduler, daemon=True)
@@ -81,6 +91,10 @@ class SuperBotScheduler:
         """
         if kwargs is None:
             kwargs = {}
+        if not name or not callable(func) or interval_seconds <= 0:
+            raise ValueError("name, func et interval_seconds doivent être valides")
+        if name in self.jobs:
+            self.cancel_job(name)
 
         job_config = {
             'func': func,
@@ -99,7 +113,7 @@ class SuperBotScheduler:
         self.last_run_times[name] = None
 
         # Planifier avec la bibliothèque schedule
-        schedule.every(interval_seconds).seconds.do(
+        self.schedule.every(interval_seconds).seconds.do(
             self._add_job_to_queue, name
         ).tag(name)
 
@@ -124,6 +138,11 @@ class SuperBotScheduler:
         if kwargs is None:
             kwargs = {}
 
+        if not name or not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            raise ValueError("nom ou heure quotidienne invalide")
+        if name in self.jobs:
+            self.cancel_job(name)
+
         job_config = {
             'func': func,
             'hour': hour,
@@ -142,7 +161,7 @@ class SuperBotScheduler:
         self.last_run_times[name] = None
 
         # Planifier avec la bibliothèque schedule
-        schedule.every().day.at(f"{hour:02d}:{minute:02d}").do(
+        self.schedule.every().day.at(f"{hour:02d}:{minute:02d}").do(
             self._add_job_to_queue, name
         ).tag(name)
 
@@ -167,6 +186,10 @@ class SuperBotScheduler:
 
         # Mapping des jours: 0=monday, 1=tuesday, etc.
         days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        if not name or not 0 <= day_of_week <= 6 or not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            raise ValueError("nom, jour ou heure hebdomadaire invalide")
+        if name in self.jobs:
+            self.cancel_job(name)
         day_name = days[day_of_week]
 
         job_config = {
@@ -188,7 +211,7 @@ class SuperBotScheduler:
         self.last_run_times[name] = None
 
         # Planifier avec la bibliothèque schedule
-        getattr(schedule.every(), day_name).at(f"{hour:02d}:{minute:02d}").do(
+        getattr(self.schedule.every(), day_name).at(f"{hour:02d}:{minute:02d}").do(
             self._add_job_to_queue, name
         ).tag(name)
 
@@ -202,7 +225,7 @@ class SuperBotScheduler:
             name: Nom de la tâche à annuler
         """
         if name in self.jobs:
-            schedule.clear(name)
+            self.schedule.clear(name)
             del self.jobs[name]
             if name in self.last_run_times:
                 del self.last_run_times[name]
@@ -269,7 +292,7 @@ class SuperBotScheduler:
         while self.running and not self.shutdown_event.is_set():
             try:
                 # Exécuter les tâches pending de schedule
-                schedule.run_pending()
+                self.schedule.run_pending()
 
                 # Traiter la file d'attente des tâches à exécuter
                 try:
@@ -361,6 +384,13 @@ class SuperBotScheduler:
 
         job = self.jobs[name]
         last_run = self.last_run_times[name]
+        if last_run is None:
+            # La bibliothèque schedule connaît déjà la prochaine échéance,
+            # même avant la première exécution.
+            scheduled = self.schedule.get_jobs(name)
+            if scheduled and scheduled[0].next_run:
+                return scheduled[0].next_run.isoformat()
+            return None
 
         if job.get('type') == 'daily':
             # Prochaine exécution demain à la même heure

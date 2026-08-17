@@ -18,8 +18,7 @@ def record_trade(rm, trade_record: Dict[str, Any]):
         trade_record: Dictionnaire contenant les détails du trade
     """
     try:
-        # Ajouter un timestamp de clôture si pas présent
-        # BUG-A13 FIX: Utiliser datetime.now(timezone.utc) pour cohérence timezone
+        # Ajouter un timestamp de clôture si absent.
         if 'timestamp' not in trade_record:
             trade_record['timestamp'] = datetime.now(timezone.utc).isoformat()
         # S'assurer que le timestamp est une string pour la sérialisation JSON
@@ -28,35 +27,38 @@ def record_trade(rm, trade_record: Dict[str, Any]):
 
         # Ajouter à l'historique uniquement si le trade est clôturé
         is_closed = trade_record.get('status') == 'closed' or trade_record.get('pnl') is not None
-        if is_closed:
-            rm.trade_history.append(trade_record)
 
-            # Garder seulement les 100 derniers trades pour éviter l'accumulation illimitée
-            if len(rm.trade_history) > 100:
-                rm.trade_history = rm.trade_history[-100:]
+        # Sérialiser les mutations de l'état partagé (trade_history,
+        # consecutive_losses, last_trade_close_time) entre threads.
+        with rm._history_lock:
+            if is_closed:
+                rm.trade_history.append(trade_record)
 
-        # Mise à jour des pertes consécutives
-        symbol = trade_record.get('symbol')
-        if symbol and trade_record.get('status') == 'closed' and trade_record.get('pnl') is not None:
-            if trade_record.get('pnl', 0) < 0:
-                rm.consecutive_losses[symbol] = rm.consecutive_losses.get(symbol, 0) + 1
-                log.info(f"📉 Perte enregistrée pour {symbol}. Série de pertes: {rm.consecutive_losses[symbol]}")
-            else:
-                rm.consecutive_losses[symbol] = 0
-                log.debug(f"📈 Gain enregistré pour {symbol}. Réinitialisation de la série de pertes.")
-            # ✅ BUG FIX #5 — Enregistrer l'heure de clôture pour le cooldown
-            # BUG-01 FIX: Utiliser datetime.now(timezone.utc) pour cohérence avec le cooldown check
-            rm.last_trade_close_time[symbol] = datetime.now(timezone.utc)
+                # Garder seulement les 100 derniers trades pour éviter l'accumulation illimitée
+                if len(rm.trade_history) > 100:
+                    rm.trade_history = rm.trade_history[-100:]
 
-        # BUG-09 FIX: Écrire dans le fichier JSON Lines UNIQUEMENT pour les trades clôturés
-        # Les trades ouverts ne doivent pas polluer le fichier JSONL
-        if is_closed:
-            from superbot.config import TRADE_LOG_FILE
-            trades_file = str(TRADE_LOG_FILE)
-            log_dir = os.path.dirname(trades_file)
-            os.makedirs(log_dir, exist_ok=True)
-            with open(trades_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(trade_record, ensure_ascii=False, default=str) + '\n')
+            # Mise à jour des pertes consécutives
+            symbol = trade_record.get('symbol')
+            if symbol and trade_record.get('status') == 'closed' and trade_record.get('pnl') is not None:
+                if trade_record.get('pnl', 0) < 0:
+                    rm.consecutive_losses[symbol] = rm.consecutive_losses.get(symbol, 0) + 1
+                    log.info(f"📉 Perte enregistrée pour {symbol}. Série de pertes: {rm.consecutive_losses[symbol]}")
+                else:
+                    rm.consecutive_losses[symbol] = 0
+                    log.debug(f"📈 Gain enregistré pour {symbol}. Réinitialisation de la série de pertes.")
+                # Enregistrer l'heure de clôture pour le cooldown.
+                rm.last_trade_close_time[symbol] = datetime.now(timezone.utc)
+
+            # N'écrire que les trades clôturés dans le fichier JSONL, sous le
+            # même verrou pour éviter les écritures concurrentes corrompues.
+            if is_closed:
+                from superbot.config import TRADE_LOG_FILE
+                trades_file = str(TRADE_LOG_FILE)
+                log_dir = os.path.dirname(trades_file)
+                os.makedirs(log_dir, exist_ok=True)
+                with open(trades_file, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(trade_record, ensure_ascii=False, default=str) + '\n')
 
         log.debug(f"Trade enregistré: {trade_record.get('symbol', 'Unknown')} | P&L: {trade_record.get('pnl', 0):.2f}")
 
