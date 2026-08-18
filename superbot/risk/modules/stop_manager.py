@@ -13,14 +13,13 @@ def calculate_sl_tp_levels(rm, entry_price: float, atr_value: float,
     """
     Calcule les niveaux de stop loss et take profit basés sur l'ATR, avec multiplicateurs selon l'actif.
 
-    ✅ BUG FIX #4 — Le paramètre `symbol` permet de détecter automatiquement les paires JPY
-    et d'appliquer des multiplicateurs ATR plus larges (2.0×SL / 4.0×TP) pour compenser
-    leur plus grande amplitude intra-journalière.
+    Le paramètre `symbol` détecte automatiquement les paires JPY et applique des
+    multiplicateurs ATR plus larges (2.0×SL / 4.0×TP) pour compenser leur plus grande
+    amplitude intra-journalière.
 
-    ── Phase 3 §2 — SL/TP adaptatifs par régime HMM ──────────────────────
-    Le paramètre `hmm_regime` (ex: 'HIGH_VOL_RANGE', 'LOW_VOL_RANGE', 'TRENDING',
-    'LOW_VOL_TREND') ajuste les multiplicateurs pour éviter les sorties prématurées
-    en régime haute volatilité, ou pour serrer les stops en régime calme.
+    SL/TP adaptatifs par régime HMM : le paramètre `hmm_regime` (ex: 'HIGH_VOL_RANGE',
+    'LOW_VOL_RANGE', 'TRENDING', 'LOW_VOL_TREND') ajuste les multiplicateurs pour éviter
+    les sorties prématurées en haute volatilité, ou pour serrer les stops en régime calme.
 
     Règles :
       - HIGH_VOL_RANGE  : +40% SL, +40% TP (évite les whipsaws)
@@ -46,26 +45,32 @@ def calculate_sl_tp_levels(rm, entry_price: float, atr_value: float,
             tp_price = entry_price * (1 - risk_pct * 2)
         return sl_price, tp_price
 
-    mults = rm.ATR_MULTIPLIERS.get(effective_asset_type, rm.ATR_MULTIPLIERS['forex'])
-    sl_mult, tp_mult = mults['sl'], mults['tp']
+    # 🧠 V3 : Smart SL/TP multipliers (Target-Aware)
+    if hasattr(rm, 'get_regime_sl_tp_multipliers'):
+        mults = rm.get_regime_sl_tp_multipliers(regime=hmm_regime, asset_class=effective_asset_type)
+        sl_mult = mults.get('sl_atr_mult', 1.5)
+        tp_mult = mults.get('tp_atr_mult', 3.0)
+    else:
+        mults = rm.ATR_MULTIPLIERS.get(effective_asset_type, rm.ATR_MULTIPLIERS['forex'])
+        sl_mult, tp_mult = mults['sl'], mults['tp']
 
-    # ── Phase 3 §2 — Modulation des multiplicateurs par régime HMM ──────
-    regime_upper = hmm_regime.upper() if hmm_regime else ""
-    if regime_upper == "HIGH_VOL_RANGE":
-        # Haute volatilité : écarter SL et TP pour éviter les whipsaws
-        sl_mult *= 1.40
-        tp_mult *= 1.40
-        log.debug(f"[Régime HMM] HIGH_VOL_RANGE → SL×1.4={sl_mult:.2f}, TP×1.4={tp_mult:.2f} pour {symbol}")
-    elif regime_upper == "LOW_VOL_RANGE":
-        # Marché calme : objectifs plus proches, moins de bruit
-        sl_mult *= 0.85
-        tp_mult *= 0.85
-        log.debug(f"[Régime HMM] LOW_VOL_RANGE → SL×0.85={sl_mult:.2f}, TP×0.85={tp_mult:.2f} pour {symbol}")
-    elif regime_upper == "LOW_VOL_TREND":
-        # Tendance propre et calme : SL légèrement plus serré (moins de bruit)
-        sl_mult *= 0.90
-        log.debug(f"[Régime HMM] LOW_VOL_TREND → SL×0.90={sl_mult:.2f} pour {symbol}")
-    # TRENDING et cas inconnus : multiplicateurs standards (pas de modification)
+        # Modulation des multiplicateurs par régime HMM
+        regime_upper = hmm_regime.upper() if hmm_regime else ""
+        if regime_upper == "HIGH_VOL_RANGE":
+            # Haute volatilité : écarter SL et TP pour éviter les whipsaws
+            sl_mult *= 1.40
+            tp_mult *= 1.40
+            log.debug(f"[Régime HMM] HIGH_VOL_RANGE → SL×1.4={sl_mult:.2f}, TP×1.4={tp_mult:.2f} pour {symbol}")
+        elif regime_upper == "LOW_VOL_RANGE":
+            # Marché calme : objectifs plus proches, moins de bruit
+            sl_mult *= 0.85
+            tp_mult *= 0.85
+            log.debug(f"[Régime HMM] LOW_VOL_RANGE → SL×0.85={sl_mult:.2f}, TP×0.85={tp_mult:.2f} pour {symbol}")
+        elif regime_upper == "LOW_VOL_TREND":
+            # Tendance propre et calme : SL légèrement plus serré (moins de bruit)
+            sl_mult *= 0.90
+            log.debug(f"[Régime HMM] LOW_VOL_TREND → SL×0.90={sl_mult:.2f} pour {symbol}")
+        # TRENDING et cas inconnus : multiplicateurs standards (pas de modification)
 
     if position_side == "LONG":
         sl_price = entry_price - (sl_mult * atr_value)
@@ -94,7 +99,17 @@ def _check_trailing_stop(rm, symbol: str, position: Dict[str, Any], current_pric
         if atr_value <= 0:
             return
 
+        entry_price = position.get('entry_price', 0)
+        activate_mult = getattr(rm, 'TRAIL_ACTIVATE_ATR_MULT', 2.0)
+
         if position['side'] == 'LONG':
+            # Distance d'activation : le trailing ne démarre qu'une fois le trade
+            # à +N×ATR en faveur. Avant cela, laisser le trade respirer au lieu
+            # d'écraser les winners naissants dès le premier tick favorable.
+            if entry_price > 0 and activate_mult > 0:
+                profit_atr = (current_price - entry_price) / atr_value
+                if profit_atr < activate_mult:
+                    return
             # Pour une position longue, le trailing stop monte quand le prix monte
             new_sl = current_price - (rm.TRAIL_ATR_MULT * atr_value)
             # Ne jamais descendre le stop loss pour une position longue
@@ -103,11 +118,17 @@ def _check_trailing_stop(rm, symbol: str, position: Dict[str, Any], current_pric
                 position['stop_loss'] = new_sl
                 log.info(f"Trailing stop mis à jour pour {symbol} (LONG): {old_sl:.4f} -> {new_sl:.4f}")
         else:  # SHORT
+            if entry_price > 0 and activate_mult > 0:
+                profit_atr = (entry_price - current_price) / atr_value
+                if profit_atr < activate_mult:
+                    return
             # Pour une position courte, le trailing stop descend quand le prix descend
             new_sl = current_price + (rm.TRAIL_ATR_MULT * atr_value)
-            # Ne jamais monter le stop loss pour une position courte
-            if new_sl < position.get('stop_loss', float('inf')) or position.get('stop_loss', 0) == 0:
-                old_sl = position.get('stop_loss', 0)
+            current_sl = position.get('stop_loss', 0)
+            sl_not_set = (current_sl == 0 or current_sl is None)
+            # Ne jamais remonter le stop d'une position courte.
+            if sl_not_set or new_sl < current_sl:
+                old_sl = current_sl
                 position['stop_loss'] = new_sl
                 log.info(f"Trailing stop mis à jour pour {symbol} (SHORT): {old_sl:.4f} -> {new_sl:.4f}")
 
@@ -163,7 +184,8 @@ def _check_break_even(rm, symbol: str, position: Dict[str, Any], current_price: 
                 else:
                     log.info(f"Break-even activé pour {symbol} (LONG) mais le trailing stop actuel ({old_sl:.4f}) est meilleur que BE ({new_sl:.4f})")
             else:  # SHORT
-                old_sl = position.get('stop_loss', float('inf'))
+                # `or float('inf')` car get('stop_loss', ...) retournerait 0 si la clé vaut 0.
+                old_sl = position.get('stop_loss') or float('inf')
                 new_sl = position['entry_price'] * 0.9995  # Légèrement en-dessous pour couvrir les frais
                 if new_sl < old_sl or old_sl == 0:
                     position['stop_loss'] = new_sl

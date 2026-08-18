@@ -125,21 +125,41 @@ export const getDashboardData = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
-    const [status, equity, openPositions, closedPositions, regime, logs, profile, userBroker] = await Promise.all([
+    const [status, equity, positions, regime, logs, profile, userBroker] = await Promise.all([
       supabase.from("bot_status").select("*").eq("user_id", userId).maybeSingle(),
       supabase.from("equity_snapshots").select("ts, equity, pnl_total, drawdown")
         .eq("user_id", userId).order("ts", { ascending: true }).limit(500),
-      supabase.from("positions").select("*").eq("user_id", userId).eq("status", "open")
-        .order("opened_at", { ascending: false }),
-      supabase.from("positions").select("*").eq("user_id", userId).eq("status", "closed")
-        .order("closed_at", { ascending: false }).limit(30),
+      supabase.from("positions").select("*").eq("user_id", userId),
       supabase.from("market_regime").select("*").eq("user_id", userId)
         .order("updated_at", { ascending: false }),
       supabase.from("bot_logs").select("*").eq("user_id", userId)
         .order("created_at", { ascending: false }).limit(60),
       supabase.from("profiles").select("trial_end, role, ingest_token").eq("id", userId).single(),
-      supabase.from("user_brokers").select("broker_type, asset_type").eq("user_id", userId).maybeSingle(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any).from("user_brokers").select("broker_type, asset_type").eq("user_id", userId).maybeSingle(),
     ]);
+
+    const openPositions = positions.data?.filter(p => p.status === 'open') || [];
+    const closedPositions = positions.data?.filter(p => p.status === 'closed').sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 50) || [];
+
+    // BUG-D02 FIX: Vérifier les erreurs Supabase sur les requêtes critiques.
+    // Sans ce check, les erreurs réseau ou RLS retournent data=null silencieusement.
+    if (equity.error) {
+      console.error("[getDashboardData] equity_snapshots error:", equity.error.message);
+      throw new Error(`Erreur récupération equity: ${equity.error.message}`);
+    }
+    if (openPositions.error) {
+      console.error("[getDashboardData] open positions error:", openPositions.error.message);
+      throw new Error(`Erreur positions ouvertes: ${openPositions.error.message}`);
+    }
+    if (closedPositions.error) {
+      console.error("[getDashboardData] closed positions error:", closedPositions.error.message);
+      throw new Error(`Erreur positions fermées: ${closedPositions.error.message}`);
+    }
+    // Non critiques : logger sans throw
+    if (status.error) console.warn("[getDashboardData] bot_status warning:", status.error.message);
+    if (logs.error) console.warn("[getDashboardData] bot_logs warning:", logs.error.message);
+    if (profile.error) console.warn("[getDashboardData] profiles warning:", profile.error.message);
 
     return {
       status: status.data,
@@ -153,17 +173,35 @@ export const getDashboardData = createServerFn({ method: "GET" })
     };
   });
 
+
+import { startBotProcess, stopBotProcess } from "./bot_process_manager";
+
 export const toggleBot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ run: z.boolean() }).parse(d))
+  .validator((d) => z.object({ run: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const { data: existing } = await supabase.from("bot_status").select("*").eq("user_id", userId).maybeSingle();
     const patch = {
+      user_id: userId,
       is_running: data.run,
       last_heartbeat: new Date().toISOString(),
       ...(data.run ? { started_at: new Date().toISOString() } : {}),
+      broker_type: existing?.broker_type ?? "binance",
+      testnet: existing?.testnet ?? true,
     };
-    await supabase.from("bot_status").update(patch).eq("user_id", userId);
+    const { error } = await supabase.from("bot_status").upsert(patch, { onConflict: "user_id" });
+    if (error) {
+      console.error("[toggleBot] error:", error);
+      throw new Error(`Failed to toggle bot: ${error.message}`);
+    }
+
+    if (data.run) {
+      await startBotProcess();
+    } else {
+      await stopBotProcess();
+    }
+
     await supabase.from("bot_logs").insert({
       user_id: userId,
       level: data.run ? "success" : "warn",
@@ -175,11 +213,25 @@ export const toggleBot = createServerFn({ method: "POST" })
 
 export const updateRisk = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ risk: z.number() }).parse(d))
+  .validator((d) => z.object({ risk: z.number().min(0.1).max(10) }).parse(d))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    // Mise à jour hypothétique de bot_config, à lier plus tard avec Python
-    // await supabase.from("bot_config").update({ risk_pct: data.risk }).eq("user_id", userId);
+    // BUG-D01 FIX: Persister risk_pct dans bot_status pour que le bot Python le lise
+    // L'ancienne ligne était commentée → le changement de risque était purement décoratif.
+    // Cast en any: risk_pct sera ajouté via migration Supabase (pas encore dans les types générés)
+    const { data: existing } = await supabase.from("bot_status").select("*").eq("user_id", userId).maybeSingle();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from("bot_status") as any).upsert({
+      user_id: userId,
+      risk_pct: data.risk,
+      broker_type: existing?.broker_type ?? "binance",
+      testnet: existing?.testnet ?? true,
+    }, { onConflict: "user_id" });
+
+    if (error) {
+      console.error("[updateRisk] Erreur mise à jour risk_pct:", error.message);
+      throw new Error(`Impossible de sauvegarder le risque: ${error.message}`);
+    }
     await supabase.from("bot_logs").insert({
       user_id: userId,
       level: "info",
@@ -188,6 +240,35 @@ export const updateRisk = createServerFn({ method: "POST" })
     });
     return { ok: true };
   });
+
+export const updateBrokerConfig = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ brokerType: z.string(), testnet: z.boolean() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const { data: existing } = await supabase.from("bot_status").select("*").eq("user_id", userId).maybeSingle();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from("bot_status") as any).upsert({
+      user_id: userId,
+      broker_type: data.brokerType,
+      testnet: data.testnet,
+      is_running: existing?.is_running ?? false,
+      risk_pct: existing?.risk_pct ?? 1.0,
+    }, { onConflict: "user_id" });
+
+    if (error) {
+      console.error("[updateBrokerConfig] Erreur mise à jour broker:", error.message);
+      throw new Error(`Impossible de sauvegarder le broker: ${error.message}`);
+    }
+    await supabase.from("bot_logs").insert({
+      user_id: userId,
+      level: "info",
+      source: "control",
+      message: `Broker changé pour ${data.brokerType} (${data.testnet ? "Testnet" : "Live"}). Pris en compte au prochain cycle.`,
+    });
+    return { ok: true };
+  });
+
 
 import crypto from "crypto";
 
@@ -207,7 +288,7 @@ function encrypt(text: string): string {
 
 export const saveBrokerCredentials = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({
+  .validator((d) => z.object({
     broker_type: z.enum(["binance", "alpaca", "mt5"]),
     api_key: z.string().optional(),
     api_secret: z.string().optional(),
@@ -216,7 +297,10 @@ export const saveBrokerCredentials = createServerFn({ method: "POST" })
     password: z.string().optional(),
     server: z.string().optional(),
     path: z.string().optional(),
+    // BUG-D11 FIX: testnet doit être configurable, pas hardcodé à true
+    testnet: z.boolean().optional(),
   }).parse(d))
+
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     
@@ -242,7 +326,8 @@ export const saveBrokerCredentials = createServerFn({ method: "POST" })
     const encryptedSecret = apiSecretToEncrypt ? encrypt(apiSecretToEncrypt) : "";
 
     // Insérer ou mettre à jour dans user_brokers
-    const { error } = await supabase.from("user_brokers").upsert({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("user_brokers").upsert({
       user_id: userId,
       broker_type: data.broker_type,
       encrypted_api_key: encryptedKey,
@@ -264,11 +349,13 @@ export const saveBrokerCredentials = createServerFn({ method: "POST" })
       message: `Broker ${data.broker_type.toUpperCase()} configuré (${asset_type.toUpperCase()})`,
     });
 
-    // Mettre à jour le type de broker dans bot_status
+    // BUG-D11 FIX: testnet ne doit pas être toujours forcé à true.
+    // Ajout du param testnet dans le schema Zod (optionnel, défaut false pour la prod)
     await supabase.from("bot_status").update({
       broker_type: data.broker_type,
-      testnet: true
+      testnet: data.testnet ?? false
     }).eq("user_id", userId);
+
 
     return { ok: true };
   });
@@ -279,8 +366,11 @@ export const getAdminData = createServerFn({ method: "GET" })
     const { userId } = context;
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabaseAdminAny = supabaseAdmin as any;
+
     // Vérifier si l'utilisateur est admin
-    const { data: callerProfile } = await supabaseAdmin
+    const { data: callerProfile } = await supabaseAdminAny
       .from("profiles")
       .select("role")
       .eq("id", userId)
@@ -292,10 +382,10 @@ export const getAdminData = createServerFn({ method: "GET" })
 
     // Récupérer tous les utilisateurs
     const [profilesRes, botStatusRes, logsRes, brokersRes] = await Promise.all([
-      supabaseAdmin.from("profiles").select("id, email, display_name, role, trial_end, created_at").order("created_at", { ascending: false }),
+      supabaseAdminAny.from("profiles").select("id, email, display_name, role, trial_end, created_at").order("created_at", { ascending: false }),
       supabaseAdmin.from("bot_status").select("*"),
       supabaseAdmin.from("bot_logs").select("*").order("created_at", { ascending: false }).limit(100),
-      supabaseAdmin.from("user_brokers").select("user_id, broker_type, asset_type"),
+      supabaseAdminAny.from("user_brokers").select("user_id, broker_type, asset_type"),
     ]);
 
     return {
@@ -308,12 +398,13 @@ export const getAdminData = createServerFn({ method: "GET" })
 
 export const toggleUserBot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ targetUserId: z.string().uuid(), run: z.boolean() }).parse(d))
+  .validator((d) => z.object({ targetUserId: z.string().uuid(), run: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
     const { userId } = context;
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: callerProfile } = await supabaseAdmin
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: callerProfile } = await (supabaseAdmin as any)
       .from("profiles")
       .select("role")
       .eq("id", userId)
@@ -342,12 +433,13 @@ export const toggleUserBot = createServerFn({ method: "POST" })
 
 export const updateUserTrial = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ targetUserId: z.string().uuid(), trialDays: z.number() }).parse(d))
+  .validator((d) => z.object({ targetUserId: z.string().uuid(), trialDays: z.number() }).parse(d))
   .handler(async ({ data, context }) => {
     const { userId } = context;
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: callerProfile } = await supabaseAdmin
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: callerProfile } = await (supabaseAdmin as any)
       .from("profiles")
       .select("role")
       .eq("id", userId)
@@ -358,7 +450,8 @@ export const updateUserTrial = createServerFn({ method: "POST" })
     }
 
     const trialEnd = new Date(Date.now() + data.trialDays * 24 * 3600 * 1000).toISOString();
-    await supabaseAdmin.from("profiles").update({ trial_end: trialEnd }).eq("id", data.targetUserId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabaseAdmin as any).from("profiles").update({ trial_end: trialEnd }).eq("id", data.targetUserId);
 
     await supabaseAdmin.from("bot_logs").insert({
       user_id: data.targetUserId,

@@ -63,3 +63,28 @@ def test_get_risk_metrics(risk_manager):
     assert 'drawdown_pct' in metrics
     assert 'win_rate' in metrics
     assert 'profit_factor' in metrics
+
+
+def test_record_trade_consecutive_losses_are_atomic(risk_manager, monkeypatch, tmp_path):
+    """
+    200 clôtures perdantes concurrentes doivent donner exactement 200 pertes
+    consécutives : sans le verrou interne, le read-modify-write de
+    consecutive_losses[symbol] perdrait des incréments.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setattr("superbot.config.TRADE_LOG_FILE", str(tmp_path / "trades.jsonl"))
+
+    n = 200
+
+    def _record(_):
+        risk_manager.record_trade({
+            'symbol': 'BTC/USDT', 'status': 'closed', 'pnl': -1.0,
+            'timestamp': '2026-01-01T00:00:00',
+        })
+
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        list(ex.map(_record, range(n)))
+
+    assert risk_manager.consecutive_losses.get('BTC/USDT', 0) == n
+    assert len(risk_manager.trade_history) == min(n, 100)

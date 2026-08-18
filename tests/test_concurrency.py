@@ -186,5 +186,67 @@ def test_rlock_supports_nested_acquisition():
     assert bot.positions['SYM1']['size'] == 2.0
 
 
+def test_sync_positions_with_broker_concurrent_with_writes():
+    """
+    Le vrai syncer doit tolérer des écritures concurrentes (thread webhook / workers)
+    sans RuntimeError ni perte de cohérence : le snapshot et le swap sont sous _lock.
+    """
+    from types import SimpleNamespace
+    from superbot.components.position_syncer import sync_positions_with_broker
+
+    class _Broker:
+        def get_position(self, symbol):
+            return {"side": "LONG", "size": 0.5, "entry_price": 100.0,
+                    "stop_loss": 90.0, "take_profit": 110.0}
+
+        def get_open_positions(self):
+            return [{"symbol": "BTC/USDT"}]
+
+        def cancel_all_orders(self, symbol):
+            pass
+
+        def get_trade_history(self, days=1):
+            return []
+
+    bot = _FakeBot()
+    bot.instruments = ["BTC/USDT"]
+    bot.broker = _Broker()
+    bot.risk_manager = SimpleNamespace(
+        open_positions={"BTC/USDT": {"symbol": "BTC/USDT", "side": "LONG"}}
+    )
+    bot.telemetry = SimpleNamespace(enabled=False)
+    bot.positions["BTC/USDT"] = {"side": "LONG", "size": 0.5, "entry_price": 100.0}
+
+    errors = []
+    stop = threading.Event()
+
+    def syncer():
+        try:
+            while not stop.is_set():
+                sync_positions_with_broker(bot)
+        except Exception as e:
+            errors.append(e)
+
+    def writer():
+        try:
+            while not stop.is_set():
+                with bot._lock:
+                    bot.positions["BTC/USDT"] = {"side": "LONG", "size": 0.5, "entry_price": 100.0}
+                bot.safe_increment_stat("writes")
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=syncer) for _ in range(2)]
+    threads += [threading.Thread(target=writer) for _ in range(4)]
+    for t in threads:
+        t.start()
+    time.sleep(2)
+    stop.set()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert not errors, f"Erreurs sous concurrence (syncer) : {errors}"
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-v']))

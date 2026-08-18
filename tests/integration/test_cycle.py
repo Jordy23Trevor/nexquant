@@ -23,8 +23,13 @@ def mock_bot():
              patch('superbot.orchestrator.WEBHOOK_ENABLED', False):
             
             bot = SuperBot()
+            # Ce test couvre explicitement le chemin intraday historique ;
+            # il doit rester déterministe même si le .env active TSMOM pour
+            # l'exécution réelle.
+            bot.TSMOM_ENABLED = False
             bot.telemetry = MagicMock()
             bot.telemetry.enabled = False
+            bot.WARMUP_SECONDS = 0  # skip the 5s broker warmup in tests
             
             return bot
 

@@ -39,13 +39,13 @@ def _check_entry_triggers(
                         prev.get('macd', 0) <= prev.get('macd_signal', 0))
             supertrend_up = latest.get('supertrend_trend', 0) > 0 and prev.get('supertrend_trend', 0) <= 0
 
-            # Pullback sur EMA lente : le prix a touché l'EMA lente et rebouncé dessus
-            # Crypto : fenêtre élargie (3 bougies) pour capturer les retours de pression de vente
+            # Pullback : le prix a touché l'EMA lente puis rebondi au-dessus.
+            # Crypto : fenêtre élargie aux 2 dernières bougies.
             if is_crypto and len(df) >= 3:
                 prev2 = df.iloc[-3]
                 pullback_long = (
                     ema_f_now > ema_s_now and
-                    (prev['low'] <= ema_s_now or prev2.get(ema_slow_col, prev2.get('ema_slow', 0)) >= prev2['low']) and
+                    (prev['low'] <= ema_s_now or prev2['low'] <= ema_s_now) and
                     latest['close'] > ema_s_now and
                     latest.get('supertrend_trend', 0) > 0 and
                     latest.get('rsi', 50) < 65
@@ -107,9 +107,8 @@ def _check_entry_triggers(
 
             base_trigger = (ema_cross or macd_cross or supertrend_up or pullback_long or continuation_long)
             forex_trigger = base_trigger or inside_bar_long or pin_bar_long
-            # ETF : Elder Impulse vert peut déclencher seul OU en combo avec un signal de base
-            # Cela évite de rater les trades quand l'EMA cross est déjà passé mais Elder reste vert
-            stock_trigger = stock_momentum_long and (base_trigger or stock_momentum_long)
+            # ETF : l'Elder Impulse vert suffit (le croisement EMA est souvent déjà passé).
+            stock_trigger = stock_momentum_long
 
             if is_forex:
                 trigger_long = forex_trigger and elder_allow_long and elder_screen1_ok

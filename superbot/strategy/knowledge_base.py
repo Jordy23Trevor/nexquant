@@ -237,8 +237,11 @@ def calculate_ichimoku(high: pd.Series, low: pd.Series, close: pd.Series,
     # Senkou Span B (Leading Span B): (highest high + lowest low)/2 pour les 52 dernières périodes décalé de 26 périodes
     senkou_span_b = ((high.rolling(window=senkou_span_b).max() + low.rolling(window=senkou_span_b).min()) / 2).shift(displacement)
 
-    # Chikou Span (Lagging Span): Prix de clôture décalé de -26 périodes
-    chikou_span = close.shift(-displacement)
+    # Chikou Span (Lagging Span): prix de clôture tracé 26 périodes en arrière.
+    # IMPORTANT — causale uniquement : la valeur du Chikou à l'instant t est
+    # close(t). La forme `close.shift(-displacement)` utilisait des clôtures
+    # FUTURES (look-ahead) ; on la remplace par close() pour un backtest honnête.
+    chikou_span = close.copy()
 
     return {
         "tenkan_sen": tenkan_sen,

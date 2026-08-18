@@ -2,6 +2,30 @@ import React, { useState, useEffect } from "react";
 import { Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const translations = {
+  fr: {
+    title: "Respect de votre vie privée (RGPD)",
+    desc: "Nous utilisons des cookies essentiels au bon fonctionnement (gating de licence) et des outils de mesure anonymes. Vous pouvez configurer ou accepter nos conditions dans notre ",
+    link: "Politique de Confidentialité",
+    decline: "Refuser les cookies tiers",
+    accept: "Tout accepter"
+  },
+  en: {
+    title: "Respecting your privacy (GDPR)",
+    desc: "We use cookies essential for proper operation (license gating) and anonymous measurement tools. You can configure or accept our terms in our ",
+    link: "Privacy Policy",
+    decline: "Decline third-party cookies",
+    accept: "Accept all"
+  },
+  es: {
+    title: "Respetando su privacidad (RGPD)",
+    desc: "Utilizamos cookies esenciales para el buen funcionamiento (gating de licencia) y herramientas de medición anónimas. Puede configurar o aceptar nuestros términos en nuestra ",
+    link: "Política de Privacidad",
+    decline: "Rechazar cookies de terceros",
+    accept: "Aceptar todo"
+  }
+};
+
 export interface GDPRBannerProps {
   className?: string;
   privacyPolicyUrl?: string;
@@ -12,13 +36,26 @@ export const GDPRBanner: React.FC<GDPRBannerProps> = ({
   privacyPolicyUrl = "/legal/privacy",
 }) => {
   const [show, setShow] = useState(false);
+  const [lang, setLang] = useState<"fr" | "en" | "es">("fr");
 
   useEffect(() => {
     const consent = localStorage.getItem("nexquant_gdpr_consent");
     if (!consent) {
       setShow(true);
     }
+    
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("lang") as "fr" | "en" | "es";
+      if (stored && stored !== lang) setLang(stored);
+    }
+    const handleLangChange = () => {
+      setLang((localStorage.getItem("lang") as "fr" | "en" | "es") || "fr");
+    };
+    window.addEventListener("langChange", handleLangChange);
+    return () => window.removeEventListener("langChange", handleLangChange);
   }, []);
+
+  const t = translations[lang] || translations.fr;
 
   const handleAcceptAll = () => {
     localStorage.setItem("nexquant_gdpr_consent", "all");
@@ -46,13 +83,12 @@ export const GDPRBanner: React.FC<GDPRBannerProps> = ({
           </div>
           <div>
             <h4 className="text-sm font-bold text-foreground">
-              Respect de votre vie privée (RGPD)
+              {t.title}
             </h4>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              Nous utilisons des cookies essentiels au bon fonctionnement (gating de licence) et des
-              outils de mesure anonymes. Vous pouvez configurer ou accepter nos conditions dans notre{" "}
+              {t.desc}
               <a href={privacyPolicyUrl} className="text-primary hover:underline font-semibold">
-                Politique de Confidentialité
+                {t.link}
               </a>
               .
             </p>
@@ -63,13 +99,13 @@ export const GDPRBanner: React.FC<GDPRBannerProps> = ({
             onClick={handleDeclineAll}
             className="text-xs text-muted-foreground hover:text-foreground px-3 py-2 rounded bg-transparent hover:bg-muted/30 transition-all cursor-pointer"
           >
-            Refuser les cookies tiers
+            {t.decline}
           </button>
           <button
             onClick={handleAcceptAll}
             className="text-xs font-semibold text-primary-foreground bg-primary hover:bg-primary/90 px-4 py-2.5 rounded-lg shadow-lg transition-all cursor-pointer"
           >
-            Tout accepter
+            {t.accept}
           </button>
         </div>
       </div>

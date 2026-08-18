@@ -57,7 +57,33 @@ REGIME_MAP = {
     "BEARISH_TREND":   "TRENDING",
     "LOW_VOL_RANGE":   "RANGING",
     "HIGH_VOL_RANGE":  "RANGING",
+    # Labels hérités du modèle 3 états (train_regime historique)
+    "BULLISH_STABLE":  "TRENDING",
+    "BEARISH_VOLATILE": "TRENDING",
+    "RANGING_QUIET":   "RANGING",
 }
+
+
+def heuristic_regime(df: pd.DataFrame, adx_threshold: float = 25.0) -> str:
+    """
+    Règle de régime robuste et interprétable, utilisée quand le HMM est absent
+    ou dégénéré. Un marché est TRENDING seulement si l'ADX est élevé ET que la
+    largeur des Bollinger n'est pas en compression (squeeze) : une compression
+    signale un range même quand l'ADX reste élevé.
+    """
+    if len(df) == 0:
+        return "RANGING"
+    latest = df.iloc[-1]
+    adx = float(latest.get('adx', 0))
+    bb_squeeze = False
+    if 'bb_width' in df.columns and len(df) >= 40:
+        # O(1) : ne regarder que les 40 dernières bougies (pas de dropna sur tout le df).
+        recent = df['bb_width'].iloc[-40:]
+        if int(recent.notna().sum()) >= 20:
+            bb_squeeze = float(recent.iloc[-1]) < float(recent.median())
+    if adx > adx_threshold and not bb_squeeze:
+        return "TRENDING"
+    return "RANGING"
 
 
 class MarketRegimeDetector:
@@ -72,7 +98,11 @@ class MarketRegimeDetector:
     N_ITER = 200           # Itérations EM pour la convergence
     N_FEATURES = 5         # Nombre de features extraites
     MIN_BARS_FOR_FIT = 200 # Minimum de bougies pour entraîner
-    LOOKBACK_PREDICT = 30  # Bougies utilisées pour la prédiction
+    LOOKBACK_PREDICT = 30  # Bougies récentes pour l'état courant
+    # Historique passé à _extract_features : doit couvrir le lookback le plus
+    # long des features (percentile bb_width sur 100 bougies). Sans ceci,
+    # une fenêtre trop courte rend toutes les lignes NaN -> fallback ADX permanent.
+    FEATURE_LOOKBACK = 150
 
     def __init__(self):
         self._model = None           # hmmlearn.GaussianHMM
@@ -80,6 +110,7 @@ class MarketRegimeDetector:
         self._state_labels: Dict[int, str] = {}  # {0: "BULLISH_STABLE", ...}
         self._is_trained = False
         self._training_stats: Dict[str, Any] = {}
+        self._recent_states: list = []  # derniers états prédits (détection de dégénérescence)
 
     # ─── API publique ─────────────────────────────────────────────────────────
 
@@ -165,8 +196,9 @@ class MarketRegimeDetector:
             log.debug("[HMM] Modele non entraîné — fallback ADX")
             return self._fallback_prediction(df)
 
-        # Utiliser les N dernières bougies pour la prédiction
-        df_recent = df.iloc[-max(self.LOOKBACK_PREDICT, 30):].copy()
+        # Utiliser suffisamment de bougies pour que _extract_features produise
+        # des lignes valides (le percentile bb_width exige ~100 bougies).
+        df_recent = df.iloc[-self.FEATURE_LOOKBACK:].copy()
 
         try:
             features = self._extract_features(df_recent)
@@ -186,6 +218,14 @@ class MarketRegimeDetector:
             # État courant = dernier état de la séquence
             current_state = int(states[-1])
 
+            # Détection de dégénérescence : un modèle bloqué sur un seul état
+            # (ex. modèle entraîné sur d'anciennes données) n'apporte aucune
+            # information — on bascule sur l'heuristique.
+            self._recent_states.append(current_state)
+            self._recent_states = self._recent_states[-20:]
+            if len(self._recent_states) >= 20 and len(set(self._recent_states)) == 1:
+                return heuristic_regime(df), 0.50, -1
+
             # Confiance = proportion de l'état courant dans les 10 dernières bougies
             # (plus robuste que predict_proba sur des séquences courtes)
             recent_states = states[-min(10, len(states)):]
@@ -195,7 +235,7 @@ class MarketRegimeDetector:
 
             # Mapper vers le label et le régime NexQuant
             state_label = self._state_labels.get(current_state, "RANGING_QUIET")
-            regime = REGIME_MAP.get(state_label, "RANGING")
+            regime = self._state_to_regime(state_label)
 
             log.debug(
                 f"[HMM] Etat={current_state} ({state_label}) | "
@@ -210,6 +250,16 @@ class MarketRegimeDetector:
     def get_state_label(self, state_id: int) -> str:
         """Retourne le nom de l'état HMM (ex: 'BULLISH_STABLE')."""
         return self._state_labels.get(state_id, f"STATE_{state_id}")
+
+    @staticmethod
+    def _state_to_regime(state_label: str) -> str:
+        """Mappe un label d'état vers 'TRENDING' / 'RANGING' (robuste aux labels hérités)."""
+        if state_label in REGIME_MAP:
+            return REGIME_MAP[state_label]
+        up = state_label.upper()
+        if "RANG" in up or "RANGE" in up or "QUIET" in up:
+            return "RANGING"
+        return "TRENDING"
 
     def print_training_summary(self):
         """Affiche un résumé des statistiques d'entraînement dans le terminal."""
@@ -394,9 +444,13 @@ class MarketRegimeDetector:
             }
 
         self._state_labels = {}
-        
-        if len(state_stats) < 4:
-            # Fallback en cas de non convergence sur 4 états (ex: peu de données)
+
+        # Vérifier les états sans observations (count=0) : le dict a toujours N_STATES entrées,
+        # mais certaines peuvent avoir count=0.
+        empty_states = [s for s, st in state_stats.items() if st.get('count', 0) == 0]
+        if empty_states:
+            # Fallback si certains états n'ont pas d'observations (modèle mal convergé)
+            log.warning(f"[HMM] États sans observations: {empty_states} — fallback labels génériques")
             for s in state_stats:
                 self._state_labels[s] = f"STATE_{s}"
             return
@@ -448,13 +502,9 @@ class MarketRegimeDetector:
 
     # ─── Fallback ADX ────────────────────────────────────────────────────────
 
-    def _fallback_prediction(self, df: pd.DataFrame, adx_threshold: float = 22.0) -> Tuple[str, float, int]:
+    def _fallback_prediction(self, df: pd.DataFrame, adx_threshold: float = 25.0) -> Tuple[str, float, int]:
         """
-        Prédiction de secours basée uniquement sur l'ADX.
+        Prédiction de secours basée sur l'heuristique ADX + squeeze Bollinger.
         Retourne une confiance de 0.5 pour signaler l'incertitude.
         """
-        if len(df) > 0 and "adx" in df.columns:
-            adx_val = float(df["adx"].iloc[-1])
-            if adx_val > adx_threshold:
-                return "TRENDING", 0.50, -1
-        return "RANGING", 0.50, -1
+        return heuristic_regime(df, adx_threshold), 0.50, -1

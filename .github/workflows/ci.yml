@@ -29,7 +29,9 @@ jobs:
     - name: Run Tests (including Chaos Engineering)
       env:
         PYTHONPATH: .
-        BROKER_TYPE: paper
+        # « paper » n'est pas un broker valide (binance/alpaca/mt5) ; BACKTEST_MODE
+        # court-circuite la validation des identifiants broker dans superbot.config.
+        BACKTEST_MODE: "true"
       run: |
         pytest tests/ -v --cov=superbot --cov-report=xml
         

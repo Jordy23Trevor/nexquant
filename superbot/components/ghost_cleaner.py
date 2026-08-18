@@ -48,6 +48,13 @@ def clean_ghost_positions(
     """
     # Construire l'ensemble des symboles réellement ouverts sur le broker
     real_symbols = set()
+    # Table de correspondance des alias broker (WTIUSD ↔ XTIUSD, BRENTUSD ↔ XBRUSD…).
+    _SYMBOL_ALIASES = {
+        "XTIUSD": "WTIUSD", "WTIUSD": "XTIUSD",
+        "WTI": "XTIUSD",
+        "XBRUSD": "BRENTUSD", "BRENTUSD": "XBRUSD",
+        "BRENT": "XBRUSD", "BRNUSD": "XBRUSD",
+    }
     for pos in (broker_real_positions or []):
         sym = pos.get('symbol', '')
         if sym:
@@ -55,15 +62,19 @@ def clean_ghost_positions(
             # Aussi ajouter les variantes de notation (BTC/USDT, BTCUSDT)
             real_symbols.add(sym.replace('/', ''))
             real_symbols.add(sym.replace('/', '-'))
+            # Ajouter l'alias éventuel.
+            alias = _SYMBOL_ALIASES.get(sym.upper())
+            if alias:
+                real_symbols.add(alias)
 
     log.info(f"[GhostCleaner] {len(real_symbols)} positions réelles sur le broker : {sorted(real_symbols)}")
 
     # Détecter les ghosts dans bot.positions
     ghost_symbols = []
     for symbol in list(bot_positions.keys()):
-        sym_norm = symbol.replace('/', '').replace('-', '')
-        if (symbol not in real_symbols and
-                sym_norm not in {s.replace('/', '').replace('-', '') for s in real_symbols}):
+        sym_norm = symbol.replace('/', '').replace('-', '').upper()
+        real_norms = {s.replace('/', '').replace('-', '').upper() for s in real_symbols}
+        if (symbol not in real_symbols and sym_norm not in real_norms):
             ghost_symbols.append(symbol)
             log.warning(
                 f"[GhostCleaner] 👻 POSITION FANTÔME détectée : {symbol} "

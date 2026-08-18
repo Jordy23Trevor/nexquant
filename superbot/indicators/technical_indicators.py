@@ -133,12 +133,13 @@ class TechnicalIndicators:
         result['ema_d1'] = calculate_ema(close_price, ema_d1_period)
         result['ema_w1'] = calculate_ema(close_price, ema_w1_period)
 
-        # Colonnes EMA fixes par asset_type (toujours calculées, indépendamment de EMA_FAST/EMA_SLOW)
-        # La stratégie sélectionnera les bonnes colonnes selon l'actif sans recalcul
-        result['ema_21'] = calculate_ema(close_price, 21)   # Standard institutionnel Forex & Crypto
-        result['ema_55'] = calculate_ema(close_price, 55)   # Fibonacci — Forex institutionnel
-        result['ema_20'] = calculate_ema(close_price, 20)   # Référence US stocks/ETF
-        result['ema_50'] = calculate_ema(close_price, 50)   # EMA50 — référence universelle
+        # Colonnes EMA par classe d'actif (calculées une seule fois ; la stratégie
+        # sélectionne les bonnes colonnes selon l'actif).
+        result['ema_14'] = calculate_ema(close_price, 14)   # Forex rapide
+        result['ema_21'] = calculate_ema(close_price, 21)   # Crypto rapide
+        result['ema_55'] = calculate_ema(close_price, 55)   # Crypto lente
+        result['ema_20'] = calculate_ema(close_price, 20)   # Stock rapide
+        result['ema_50'] = calculate_ema(close_price, 50)   # Stock & Forex lente
         result['volume_ma'] = calculate_sma(volume, 20)     # Volume MA20 pour filtres de liquidité
 
         # SMA (pour certaines utilisations spécifiques)
@@ -387,7 +388,10 @@ class TechnicalIndicators:
         """
         lowest_low = low.rolling(window=k_period).min()
         highest_high = high.rolling(window=k_period).max()
-        k_percent = 100 * ((close - lowest_low) / (highest_high - lowest_low))
+        # Bougies plates => highest == lowest => division par zéro (NaN/Inf) :
+        # on neutralise le dénominateur et on met le stochastique à 50 (neutre).
+        denom = (highest_high - lowest_low).replace(0, np.nan)
+        k_percent = (100 * ((close - lowest_low) / denom)).fillna(50.0)
         d_percent = k_percent.rolling(window=d_period).mean()
         return k_percent, d_percent
 
@@ -401,7 +405,9 @@ class TechnicalIndicators:
         """
         highest_high = high.rolling(window=period).max()
         lowest_low = low.rolling(window=period).min()
-        williams_r = -100 * ((highest_high - close) / (highest_high - lowest_low))
+        # Bougies plates => division par zéro : Williams %R neutre à -50.
+        denom = (highest_high - lowest_low).replace(0, np.nan)
+        williams_r = (-100 * ((highest_high - close) / denom)).fillna(-50.0)
         return williams_r
 
     def _calculate_cci(self, high: pd.Series, low: pd.Series, close: pd.Series,
@@ -509,15 +515,11 @@ class TechnicalIndicators:
             except Exception as e:
                 log.debug(f"[TechnicalIndicators] Erreur HMM ({e}) — fallback ADX")
 
-        # Fallback ADX
-        latest = df.iloc[-1]
-        adx_value = latest.get('adx', 0)
+        # Fallback : heuristique ADX + squeeze Bollinger (discriminante).
+        from superbot.ml.regime_detector import heuristic_regime
         adx_threshold = self.config.get('ADX_TREND', 22.0)
-
-        if adx_value > adx_threshold:
-            return 'TRENDING', 0.50, -1
-        else:
-            return 'RANGING', 0.50, -1
+        regime = heuristic_regime(df, adx_threshold)
+        return regime, 0.50, -1
 
     def is_uptrend(self, df: pd.DataFrame) -> bool:
         """

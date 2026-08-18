@@ -75,9 +75,12 @@ from superbot.config import (
     # Risk Management
     RISK_PCT, MAX_DAILY_LOSS_PCT, MAX_MONTHLY_LOSS_PCT, MAX_OPEN_POSITIONS,
     KELLY_FRACTION, MIN_TRADES_FOR_KELLY, SL_ATR_MULT, TP_ATR_MULT,
-    TRAIL_ATR_MULT, BE_ATR_MULT, MIN_POSITION_SIZE, MAX_POSITION_SIZE,
-    COOLDOWN_SECONDS,  # ✅ BUG FIX #5
+    TRAIL_ATR_MULT, TRAIL_ACTIVATE_ATR_MULT, BE_ATR_MULT, MIN_POSITION_SIZE, MAX_POSITION_SIZE,
+    COOLDOWN_SECONDS,
     MAX_FOREX_CURRENCY_EXPOSURE, MAX_SPREAD_PIPS, BE_DYN_RR, BE_DYN_RR_RATIO,
+    # Seuils de drawdown et perte maximale journalière
+    MAX_DAILY_LOSS_AMOUNT,
+    DRAWDOWN_THRESH_1, DRAWDOWN_THRESH_2, DRAWDOWN_REDUCE_5PCT, DRAWDOWN_REDUCE_10PCT,
 
     
     # Strategy / Indicators
@@ -99,9 +102,30 @@ from superbot.config import (
     NEWS_RISK_REDUCTION_FACTOR, NEWS_HIGH_IMPACT_ONLY, FEAR_GREED_EXTREME_FEAR,
     FEAR_GREED_EXTREME_GREED, CRYPTOCOMPARE_API_KEY,
 
-    # Filtres crypto — rapport post-mortem 2026-07-02
+    # Filtres crypto
     CRYPTO_BLACKLIST, CRYPTO_SCORE_MIN, CRYPTO_BUY_BLOCK_BTC_DROP, CRYPTO_BNB_VOLUME_FACTOR,
     COMMISSION_PCT, SLIPPAGE_PCT,
+
+    # ⚡ V3 — Cycle, performances et sessions
+    CYCLE_TIME, SYMBOL_TIMEOUT_SECONDS, MAX_PARALLEL_SYMBOLS,
+    DAILY_TARGET_EUR, SESSION_AWARE, TRADING_MODE,
+    SIMULATED_SLIPPAGE_POINTS, SIMULATED_COMMISSION_PCT,
+
+    # 🪙 V3 — Crypto MT5
+    MT5_CRYPTO_ENABLED, MT5_CRYPTO_SYMBOLS,
+
+    # 📊 V3 — Tiers de solde adaptatifs
+    BALANCE_TIER_HIGH, BALANCE_TIER_MID, BALANCE_TIER_LOW, BALANCE_TIER_MICRO,
+
+    # 🧠 V3 — Auto-apprentissage
+    AUTO_LEARN_ENABLED, POST_SESSION_DEBRIEF_HOUR_UTC, PRE_SESSION_ANALYSIS_HOUR_UTC,
+    KNOWLEDGE_FEEDER_ENABLED,
+
+    # DB
+    DB_PATH,
+
+    # 📈 TSMOM — time-series momentum (stratégie mensuelle)
+    TSMOM_ENABLED, TSMOM_PLACE_ORDERS, TSMOM_UNIVERSE, TSMOM_BROKER_SYMBOLS,
 )
 from superbot.broker import create_broker
 from superbot.strategy import TradingStrategy
@@ -133,7 +157,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         RotatingFileHandler(LOG_FILE, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
+        # Forcer UTF-8 sur la console Windows (sinon CP1252 corrompt les emoji).
+        logging.StreamHandler(open(sys.stdout.fileno(), mode='w', encoding='utf-8', closefd=False))
     ]
 )
 log = logging.getLogger("main")
@@ -162,6 +187,14 @@ class SuperBot:
         self.shutdown_event = threading.Event()
         self.active_broker_type = BROKER_TYPE
 
+        # 📈 TSMOM — time-series momentum (stratégie mensuelle)
+        self.TSMOM_ENABLED = TSMOM_ENABLED
+        self.TSMOM_PLACE_ORDERS = TSMOM_PLACE_ORDERS
+        self.TSMOM_UNIVERSE = TSMOM_UNIVERSE
+        self.TSMOM_BROKER_SYMBOLS = TSMOM_BROKER_SYMBOLS
+        self._tsmom_last_month = None
+        self._tsmom_last_log_day = None
+
         # Composants principaux
         self.broker = None
         self.strategy = None
@@ -180,15 +213,17 @@ class SuperBot:
         self.news_assets: List[str] = []
         self.initial_balance: float = 10000.0
 
-        # Paramètres adaptatifs
-        self.adaptive_risk_pct = RISK_PCT
-        self.adaptive_score_min = SCORE_MIN
+        # Paramètres adaptatifs — source unique de vérité (RuntimeConfig).
+        # adaptive_risk_pct / adaptive_score_min délèguent ici via des propriétés
+        # et propagent automatiquement vers RiskManager / TradingStrategy.
+        from superbot.components.runtime_config import RuntimeConfig
+        self.runtime_config = RuntimeConfig(risk_pct=RISK_PCT, score_min=SCORE_MIN)
         self._adaptation_counter = 0
         self._adaptation_every = 10  # cycles
 
         # Blocage dynamique des actifs perdants (géré par StateManager)
         
-        # Phase 2.4: Persistance complète des états
+        # Persistance complète des états
         from superbot.state import StateManager
         import os
         state_file = os.path.join(root_dir, 'superbot', 'logs', f'state_{self.active_broker_type}.json')
@@ -205,7 +240,20 @@ class SuperBot:
         self.consecutive_losses = self.state_manager.consecutive_losses
         self._adaptation_counter = self.state_manager.adaptation_counter
         
-        # 1.2: Verrous pour protéger les accès concurrents
+        # 1.2: Verrous pour protéger les accès concurrents.
+        #
+        # Modèle de threads :
+        #   - Boucle principale (cycle_runner) : sync positions, dispatch workers, stats/télémétrie.
+        #   - Workers ThreadPoolExecutor (cycle_runner) : _process_symbol → exécution + risk.
+        #   - Thread webhook (webhook/server) : ouverture/fermeture manuelle de positions.
+        #   - Thread télémétrie (TelemetryClient) : envois HTTP via une file dédiée (pas d'état bot).
+        #
+        # Convention de verrouillage :
+        #   - `_lock`       (RLock) : état de marché — positions, market_data,
+        #                            caches de cycle et risk_manager.open_positions.
+        #   - `_state_lock` (Lock)  : compteurs/drapeaux — stats, cooldowns,
+        #                            blocked_symbols, failed_execution_cooldowns.
+        # Ne jamais tenir un verrou pendant un appel broker réseau (I/O).
         self._state_lock = threading.Lock()
         self._lock = threading.RLock()
         
@@ -243,8 +291,346 @@ class SuperBot:
             'last_cycle_time': None
         }
 
-        # Initialiser les composants
+        # =================================================================
+        # ⚡ V3 : Attributs de cycle et performance (lus par cycle_runner)
+        # =================================================================
+        # Fix bug heartbeat 50-60s : CYCLE_TIME est maintenant 15s par défaut
+        self.CYCLE_TIME = CYCLE_TIME
+        self.SYMBOL_TIMEOUT_SECONDS = SYMBOL_TIMEOUT_SECONDS
+        self.MAX_PARALLEL_SYMBOLS = MAX_PARALLEL_SYMBOLS
+        # Objectifs journaliers et mode de trading
+        self.DAILY_TARGET_EUR = DAILY_TARGET_EUR
+        self.SESSION_AWARE = SESSION_AWARE
+        self.TRADING_MODE = TRADING_MODE
+        self.SIMULATED_SLIPPAGE_POINTS = SIMULATED_SLIPPAGE_POINTS
+        self.SIMULATED_COMMISSION_PCT = SIMULATED_COMMISSION_PCT
+        # Crypto MT5
+        self.MT5_CRYPTO_ENABLED = MT5_CRYPTO_ENABLED
+        self.MT5_CRYPTO_SYMBOLS = MT5_CRYPTO_SYMBOLS
+        # Tiers de solde
+        self.BALANCE_TIER_HIGH = BALANCE_TIER_HIGH
+        self.BALANCE_TIER_MID = BALANCE_TIER_MID
+        self.BALANCE_TIER_LOW = BALANCE_TIER_LOW
+        self.BALANCE_TIER_MICRO = BALANCE_TIER_MICRO
+        # Auto-apprentissage
+        self.AUTO_LEARN_ENABLED = AUTO_LEARN_ENABLED
+        self.POST_SESSION_DEBRIEF_HOUR_UTC = POST_SESSION_DEBRIEF_HOUR_UTC
+        self.PRE_SESSION_ANALYSIS_HOUR_UTC = PRE_SESSION_ANALYSIS_HOUR_UTC
+        self.KNOWLEDGE_FEEDER_ENABLED = KNOWLEDGE_FEEDER_ENABLED
+        # DB
+        self.DB_PATH = DB_PATH
+
+        log.info(
+            f"🚀 SuperBot V3 | CYCLE_TIME={self.CYCLE_TIME}s | "
+            f"MAX_PARALLEL={self.MAX_PARALLEL_SYMBOLS} | "
+            f"DAILY_TARGET={self.DAILY_TARGET_EUR}€ | "
+            f"TRADING_MODE={self.TRADING_MODE} | "
+            f"MT5_CRYPTO={'activé' if self.MT5_CRYPTO_ENABLED else 'désactivé'}"
+        )
+
+        # =================================================================
+        # 🧠 V3 : BRAIN — Modules d'intelligence autonome
+        # =================================================================
+        self.db = None
+        self.session_manager = None
+        self.knowledge_feeder = None
+        self.performance_learner = None
+        self.strategy_engine = None
+        self.regime_detector = None
+        self.report_generator = None
+        self.online_learner = None
+        self._brain_initialized = False
+        self._last_pre_session_hour = -1
+        self._last_mid_check_time = 0.0
+        self._last_perf_log_time = 0.0
+        self._init_brain()
+
+        # Initialiser les composants broker/stratégie
         self._initialize_components()
+
+    # ─── Paramètres adaptatifs : source unique de vérité ─────────────────────
+
+    @property
+    def adaptive_risk_pct(self) -> float:
+        return self.runtime_config.risk_pct
+
+    @adaptive_risk_pct.setter
+    def adaptive_risk_pct(self, value: float):
+        self.runtime_config.set(risk_pct=value)
+
+    @property
+    def adaptive_score_min(self) -> float:
+        return self.runtime_config.score_min
+
+    @adaptive_score_min.setter
+    def adaptive_score_min(self, value: float):
+        self.runtime_config.set(score_min=value)
+
+    def _init_brain(self):
+        """Initialise tous les modules d'intelligence autonome V3."""
+        log.info("🧠 Initialisation du Brain V3...")
+        try:
+            from superbot.db.database import init_db
+            self.db = init_db(self.DB_PATH)
+            log.info(f"🗄️ DB SQLite initialisée : {self.DB_PATH}")
+        except Exception as e:
+            log.warning(f"⚠️ DB non disponible : {e}")
+
+        try:
+            from superbot.brain.session_manager import SessionManager
+            self.session_manager = SessionManager(
+                bot_instance=self,
+                daily_target_eur=self.DAILY_TARGET_EUR
+            )
+            log.info("🕐 SessionManager initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ SessionManager non disponible : {e}")
+
+        try:
+            from superbot.brain.strategy_engine import StrategyEngine
+            self.strategy_engine = StrategyEngine(db=self.db, session_manager=self.session_manager)
+            log.info("♟️ StrategyEngine initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ StrategyEngine non disponible : {e}")
+
+        try:
+            from superbot.brain.performance_learner import PerformanceLearner
+            self.performance_learner = PerformanceLearner(
+                db=self.db,
+                session_manager=self.session_manager,
+                strategy_engine=self.strategy_engine
+            )
+            log.info("📊 PerformanceLearner initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ PerformanceLearner non disponible : {e}")
+
+        try:
+            from superbot.brain.regime_detector import MarketRegimeDetector
+            self.regime_detector = MarketRegimeDetector(db=self.db)
+            log.info("🔍 RegimeDetector initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ RegimeDetector non disponible : {e}")
+
+        if self.KNOWLEDGE_FEEDER_ENABLED:
+            try:
+                from superbot.brain.knowledge_feeder import KnowledgeFeeder
+                self.knowledge_feeder = KnowledgeFeeder(db=self.db)
+                log.info("🌐 KnowledgeFeeder initialisé")
+            except Exception as e:
+                log.warning(f"⚠️ KnowledgeFeeder non disponible : {e}")
+
+        # Online Learner (EnsembleScorer partial_fit)
+        try:
+            from superbot.ml.online_learner import OnlineLearner
+            self.online_learner = OnlineLearner(db=self.db)
+            log.info("🤖 OnlineLearner initialisé")
+        except Exception as e:
+            log.warning(f"⚠️ OnlineLearner non disponible : {e}")
+
+        # Report Generator (rapport journalier à 22h30 UTC)
+        try:
+            from superbot.brain.report_generator import ReportGenerator
+            self.report_generator = ReportGenerator(
+                db=self.db,
+                session_manager=self.session_manager,
+                strategy_engine=self.strategy_engine,
+                performance_learner=self.performance_learner,
+                knowledge_feeder=self.knowledge_feeder,
+            )
+            self.report_generator.start_daily_scheduler()
+            log.info("📝 ReportGenerator initialisé + scheduler 22h30 UTC")
+        except Exception as e:
+            log.warning(f"⚠️ ReportGenerator non disponible : {e}")
+
+        # Initialiser la DB journalière
+        if self.db and self.session_manager:
+            try:
+                balance = getattr(self, 'initial_balance', 0) or 0
+                target = self.session_manager._compute_daily_target(balance or self.BALANCE_TIER_MID)
+                self.db.set_daily_target(balance or self.BALANCE_TIER_MID, target)
+            except Exception:
+                pass
+
+        self._brain_initialized = True
+        log.info("✅ Brain V3 initialisé avec succès")
+
+
+    # ─── Builders des composants (extraits de _initialize_components) ─────────
+
+    def _build_risk_manager(self):
+        """Construit le RiskManager avec les tailles de position par classe d'actif."""
+        asset_type = self.broker.get_asset_type()
+        default_min_pos = MIN_POSITION_SIZE
+        default_max_pos = MAX_POSITION_SIZE
+
+        if asset_type == "forex":
+            # Pour le forex, les tailles sont en unités de devise (ex: 1000 EUR)
+            default_min_pos = 1.0
+            default_max_pos = 10000000.0
+        elif asset_type == "stock":
+            # Pour les actions, les tailles sont en actions (ex: 1 action SPY = ~500 USD)
+            default_min_pos = 0.001
+            default_max_pos = 100000.0
+        elif asset_type == "crypto":
+            # Pour la crypto, les tailles sont en jetons (ex: 0.001 BTC, 0.1 SOL)
+            default_min_pos = 0.001
+            default_max_pos = 1000000.0
+
+        # Surcharge possible via .env.
+        env_min_pos = os.getenv("MIN_POSITION_SIZE")
+        env_max_pos = os.getenv("MAX_POSITION_SIZE")
+        actual_min_pos = float(env_min_pos) if env_min_pos else default_min_pos
+        actual_max_pos = float(env_max_pos) if env_max_pos else default_max_pos
+
+        max_pos_key = f"MAX_OPEN_POSITIONS_{self.active_broker_type.upper()}"
+        env_max_pos_broker = os.getenv(max_pos_key)
+        if env_max_pos_broker:
+            try:
+                actual_max_open_positions = int(env_max_pos_broker)
+                log.info(f"Nombre maximum de positions spécifique au broker ({max_pos_key}) : {actual_max_open_positions}")
+            except ValueError:
+                actual_max_open_positions = MAX_OPEN_POSITIONS
+        else:
+            actual_max_open_positions = MAX_OPEN_POSITIONS
+
+        return RiskManager({
+            'RISK_PCT': self.adaptive_risk_pct,
+            'MAX_DAILY_LOSS_PCT': MAX_DAILY_LOSS_PCT,
+            'MAX_MONTHLY_LOSS_PCT': MAX_MONTHLY_LOSS_PCT,
+            'MAX_OPEN_POSITIONS': actual_max_open_positions,
+            'KELLY_FRACTION': KELLY_FRACTION,
+            'MIN_TRADES_FOR_KELLY': MIN_TRADES_FOR_KELLY,
+            'SL_ATR_MULT': SL_ATR_MULT,
+            'TP_ATR_MULT': TP_ATR_MULT,
+            'TRAIL_ATR_MULT': TRAIL_ATR_MULT,
+            'TRAIL_ACTIVATE_ATR_MULT': TRAIL_ACTIVATE_ATR_MULT,
+            'BE_ATR_MULT': BE_ATR_MULT,
+            'BE_DYN_RR': BE_DYN_RR,
+            'BE_DYN_RR_RATIO': BE_DYN_RR_RATIO,
+            'MIN_POSITION_SIZE': actual_min_pos,
+            'MAX_POSITION_SIZE': actual_max_pos,
+            'COOLDOWN_SECONDS': COOLDOWN_SECONDS,
+            'MAX_DAILY_LOSS_AMOUNT': MAX_DAILY_LOSS_AMOUNT,
+            'DRAWDOWN_THRESH_1': DRAWDOWN_THRESH_1,
+            'DRAWDOWN_THRESH_2': DRAWDOWN_THRESH_2,
+            'DRAWDOWN_REDUCE_5PCT': DRAWDOWN_REDUCE_5PCT,
+            'DRAWDOWN_REDUCE_10PCT': DRAWDOWN_REDUCE_10PCT,
+        })
+
+    def _build_technical_indicators(self):
+        """Construit le calculateur d'indicateurs techniques."""
+        return TechnicalIndicators({
+            'EMA_FAST': EMA_FAST,
+            'EMA_SLOW': EMA_SLOW,
+            'EMA_TREND': EMA_TREND,
+            'HTF_EMA': HTF_EMA,
+            'D1_EMA': D1_EMA,
+            'W1_EMA': W1_EMA,
+            'RSI_LEN': RSI_LEN,
+            'RSI_OB': RSI_OB,
+            'RSI_OS': RSI_OS,
+            'MACD_FAST': MACD_FAST,
+            'MACD_SLOW': MACD_SLOW,
+            'MACD_SIGNAL': MACD_SIGNAL,
+            'ADX_LEN': ADX_LEN,
+            'ADX_TREND': ADX_TREND,
+            'ST_MULTIPLIER': ST_MULTIPLIER,
+            'ST_ATR_LEN': ST_ATR_LEN,
+            'ATR_LEN': ATR_LEN,
+            'BB_LEN': BB_LEN,
+            'BB_STD': BB_STD,
+            'ICHIMOKU_TENKAN': ICHIMOKU_TENKAN,
+            'ICHIMOKU_KIJUN': ICHIMOKU_KIJUN,
+            'ICHIMOKU_SENKOU_SPAN_B': ICHIMOKU_SENKOU_SPAN_B,
+            'ICHIMOKU_DISPLACEMENT': ICHIMOKU_DISPLACEMENT,
+            'VWAP_WINDOW': VWAP_WINDOW
+        })
+
+    def _build_strategy(self, active_broker_type: str):
+        """Construit la TradingStrategy avec les paramètres par classe d'actif."""
+        # Ajuster les commissions et slippage selon le broker actif pour éviter de brider le R:R
+        actual_commission = COMMISSION_PCT
+        actual_slippage = SLIPPAGE_PCT
+        if active_broker_type == "alpaca":
+            actual_commission = 0.0  # Commission zéro sur Alpaca US Stocks/ETFs
+        elif active_broker_type == "binance":
+            actual_commission = 0.04  # Commission moyenne Binance Futures (0.02% maker, 0.04% taker)
+
+        return TradingStrategy({
+            'SCORE_MIN': self.adaptive_score_min,
+            'RISK_PCT': self.adaptive_risk_pct,
+            'KELLY_FRACTION': KELLY_FRACTION,
+            'EMA_FAST': EMA_FAST,
+            'EMA_SLOW': EMA_SLOW,
+            'EMA_TREND': EMA_TREND,
+            'HTF_EMA': HTF_EMA,
+            'D1_EMA': D1_EMA,
+            'W1_EMA': W1_EMA,
+            'RSI_LEN': RSI_LEN,
+            'RSI_OB': RSI_OB,
+            'RSI_OS': RSI_OS,
+            'MACD_FAST': MACD_FAST,
+            'MACD_SLOW': MACD_SLOW,
+            'MACD_SIGNAL': MACD_SIGNAL,
+            'ADX_LEN': ADX_LEN,
+            'ADX_TREND': ADX_TREND,
+            'ST_MULTIPLIER': ST_MULTIPLIER,
+            'ST_ATR_LEN': ST_ATR_LEN,
+            'ATR_LEN': ATR_LEN,
+            'BB_LEN': BB_LEN,
+            'BB_STD': BB_STD,
+            'ICHIMOKU_TENKAN': ICHIMOKU_TENKAN,
+            'ICHIMOKU_KIJUN': ICHIMOKU_KIJUN,
+            'ICHIMOKU_SENKOU_SPAN_B': ICHIMOKU_SENKOU_SPAN_B,
+            'ICHIMOKU_DISPLACEMENT': ICHIMOKU_DISPLACEMENT,
+            'VWAP_WINDOW': VWAP_WINDOW,
+            # Filtres crypto
+            'CRYPTO_BLACKLIST': CRYPTO_BLACKLIST,
+            'CRYPTO_SCORE_MIN': CRYPTO_SCORE_MIN,
+            'CRYPTO_BUY_BLOCK_BTC_DROP': CRYPTO_BUY_BLOCK_BTC_DROP,
+            'CRYPTO_BNB_VOLUME_FACTOR': CRYPTO_BNB_VOLUME_FACTOR,
+            'COMMISSION_PCT': actual_commission,
+            'SLIPPAGE_PCT': actual_slippage,
+            # Paramètres par classe d'actifs
+            'BROKER_TYPE': active_broker_type,
+            # Crypto (Binance Futures)
+            'EMA_FAST_CRYPTO': EMA_FAST_CRYPTO,
+            'EMA_SLOW_CRYPTO': EMA_SLOW_CRYPTO,
+            'ADX_TREND_CRYPTO': ADX_TREND_CRYPTO,
+            'SCORE_MIN_CRYPTO': SCORE_MIN_CRYPTO,
+            'SL_ATR_MULT_CRYPTO': SL_ATR_MULT_CRYPTO,
+            'TP_ATR_MULT_CRYPTO': TP_ATR_MULT_CRYPTO,
+            # Forex (MT5)
+            'EMA_FAST_FOREX': EMA_FAST_FOREX,
+            'EMA_SLOW_FOREX': EMA_SLOW_FOREX,
+            'ADX_TREND_FOREX': ADX_TREND_FOREX,
+            'SCORE_MIN_FOREX': SCORE_MIN_FOREX,
+            'SL_ATR_MULT_FOREX': SL_ATR_MULT_FOREX,
+            'TP_ATR_MULT_FOREX': TP_ATR_MULT_FOREX,
+            'FOREX_NEWS_AVOID_MINUTES': FOREX_NEWS_AVOID_MINUTES,
+            # ETF/Stocks (Alpaca)
+            'EMA_FAST_STOCK': EMA_FAST_STOCK,
+            'EMA_SLOW_STOCK': EMA_SLOW_STOCK,
+            'ADX_TREND_STOCK': ADX_TREND_STOCK,
+            'SCORE_MIN_STOCK': SCORE_MIN_STOCK,
+            'SL_ATR_MULT_STOCK': SL_ATR_MULT_STOCK,
+            'TP_ATR_MULT_STOCK': TP_ATR_MULT_STOCK,
+            'ALLOW_SHORT_STOCK': ALLOW_SHORT_STOCK,
+        }, indicators=self.technical_indicators)
+
+    def _build_news_manager(self):
+        """Construit le gestionnaire de nouvelles."""
+        return NewsManager({
+            'NEWS_ASSETS': self.news_assets,
+            'NEWS_UPDATE_INTERVAL': NEWS_UPDATE_INTERVAL,
+            'NEWS_AVOIDANCE_BEFORE': NEWS_AVOIDANCE_BEFORE,
+            'NEWS_AVOIDANCE_AFTER': NEWS_AVOIDANCE_AFTER,
+            'NEWS_RISK_REDUCTION_FACTOR': NEWS_RISK_REDUCTION_FACTOR,
+            'NEWS_HIGH_IMPACT_ONLY': NEWS_HIGH_IMPACT_ONLY,
+            'FEAR_GREED_EXTREME_FEAR': FEAR_GREED_EXTREME_FEAR,
+            'FEAR_GREED_EXTREME_GREED': FEAR_GREED_EXTREME_GREED,
+            'CRYPTOCOMPARE_API_KEY': CRYPTOCOMPARE_API_KEY
+        })
 
     def _initialize_components(self):
         """Initialise tous les composants du bot."""
@@ -302,6 +688,7 @@ class SuperBot:
             if self.active_broker_type != active_broker_type:
                 log.info(f"Le type de broker a changé de {self.active_broker_type} à {active_broker_type}. Réinitialisation du StateManager...")
                 self.active_broker_type = active_broker_type
+                from superbot.state import StateManager
                 state_file = os.path.join(root_dir, 'superbot', 'logs', f'state_{self.active_broker_type}.json')
                 self.state_manager = StateManager(filepath=state_file, ttl_hours=24)
                 self.state_manager.load_state()
@@ -344,12 +731,37 @@ class SuperBot:
                 self.instruments = self.broker.get_default_instruments()
                 log.info(f"Aucun instrument configuré — défauts courtier ({active_broker_type}) : {self.instruments}")
 
-            # 1.4 Filtre Multi-devises (Désactiver les paires croisées non-USD)
+            # 🪙 V3 : Intégration crypto MT5 (Fusion Markets CFD)
+            # Si broker=MT5 et MT5_CRYPTO_ENABLED=true, ajouter les paires crypto disponibles
+            if (active_broker_type == "mt5" and
+                    MT5_CRYPTO_ENABLED and
+                    hasattr(self.broker, 'get_crypto_instruments')):
+                try:
+                    crypto_instruments = self.broker.get_crypto_instruments()
+                    if crypto_instruments:
+                        # Ajouter uniquement les crypto pas déjà dans la liste
+                        existing = set(self.instruments)
+                        new_crypto = [s for s in crypto_instruments if s not in existing]
+                        self.instruments.extend(new_crypto)
+                        log.info(
+                            f"🪙 Crypto MT5 ajoutée à la liste des instruments : {new_crypto}\n"
+                            f"   Total instruments : {self.instruments}"
+                        )
+                    else:
+                        log.info("🪙 MT5_CRYPTO_ENABLED=true mais aucun symbole crypto disponible sur ce compte Fusion Markets")
+                except Exception as e:
+                    log.warning(f"Impossible de charger les instruments crypto MT5 : {e}")
+
+            # Filtre multi-devises : ne rejeter les paires croisées que sur Binance
+            # (MT5 convertit nativement le PnL des croisées).
             supported_instruments = []
             for symbol in self.instruments:
                 normalized = symbol.upper().replace("/", "")
                 # Pour Alpaca, pas de concept de paires de devises croisées (ce sont des actions/ETFs cotés en USD)
                 if active_broker_type == "alpaca":
+                    supported_instruments.append(symbol)
+                # MT5 gère nativement les paires croisées — les accepter toutes
+                elif active_broker_type == "mt5":
                     supported_instruments.append(symbol)
                 # Si le symbole finit par USD (ou USDT, USDC, BUSD) ou commence par USD, on l'accepte
                 elif normalized.endswith("USD") or normalized.endswith("USDT") or normalized.endswith("USDC") or normalized.endswith("BUSD") or normalized.startswith("USD"):
@@ -372,59 +784,7 @@ class SuperBot:
                 log.info(f"Actifs de nouvelles — défauts broker ({active_broker_type}) : {self.news_assets}")
 
             # 2. Créer le gestionnaire de risques
-            asset_type = self.broker.get_asset_type()
-            default_min_pos = MIN_POSITION_SIZE
-            default_max_pos = MAX_POSITION_SIZE
-            
-            if asset_type == "forex":
-                # Pour le forex, les tailles sont en unités de devise (ex: 1000 EUR)
-                default_min_pos = 1.0
-                default_max_pos = 10000000.0
-            elif asset_type == "stock":
-                # Pour les actions, les tailles sont en actions (ex: 1 action SPY = ~500 USD)
-                default_min_pos = 0.001
-                default_max_pos = 100000.0
-            elif asset_type == "crypto":
-                # Pour la crypto, les tailles sont en jetons (ex: 0.001 BTC, 0.1 SOL)
-                default_min_pos = 0.001
-                default_max_pos = 1000000.0
-
-            # Permettre à l'utilisateur de surcharger via .env s'ils ont explicitement configuré ces variables
-            env_min_pos = os.getenv("MIN_POSITION_SIZE")
-            env_max_pos = os.getenv("MAX_POSITION_SIZE")
-            actual_min_pos = float(env_min_pos) if env_min_pos else default_min_pos
-            actual_max_pos = float(env_max_pos) if env_max_pos else default_max_pos
-
-            # Déterminer le nombre maximum de positions selon le broker
-            broker_type = BROKER_TYPE
-            max_pos_key = f"MAX_OPEN_POSITIONS_{broker_type.upper()}"
-            env_max_pos_broker = os.getenv(max_pos_key)
-            if env_max_pos_broker:
-                try:
-                    actual_max_open_positions = int(env_max_pos_broker)
-                    log.info(f"Nombre maximum de positions spécifique au broker ({max_pos_key}) : {actual_max_open_positions}")
-                except ValueError:
-                    actual_max_open_positions = MAX_OPEN_POSITIONS
-            else:
-                actual_max_open_positions = MAX_OPEN_POSITIONS
-
-            self.risk_manager = RiskManager({
-                'RISK_PCT': RISK_PCT,
-                'MAX_DAILY_LOSS_PCT': MAX_DAILY_LOSS_PCT,
-                'MAX_MONTHLY_LOSS_PCT': MAX_MONTHLY_LOSS_PCT,
-                'MAX_OPEN_POSITIONS': actual_max_open_positions,
-                'KELLY_FRACTION': KELLY_FRACTION,
-                'MIN_TRADES_FOR_KELLY': MIN_TRADES_FOR_KELLY,
-                'SL_ATR_MULT': SL_ATR_MULT,
-                'TP_ATR_MULT': TP_ATR_MULT,
-                'TRAIL_ATR_MULT': TRAIL_ATR_MULT,
-                'BE_ATR_MULT': BE_ATR_MULT,
-                'BE_DYN_RR': BE_DYN_RR,
-                'BE_DYN_RR_RATIO': BE_DYN_RR_RATIO,
-                'MIN_POSITION_SIZE': actual_min_pos,
-                'MAX_POSITION_SIZE': actual_max_pos,
-                'COOLDOWN_SECONDS': COOLDOWN_SECONDS,  # ✅ BUG FIX #5
-            })
+            self.risk_manager = self._build_risk_manager()
             log.info("Gestionnaire de risques initialisé")
 
             # Charger l'historique de trading réel (disque + broker)
@@ -438,123 +798,25 @@ class SuperBot:
                 log.warning(f"Impossible de pré-charger l'historique de trading : {e}")
 
             # 3. Créer le calculateur d'indicateurs techniques
-            self.technical_indicators = TechnicalIndicators({
-                'EMA_FAST': EMA_FAST,
-                'EMA_SLOW': EMA_SLOW,
-                'EMA_TREND': EMA_TREND,
-                'HTF_EMA': HTF_EMA,
-                'D1_EMA': D1_EMA,
-                'W1_EMA': W1_EMA,
-                'RSI_LEN': RSI_LEN,
-                'RSI_OB': RSI_OB,
-                'RSI_OS': RSI_OS,
-                'MACD_FAST': MACD_FAST,
-                'MACD_SLOW': MACD_SLOW,
-                'MACD_SIGNAL': MACD_SIGNAL,
-                'ADX_LEN': ADX_LEN,
-                'ADX_TREND': ADX_TREND,
-                'ST_MULTIPLIER': ST_MULTIPLIER,
-                'ST_ATR_LEN': ST_ATR_LEN,
-                'ATR_LEN': ATR_LEN,
-                'BB_LEN': BB_LEN,
-                'BB_STD': BB_STD,
-                'ICHIMOKU_TENKAN': ICHIMOKU_TENKAN,
-                'ICHIMOKU_KIJUN': ICHIMOKU_KIJUN,
-                'ICHIMOKU_SENKOU_SPAN_B': ICHIMOKU_SENKOU_SPAN_B,
-                'ICHIMOKU_DISPLACEMENT': ICHIMOKU_DISPLACEMENT,
-                'VWAP_WINDOW': VWAP_WINDOW
-            })
+            self.technical_indicators = self._build_technical_indicators()
             log.info("Calculateur d'indicateurs techniques initialisé")
 
             # 4. Créer la stratégie de trading
-            # Ajuster les commissions et slippage selon le broker actif pour éviter de brider le R:R
-            actual_commission = COMMISSION_PCT
-            actual_slippage = SLIPPAGE_PCT
-            if self.active_broker_type == "alpaca":
-                actual_commission = 0.0  # Commission zéro sur Alpaca US Stocks/ETFs
-            elif self.active_broker_type == "binance":
-                actual_commission = 0.04  # Commission moyenne Binance Futures (0.02% maker, 0.04% taker)
-
-            self.strategy = TradingStrategy({
-                'SCORE_MIN': SCORE_MIN,
-                'RISK_PCT': RISK_PCT,
-                'KELLY_FRACTION': KELLY_FRACTION,
-                'EMA_FAST': EMA_FAST,
-                'EMA_SLOW': EMA_SLOW,
-                'EMA_TREND': EMA_TREND,
-                'HTF_EMA': HTF_EMA,
-                'D1_EMA': D1_EMA,
-                'W1_EMA': W1_EMA,
-                'RSI_LEN': RSI_LEN,
-                'RSI_OB': RSI_OB,
-                'RSI_OS': RSI_OS,
-                'MACD_FAST': MACD_FAST,
-                'MACD_SLOW': MACD_SLOW,
-                'MACD_SIGNAL': MACD_SIGNAL,
-                'ADX_LEN': ADX_LEN,
-                'ADX_TREND': ADX_TREND,
-                'ST_MULTIPLIER': ST_MULTIPLIER,
-                'ST_ATR_LEN': ST_ATR_LEN,
-                'ATR_LEN': ATR_LEN,
-                'BB_LEN': BB_LEN,
-                'BB_STD': BB_STD,
-                'ICHIMOKU_TENKAN': ICHIMOKU_TENKAN,
-                'ICHIMOKU_KIJUN': ICHIMOKU_KIJUN,
-                'ICHIMOKU_SENKOU_SPAN_B': ICHIMOKU_SENKOU_SPAN_B,
-                'ICHIMOKU_DISPLACEMENT': ICHIMOKU_DISPLACEMENT,
-                'VWAP_WINDOW': VWAP_WINDOW,
-                # Filtres crypto — rapport post-mortem 2026-07-02
-                'CRYPTO_BLACKLIST': CRYPTO_BLACKLIST,
-                'CRYPTO_SCORE_MIN': CRYPTO_SCORE_MIN,
-                'CRYPTO_BUY_BLOCK_BTC_DROP': CRYPTO_BUY_BLOCK_BTC_DROP,
-                'CRYPTO_BNB_VOLUME_FACTOR': CRYPTO_BNB_VOLUME_FACTOR,
-                'COMMISSION_PCT': actual_commission,
-                'SLIPPAGE_PCT': actual_slippage,
-                # ── Paramètres par classe d'actifs (refactoring stratégie 2026-07-14) ──
-                'BROKER_TYPE': active_broker_type,
-                # Crypto (Binance Futures)
-                'EMA_FAST_CRYPTO': EMA_FAST_CRYPTO,
-                'EMA_SLOW_CRYPTO': EMA_SLOW_CRYPTO,
-                'ADX_TREND_CRYPTO': ADX_TREND_CRYPTO,
-                'SCORE_MIN_CRYPTO': SCORE_MIN_CRYPTO,
-                'SL_ATR_MULT_CRYPTO': SL_ATR_MULT_CRYPTO,
-                'TP_ATR_MULT_CRYPTO': TP_ATR_MULT_CRYPTO,
-                # Forex (MT5)
-                'EMA_FAST_FOREX': EMA_FAST_FOREX,
-                'EMA_SLOW_FOREX': EMA_SLOW_FOREX,
-                'ADX_TREND_FOREX': ADX_TREND_FOREX,
-                'SCORE_MIN_FOREX': SCORE_MIN_FOREX,
-                'SL_ATR_MULT_FOREX': SL_ATR_MULT_FOREX,
-                'TP_ATR_MULT_FOREX': TP_ATR_MULT_FOREX,
-                'FOREX_NEWS_AVOID_MINUTES': FOREX_NEWS_AVOID_MINUTES,
-                # ETF/Stocks (Alpaca)
-                'EMA_FAST_STOCK': EMA_FAST_STOCK,
-                'EMA_SLOW_STOCK': EMA_SLOW_STOCK,
-                'ADX_TREND_STOCK': ADX_TREND_STOCK,
-                'SCORE_MIN_STOCK': SCORE_MIN_STOCK,
-                'SL_ATR_MULT_STOCK': SL_ATR_MULT_STOCK,
-                'TP_ATR_MULT_STOCK': TP_ATR_MULT_STOCK,
-                'ALLOW_SHORT_STOCK': ALLOW_SHORT_STOCK,
-            }, indicators=self.technical_indicators)
+            self.strategy = self._build_strategy(active_broker_type)
             log.info("Stratégie de trading initialisée")
             # Exposer le config au niveau bot pour les filtres de l'executor
             self.config = self.strategy.config
 
+            # Lier la source unique de vérité aux composants actifs : toute
+            # écriture ultérieure sur adaptive_risk_pct / adaptive_score_min
+            # se propage automatiquement.
+            self.runtime_config.bind(self.risk_manager, self.strategy)
+
             # 5. Créer le gestionnaire de nouvelles
-            self.news_manager = NewsManager({
-                'NEWS_ASSETS': self.news_assets,
-                'NEWS_UPDATE_INTERVAL': NEWS_UPDATE_INTERVAL,
-                'NEWS_AVOIDANCE_BEFORE': NEWS_AVOIDANCE_BEFORE,
-                'NEWS_AVOIDANCE_AFTER': NEWS_AVOIDANCE_AFTER,
-                'NEWS_RISK_REDUCTION_FACTOR': NEWS_RISK_REDUCTION_FACTOR,
-                'NEWS_HIGH_IMPACT_ONLY': NEWS_HIGH_IMPACT_ONLY,
-                'FEAR_GREED_EXTREME_FEAR': FEAR_GREED_EXTREME_FEAR,
-                'FEAR_GREED_EXTREME_GREED': FEAR_GREED_EXTREME_GREED,
-                'CRYPTOCOMPARE_API_KEY': CRYPTOCOMPARE_API_KEY
-            })
+            self.news_manager = self._build_news_manager()
             log.info("Gestionnaire de nouvelles initialisé")
 
-            # 5.5. Initialiser Prometheus Exporter (Phase 3.3)
+            # Initialiser Prometheus Exporter
             try:
                 from superbot.telemetry import PrometheusExporter
                 # Calculer un port de métriques unique pour éviter les conflits en multi-instances
@@ -584,7 +846,7 @@ class SuperBot:
             except Exception as e:
                 log.warning(f"Impossible de synchroniser les positions initiales : {e}")
 
-            # 7. Initialiser les agents de supervision (Formulation 2)
+            # 7. Initialiser les agents de supervision
             try:
                 from superbot.monitoring.bug_watchdog import BugWatchdog
                 from superbot.config import BUG_WATCHDOG_INTERVAL, BUG_WATCHDOG_MAX_LATENCY, BUG_WATCHDOG_ENABLED
@@ -607,6 +869,163 @@ class SuperBot:
             log.error(f"Erreur lors de l'initialisation des composants : {e}")
             log.error(traceback.format_exc())
             raise
+
+    def _tsmom_cycle(self):
+        """Mode TSMOM : allocation mensuelle à la place de la boucle intraday.
+
+        Quand TSMOM_ENABLED=true, la boucle principale appelle cette méthode au
+        lieu de scanner les symboles en intraday. Elle :
+          1. récupère les clôtures QUOTIDIENNES des actifs TSMOM du broker actif ;
+          2. calcule l'allocation cible (poids) via superbot.strategy.tsmom ;
+          3. logue la cible une fois par jour ;
+          4. au changement de mois, rapproche les positions de la cible :
+             ordres market si TSMOM_PLACE_ORDERS=true, sinon dry-run (log seul).
+
+        Un seul broker à la fois : alpaca→SPY, mt5→XAUUSD, binance→BTC/USDT.
+        sl/tp = 0 signifie « pas de stop » (hold mensuel) — comportement à
+        valider par broker avant tout placement réel.
+        """
+        import pandas as pd
+        from datetime import datetime, timezone
+        import superbot.config as cfg
+        from superbot.strategy import tsmom
+
+        broker_map = self.TSMOM_BROKER_SYMBOLS.get(self.active_broker_type.lower(), {})
+        if not broker_map:
+            log.info("[TSMOM] Aucun actif pour le broker %s — allocation sautée.", self.active_broker_type)
+            return
+
+        now = datetime.now(timezone.utc)
+        day_key = now.date()
+        # Throttle : le cycle tourne toutes les ~15s mais la stratégie est
+        # mensuelle ; on ne refait le travail (fetch + allocation) qu'une fois/jour.
+        if getattr(self, "_tsmom_last_log_day", None) == day_key:
+            return
+        self._tsmom_last_log_day = day_key
+        month_key = (now.year, now.month)
+
+        # 1. Clôtures quotidiennes des actifs de l'univers du broker
+        prices = {}
+        for uni_sym, broker_sym in broker_map.items():
+            if uni_sym not in self.TSMOM_UNIVERSE:
+                continue
+            try:
+                df = self.broker.fetch_candles(broker_sym, "1d", limit=400)
+                if df is None or df.empty or "close" not in df.columns:
+                    log.warning("[TSMOM] Clôtures quotidiennes indisponibles pour %s", broker_sym)
+                    continue
+                # Le dashboard utilise la dernière série OHLC disponible pour
+                # alimenter le graphique. TSMOM ne doit pas laisser ce cache vide
+                # simplement parce qu'il ne passe qu'une fois par jour.
+                with self._lock:
+                    self.market_data[broker_sym] = df.copy()
+                closes = df["close"].astype(float)
+                closes.index = pd.to_datetime(closes.index, utc=True)
+                prices[uni_sym] = closes
+            except Exception as e:
+                log.warning("[TSMOM] Erreur récupération %s : %s", broker_sym, e)
+
+        if not prices:
+            return
+
+        # 2. Allocation cible (signal « L-1 » + vol ciblée, sans look-ahead)
+        cfg_dict = {k: v for k, v in vars(cfg).items() if k.startswith("TSMOM_")}
+        alloc = tsmom.compute_allocations(cfg_dict, prices)
+        if alloc.empty:
+            log.info("[TSMOM] Allocation non calculable (données insuffisantes).")
+            return
+
+        # 3. Log quotidien de la cible (une fois/jour via le throttle ci-dessus)
+        targets = ", ".join(f"{r.symbol}={r.weight:+.2f}" for _, r in alloc.iterrows())
+        log.info("[TSMOM] Allocation cible du jour : %s", targets)
+
+        # 4. Rebalancement uniquement au changement de mois
+        if getattr(self, "_tsmom_last_month", None) == month_key:
+            return
+        self._tsmom_last_month = month_key
+
+        # 5. Équité réelle (sinon dry-run forcé)
+        equity = 0.0
+        try:
+            acc = self.broker.get_account_summary()
+            if acc:
+                equity = float(acc.get("equity") or acc.get("balance") or 0.0)
+        except Exception:
+            equity = 0.0
+        if equity <= 0.0:
+            try:
+                equity = float(self.broker.get_balance())
+            except Exception:
+                equity = 0.0
+
+        place_orders = bool(self.TSMOM_PLACE_ORDERS) and equity > 0.0
+        if self.TSMOM_PLACE_ORDERS and equity <= 0.0:
+            log.warning("[TSMOM] Équité indisponible — rebalancement en dry-run.")
+
+        for _, row in alloc.iterrows():
+            uni_sym = str(row["symbol"])
+            broker_sym = broker_map.get(uni_sym)
+            if not broker_sym:
+                continue
+            target_weight = float(row["weight"])
+            try:
+                price = float(self.broker.get_current_price(broker_sym))
+            except Exception:
+                price = float(prices[uni_sym].iloc[-1]) if uni_sym in prices else 0.0
+            if price <= 0.0:
+                log.warning("[TSMOM] Prix indisponible pour %s — ignoré.", broker_sym)
+                continue
+
+            target_notional = target_weight * equity if equity > 0.0 else 0.0
+            target_signed_size = target_notional / price  # >0 long, <0 short
+
+            # Garde-fou « compte insuffisant » : ne jamais produire un ordre
+            # impossible à exécuter. Le broker impose une taille minimale
+            # (ex. XAUUSD = 1 once = 0.01 lot). Si la cible entière est sous ce
+            # minimum, le compte ne peut pas porter ce symbole → on le saute.
+            min_order_size = None
+            try:
+                min_order_size = self.broker.get_min_order_size(broker_sym)
+            except Exception:
+                min_order_size = None
+            if min_order_size and min_order_size > 0 and abs(target_signed_size) > 0:
+                if abs(target_signed_size) < min_order_size:
+                    required_equity = (
+                        min_order_size * price / abs(target_weight)
+                        if target_weight else float("inf")
+                    )
+                    log.info(
+                        "[TSMOM] %s : cible %.6f < minimum broker %.4f → compte "
+                        "insuffisant (requis ≈ %.0f %s). Symbole ignoré.",
+                        broker_sym, target_signed_size, min_order_size,
+                        required_equity, "USD",
+                    )
+                    continue
+
+            pos = self.positions.get(broker_sym) or {}
+            cur_size = float(pos.get("size", 0.0) or 0.0)
+            cur_signed = -cur_size if str(pos.get("side", "LONG")).upper() == "SHORT" else cur_size
+            delta = target_signed_size - cur_signed
+
+            min_notional = equity * 0.01 if equity > 0.0 else 0.0
+            if min_notional > 0.0 and abs(delta) * price < min_notional:
+                log.info("[TSMOM] %s : delta %.6f < seuil 1%% — position conservée.", broker_sym, delta)
+                continue
+
+            side = "buy" if delta > 0 else "sell"
+            amount = abs(delta)
+            if place_orders:
+                try:
+                    ok = self.broker.place_order(
+                        broker_sym, side, amount, sl=0.0, tp=0.0, comment="TSMOM rebalance"
+                    )
+                    log.info("[TSMOM] Ordre %s %s %.6f → %s", side, broker_sym, amount,
+                             "OK" if ok else "ÉCHEC")
+                except Exception as e:
+                    log.error("[TSMOM] Échec ordre %s %s : %s", side, broker_sym, e)
+            else:
+                log.info("[TSMOM] DRY-RUN : %s %s %.6f (poids cible %+.2f) — TSMOM_PLACE_ORDERS=false",
+                         side.upper(), broker_sym, amount, target_weight)
 
     def _sync_positions_with_broker(self):
         """
@@ -666,7 +1085,7 @@ class SuperBot:
         self.main_thread.start()
         log.info("Boucle principale de trading démarrée")
 
-        # Démarrer le Bug Watchdog (Formulation 2)
+        # Démarrer le Bug Watchdog
         if getattr(self, 'bug_watchdog', None):
             try:
                 self.bug_watchdog.start()
@@ -689,7 +1108,7 @@ class SuperBot:
         self.running = False
         self.shutdown_event.set()
 
-        # Phase 2.4 : Sauvegarder l'état avant l'arrêt
+        # Sauvegarder l'état avant l'arrêt
         self._save_cooldowns()
         log.info("États de session sauvegardés avec succès.")
 
@@ -700,7 +1119,7 @@ class SuperBot:
         except Exception as e:
             log.error(f"Erreur lors de l'arrêt du gestionnaire de nouvelles : {e}")
 
-        # Arrêter le Bug Watchdog (Formulation 2)
+        # Arrêter le Bug Watchdog
         if getattr(self, 'bug_watchdog', None):
             try:
                 self.bug_watchdog.stop()
@@ -731,13 +1150,48 @@ class SuperBot:
             else:
                 log.info("Thread principal arrêté")
 
-        # Fermer les connexions du broker
+        # Fermer les connexions du broker (MT5 garde une connexion COM ouverte sinon).
         try:
-            # La plupart des brokers n'ont pas besoin de fermeture explicite
-            # mais on peut ajouter ici du nettoyage si nécessaire
-            log.info("Connexions broker fermées")
+            if hasattr(self.broker, 'disconnect'):
+                self.broker.disconnect()
+                log.info("Connexions broker fermées")
+            elif hasattr(self.broker, 'close'):
+                self.broker.close()
+                log.info("Connexions broker fermées")
+            else:
+                log.info("Connexions broker fermées (pas de méthode explicite)")
         except Exception as e:
             log.error(f"Erreur lors de la fermeture des connexions broker : {e}")
+
+        # 🧠 V3 : Arrêter les modules Brain
+        if getattr(self, 'report_generator', None):
+            try:
+                self.report_generator.stop()
+                log.info("📝 ReportGenerator arrêté")
+            except Exception as e:
+                log.debug(f"Erreur arrêt ReportGenerator: {e}")
+
+        if getattr(self, 'knowledge_feeder', None):
+            try:
+                self.knowledge_feeder.stop()
+                log.info("KnowledgeFeeder arrêté")
+            except Exception as e:
+                log.debug(f"Erreur arrêt KnowledgeFeeder: {e}")
+
+        # Flusher le modèle ML avant la fermeture DB (sinon les derniers apprentissages sont perdus).
+        if getattr(self, 'online_learner', None):
+            try:
+                self.online_learner.flush()
+                log.info("🧠 OnlineLearner sauvegardé à l'arrêt")
+            except Exception as e:
+                log.debug(f"Erreur flush OnlineLearner: {e}")
+
+        if getattr(self, 'db', None):
+            try:
+                self.db.close()
+                log.info("🗄️ DB SQLite fermée")
+            except Exception as e:
+                log.debug(f"Erreur fermeture DB: {e}")
 
         log.info("SuperBot arrêté avec succès")
 
@@ -806,6 +1260,26 @@ class SuperBot:
             self._update_active_position_risk(symbol, df_with_indicators)
             risk_time = time.time() - risk_start
 
+            # 🧠 V3 : Vérification de session (SessionManager)
+            if self.session_manager:
+                try:
+                    self.session_manager.tick()
+                    can_trade, reason = self.session_manager.can_trade_symbol(symbol)
+                    if not can_trade:
+                        log.debug(f"Session filter: {symbol} skipé — {reason}")
+                        return
+                except Exception as _se:
+                    log.debug(f"SessionManager tick error: {_se}")
+
+            # ⚫ V3 : Vérification PerformanceLearner (blocage pertes consécutives)
+            if self.performance_learner:
+                try:
+                    if self.performance_learner.is_symbol_blocked(symbol):
+                        log.info(f"🚫 {symbol} bloqué par PerformanceLearner (3+ pertes consécutives)")
+                        return
+                except Exception as _pe:
+                    log.debug(f"PerformanceLearner check error: {_pe}")
+
             # 🚫 BLOCAGE DYNAMIQUE : Skip si actif bloqué pour cette session
             if symbol in self.blocked_symbols:
                 log.info(f"⛔ {symbol} bloqué pour cette session (perte cumulée > seuil)")
@@ -845,13 +1319,15 @@ class SuperBot:
                 else:
                     signal_data = None
             if signal_data is None:
-                # Passer le vrai solde et le Kelly réel calculé depuis l'historique au modèle
+                # Passer le vrai solde et le win rate réel au modèle.
                 _real_balance = getattr(self, '_cached_balance', 0.0)
                 _real_win_rate = None
                 if self.risk_manager and len(self.risk_manager.trade_history) >= self.risk_manager.MIN_TRADES_FOR_KELLY:
-                    _real_win_rate = self.risk_manager._calculate_kelly_fraction()
+                    closed = [t for t in self.risk_manager.trade_history if t.get('target') is not None]
+                    if closed:
+                        _real_win_rate = sum(1 for t in closed if t.get('target') == 1) / len(closed)
 
-                # P1-1 : Calculer la variation BTC 24h depuis les données de marché en cache
+                # Calculer la variation BTC 24h depuis les données de marché en cache
                 _btc_change_24h = None
                 if self.broker.get_asset_type() == "crypto":
                     btc_sym = 'BTC/USDT'
@@ -887,6 +1363,53 @@ class SuperBot:
                     news_filter_passed=_news_filter_passed
                 )
                 signal_data['symbol'] = symbol
+
+                # 🧠 V3 : Enrichir le signal avec le régime Brain + StrategyEngine
+                try:
+                    if self.regime_detector:
+                        asset_class = 'crypto' if 'BTC' in symbol or 'ETH' in symbol or 'BNB' in symbol else 'forex'
+                        regime_result = self.regime_detector.detect(
+                            df_with_indicators, symbol=symbol, asset_class=asset_class, store_in_db=False
+                        )
+                        # Le brain V3 retourne un format ('high_volatility'/'ranging') différent du
+                        # label HMM brut attendu par stop_manager/position_sizer. On le stocke donc
+                        # séparément, sans écraser le hmm_label injecté par la stratégie.
+                        signal_data['brain_regime'] = regime_result.regime
+                        signal_data['market_regime'] = regime_result.regime
+                        # hmm_label : ne mettre à jour que si non encore défini par la strategy
+                        if 'hmm_label' not in signal_data or signal_data.get('hmm_label') in ('UNKNOWN', '', None):
+                            signal_data['hmm_label'] = regime_result.regime
+                        signal_data['regime_confidence'] = regime_result.confidence
+                        signal_data['regime_risk_mult'] = self.regime_detector.get_risk_multiplier(regime_result.regime)
+
+                    if self.strategy_engine and self.session_manager:
+                        sess = self.session_manager.get_current_session()
+                        regime = signal_data.get('market_regime', 'ranging')
+                        asset_class = 'crypto' if 'BTC' in symbol or 'ETH' in symbol else 'forex'
+                        best_strat, strat_conf = self.strategy_engine.select_best_strategy(
+                            regime=regime,
+                            session_name=sess.get('name', 'LONDON'),
+                            asset_class=asset_class,
+                            symbol=symbol,
+                            adx_value=float(df_with_indicators.iloc[-1].get('adx', 0) or 0),
+                        )
+                        signal_data['strategy_used'] = best_strat
+                        signal_data['strategy_confidence'] = strat_conf
+
+                        # Ajuster le score_min selon le régime
+                        if self.regime_detector:
+                            score_adj = self.regime_detector.get_score_min_adjustment(regime)
+                            base_score_min = signal_data.get('score_min', self.strategy.score_min)
+                            signal_data['score_min'] = max(1, base_score_min + score_adj)
+
+                        # Ajuster le score_min selon la session
+                        if self.session_manager:
+                            base_score_min = signal_data.get('score_min', self.strategy.score_min)
+                            signal_data['score_min'] = self.session_manager.get_adapted_score_min(base_score_min)
+
+                except Exception as _brain_e:
+                    log.debug(f"Brain enrichment error ({symbol}): {_brain_e}")
+
                 with self._lock:
                     self._strategy_cache[symbol] = signal_data
             strategy_time = time.time() - strategy_start
@@ -952,11 +1475,11 @@ class SuperBot:
         current_price = df_with_indicators.iloc[-1]['close']
         atr_value = df_with_indicators.iloc[-1].get('atr', 0)
 
-        # Mettre à jour l'ATR dans la position pour le risk manager
-        pos_risk = self.risk_manager.open_positions[symbol]
-        pos_risk['atr_value'] = atr_value
-
-        old_sl = pos_risk.get('stop_loss', 0.0)
+        # Mettre à jour l'ATR dans la position pour le risk manager (sous verrou interne).
+        with self.risk_manager._history_lock:
+            pos_risk = self.risk_manager.open_positions[symbol]
+            pos_risk['atr_value'] = atr_value
+            old_sl = pos_risk.get('stop_loss', 0.0)
 
         # Récupérer la position brute du courtier pour vérifier la présence des ordres SL/TP réels
         broker_pos = self.broker.get_position(symbol)
@@ -980,7 +1503,9 @@ class SuperBot:
                 asset_type=self.broker.get_asset_type(),
                 symbol=symbol
             )
-            pos_risk['take_profit'] = theoretical_tp
+            with self.risk_manager._history_lock:
+                if symbol in self.risk_manager.open_positions:
+                    self.risk_manager.open_positions[symbol]['take_profit'] = theoretical_tp
             with self._lock:
                 if symbol in self.positions:
                     self.positions[symbol]['take_profit'] = theoretical_tp
@@ -1167,10 +1692,15 @@ class SuperBot:
         Returns:
             DataFrame avec les données OHLCV ou None en cas d'erreur
         """
-        # Vérifier d'abord le cache du cycle de trading pour éviter des appels API doubles
-        cache = getattr(self, '_market_data_cache', {})
-        if symbol in cache:
-            return cache[symbol]
+        # Vérifier d'abord le cache du cycle de trading pour éviter des appels API doubles.
+        # Accès sous verrou : _market_data_cache est partagé entre les workers du cycle.
+        with self._lock:
+            cache = getattr(self, '_market_data_cache', None)
+            if cache is None:
+                self._market_data_cache = {}
+                cache = self._market_data_cache
+            if symbol in cache:
+                return cache[symbol]
 
         try:
             # Utiliser le timeframe configuré
@@ -1190,9 +1720,10 @@ class SuperBot:
                 return None
 
             # Mettre en cache pour ce cycle
-            if not hasattr(self, '_market_data_cache'):
-                self._market_data_cache = {}
-            self._market_data_cache[symbol] = df
+            with self._lock:
+                if not hasattr(self, '_market_data_cache'):
+                    self._market_data_cache = {}
+                self._market_data_cache[symbol] = df
 
             return df
 
@@ -1241,6 +1772,11 @@ class SuperBot:
         """
         position_side = "LONG" if side == "buy" else "SHORT"
 
+        # Normaliser le symbole pour que bot.positions utilise le même nom que MT5
+        # (évite les doublons du GhostCleaner et le pyramidage).
+        if hasattr(self.broker, 'normalize_symbol'):
+            symbol = self.broker.normalize_symbol(symbol)
+
         with self._lock:
             self.positions[symbol] = {
                 'side': position_side,
@@ -1250,7 +1786,7 @@ class SuperBot:
                 'take_profit': take_profit,
                 'timestamp': datetime.now(timezone.utc),
                 'status': 'open',
-                # ✅ BUG FIX #3 — Stocker le régime de marché pour propagation à la clôture
+                # Régime de marché conservé pour être propagé à la clôture.
                 'market_regime': market_regime,
                 'features': features or {}
             }
@@ -1313,11 +1849,13 @@ class SuperBot:
                 log.info(f"Demande de fermeture de position reçue via webhook pour {symbol}")
                 success = self.broker.close_position(symbol, reason="Webhook exit request")
                 if success:
-                    # Mettre à jour l'état local
-                    if symbol in self.positions:
-                        del self.positions[symbol]
-                    if self.risk_manager and symbol in self.risk_manager.open_positions:
-                        del self.risk_manager.open_positions[symbol]
+                    # Mettre à jour l'état local sous verrou : ce thread peut tourner
+                    # en parallèle des workers du cycle et du sync.
+                    with self._lock:
+                        if symbol in self.positions:
+                            del self.positions[symbol]
+                        if self.risk_manager and symbol in self.risk_manager.open_positions:
+                            del self.risk_manager.open_positions[symbol]
                     return {"status": "success", "action": "closed", "symbol": symbol}
                 else:
                     return {"status": "error", "reason": "failed_to_close", "symbol": symbol}
@@ -1326,7 +1864,7 @@ class SuperBot:
             if action not in ['buy', 'sell']:
                 return {"status": "error", "reason": f"unknown_action: {action}"}
 
-            # 🔒 BUG FIX #WH — Filtres de sécurité webhook (même pipeline que le trading automatique)
+            # 🔒 Filtres de sécurité webhook (même pipeline que le trading automatique)
 
             # A. Vérifier si le bot est en pause
             if self.is_paused:
@@ -1349,12 +1887,26 @@ class SuperBot:
 
             # E. Filtre session US (stocks/ETFs)
             if self.broker.get_asset_type() == "stock":
-                now_utc_dt = datetime.now(timezone.utc)
-                now_utc_time = now_utc_dt.time()
-                # Approximation simple (DST géré de manière simplifiée)
-                start_session = datetime.strptime("14:30", "%H:%M").time()
-                end_session = datetime.strptime("21:00", "%H:%M").time()
-                if not (start_session <= now_utc_time <= end_session):
+                market_is_open = True
+                # 1) Horloge officielle Alpaca (autoritaire, gère DST + jours fériés)
+                if hasattr(self.broker, '_api') and hasattr(self.broker._api, 'get_clock'):
+                    try:
+                        market_is_open = bool(self.broker._api.get_clock().is_open)
+                    except Exception as e:
+                        log.warning(f"Erreur horloge Alpaca (webhook) : {e}")
+                        market_is_open = False
+                else:
+                    # 2) Fallback DST-aware + week-end (pas d'API dispo)
+                    try:
+                        import zoneinfo
+                        et_tz = zoneinfo.ZoneInfo("America/New_York")
+                        now_et = datetime.now(et_tz)
+                        open_t = datetime.strptime("09:30", "%H:%M").time()
+                        close_t = datetime.strptime("16:00", "%H:%M").time()
+                        market_is_open = (now_et.weekday() < 5 and open_t <= now_et.time() <= close_t)
+                    except Exception:
+                        market_is_open = False
+                if not market_is_open:
                     return {"status": "skipped", "reason": "outside_us_session", "symbol": symbol}
 
             # F. Bloquer les SHORTs sur ETF/Stocks si non autorisé
@@ -1431,7 +1983,8 @@ class SuperBot:
             )
 
             if order_result:
-                self.stats['trades_executed'] += 1
+                with self._state_lock:
+                    self.stats['trades_executed'] += 1
                 
                 # Enregistrer le trade pour le suivi du risque
                 trade_record = {
@@ -1444,7 +1997,7 @@ class SuperBot:
                     'timestamp': datetime.now(timezone.utc).isoformat(),
                     'signal_score': data.get('strength', 1.0) * 10,
                     'market_regime': 'Webhook Alert',
-                    'broker': BROKER_TYPE
+                    'broker': self.active_broker_type
                 }
                 self.risk_manager.record_trade(trade_record)
 
@@ -1584,6 +2137,74 @@ class SuperBot:
                     if candles:
                         dashboard_data['market_data'][symbol] = candles
 
+            # 🧠 V3: Collecte des données Brain
+            brain_data = {}
+            try:
+                sm = getattr(self, 'session_manager', None)
+                if sm:
+                    progress = sm.get_daily_progress()
+                    curr_session = sm.get_current_session()
+                    brain_data['daily_progress'] = {
+                        'achieved_eur': progress.get('achieved_eur', 0),
+                        'target_eur': progress.get('target_eur', 200),
+                        'achievement_pct': progress.get('achievement_pct', 0),
+                    }
+                    brain_data['session'] = {
+                        'name': curr_session.get('name', ''),
+                        'description': curr_session.get('description', ''),
+                        'risk_mult': curr_session.get('risk_multiplier', 1.0),
+                    }
+
+                rd = getattr(self, 'regime_detector', None)
+                if rd:
+                    last_reg = None
+                    if hasattr(rd, '_cache') and rd._cache:
+                        last_reg = list(rd._cache.values())[-1]
+                    elif hasattr(rd, '_last_regime'):
+                        last_reg = rd._last_regime
+
+                    if last_reg:
+                        brain_data['regime'] = {
+                            'regime': getattr(last_reg, 'regime', '—'),
+                            'confidence': getattr(last_reg, 'confidence', 0),
+                            'risk_mult': rd.get_risk_multiplier(getattr(last_reg, 'regime', '')) if hasattr(rd, 'get_risk_multiplier') else 1.0,
+                        }
+
+                se = getattr(self, 'strategy_engine', None)
+                if se:
+                    lb = se.get_strategy_leaderboard()[:1]
+                    if lb:
+                        top = lb[0]
+                        brain_data['strategy'] = {
+                            'name': top.get('strategy', ''),
+                            'confidence': top.get('wr', 0),
+                            'trades': top.get('trades', 0),
+                        }
+
+                pl = getattr(self, 'performance_learner', None)
+                if pl:
+                    brain_data['learner_params'] = pl.get_current_params()
+                    brain_data['blocked_symbols'] = [
+                        {'symbol': sym, 'reason': '3 pertes consécutives'}
+                        for sym in getattr(pl, '_blocked_symbols', set())
+                    ]
+                    brain_data['recent_decisions'] = getattr(pl, '_decisions_log', [])
+
+                kf_inst = getattr(self, 'knowledge_feeder', None)
+                if kf_inst:
+                    kf_sentiment = kf_inst.get_current_sentiment()
+                    brain_data['knowledge_feeder'] = {
+                        'items_today': getattr(kf_inst, '_items_today', 0),
+                        'last_refresh': getattr(kf_inst, '_last_refresh_time', None),
+                        'is_running': getattr(kf_inst, '_running', False),
+                        'fear_greed_index': kf_sentiment.get('fear_greed_index'),
+                        'overall_sentiment': kf_sentiment.get('overall_sentiment', 'neutral'),
+                    }
+            except Exception as e:
+                log.debug(f"Erreur collecte brain data dans _update_dashboard: {e}")
+
+            dashboard_data['brain'] = brain_data
+
             # Mettre à jour le dashboard
             self.dashboard.update_data(dashboard_data)
 
@@ -1640,6 +2261,8 @@ class SuperBot:
                 self.strategy.config['SCORE_MIN'] = best_params['SCORE_MIN']
                 self.strategy.config['RSI_OB'] = best_params['RSI_OB']
                 self.strategy.config['ADX_TREND'] = best_params['ADX_TREND']
+                self.strategy.score_min = best_params['SCORE_MIN']
+                self.adaptive_score_min = best_params['SCORE_MIN']
                 log.info(f"Paramètres de stratégie mis à jour par Walk-Forward : {best_params}")
             except Exception as e:
                 log.error(f"Erreur lors de l'optimisation Walk-Forward : {e}")
@@ -1650,6 +2273,19 @@ class SuperBot:
     def _update_adaptive_parameters(self):
         from superbot.components.adaptive_params import update_adaptive_parameters
         update_adaptive_parameters(self)
+
+    def _apply_adaptive_params(self):
+        """Pousse les paramètres adaptatifs (cloud, walk-forward, adaptation) vers les composants actifs."""
+        rc = getattr(self, 'runtime_config', None)
+        if rc is not None:
+            rc.apply()
+            return
+        # Fallback pour les mocks légers de test (sans runtime_config).
+        if self.risk_manager:
+            self.risk_manager.RISK_PCT = self.adaptive_risk_pct
+        if self.strategy:
+            self.strategy.score_min = self.adaptive_score_min
+            self.strategy.risk_per_trade = self.adaptive_risk_pct
 
     def _detect_model_drift(self):
         from superbot.components.drift_detector import detect_model_drift

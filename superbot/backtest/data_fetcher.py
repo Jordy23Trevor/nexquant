@@ -144,15 +144,88 @@ class DataFetcher:
     def _download(self, symbol: str, timeframe: str, start_dt: datetime, end_dt: datetime) -> Optional[pd.DataFrame]:
         """Tente le téléchargement par ordre de priorité des sources."""
 
-        # 1. Broker natif NexQuant
+        # 1. Binance public klines (sans clé API, historique complet)
+        if self.broker_type == 'binance':
+            df = self._download_from_binance_public(symbol, timeframe, start_dt, end_dt)
+            if df is not None and not df.empty:
+                return df
+            log.warning(f"[DataFetcher] Binance public indisponible — fallback broker natif.")
+
+        # 2. Broker natif NexQuant
         if self.broker_type in ('binance', 'alpaca', 'mt5'):
             df = self._download_from_broker(symbol, timeframe, start_dt, end_dt)
             if df is not None and not df.empty:
                 return df
             log.warning(f"[DataFetcher] Broker {self.broker_type} indisponible — fallback yfinance.")
 
-        # 2. Fallback yfinance (universel, sans clé API)
+        # 3. Fallback yfinance (universel, sans clé API)
         return self._download_from_yfinance(symbol, timeframe, start_dt, end_dt)
+
+    def _download_from_binance_public(self, symbol: str, timeframe: str,
+                                      start_dt: datetime, end_dt: datetime) -> Optional[pd.DataFrame]:
+        """
+        Télécharge via l'API publique spot Binance (aucune clé requise) avec
+        pagination sur startTime/endTime — indispensable pour l'historique
+        intraday (15m/1h) que le testnet futures ne conserve pas.
+        """
+        try:
+            from binance.client import Client
+        except ImportError:
+            log.warning("[DataFetcher] python-binance non installé.")
+            return None
+
+        binance_symbol = symbol.replace('/', '').upper()
+        interval = timeframe  # '1m'/'5m'/'15m'/'1h'… sont des intervalles spot valides
+        delta = self.TIMEFRAME_DELTA.get(timeframe, timedelta(hours=1))
+        page_limit = 1000
+        window = delta * page_limit
+
+        client = Client(api_key='', api_secret='')
+        frames: list = []
+        current_start = start_dt
+
+        while current_start < end_dt:
+            current_end = min(current_start + window, end_dt)
+            try:
+                klines = client.get_klines(
+                    symbol=binance_symbol,
+                    interval=interval,
+                    startTime=int(current_start.timestamp() * 1000),
+                    endTime=int(current_end.timestamp() * 1000),
+                    limit=page_limit,
+                )
+            except Exception as e:
+                log.warning(f"[DataFetcher] Erreur klines publics {binance_symbol} {current_start.date()}: {e}")
+                break
+
+            if not klines:
+                break
+
+            df_page = pd.DataFrame(klines, columns=[
+                'open_time', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_volume', 'trades',
+                'taker_buy_base', 'taker_buy_quote', 'ignore',
+            ])
+            df_page['open_time'] = pd.to_datetime(df_page['open_time'], unit='ms', utc=True)
+            df_page = df_page.set_index('open_time')
+            for col in ('open', 'high', 'low', 'close', 'volume'):
+                df_page[col] = pd.to_numeric(df_page[col], errors='coerce')
+            df_page = df_page[['open', 'high', 'low', 'close', 'volume']]
+            frames.append(df_page)
+
+            if len(klines) < page_limit:
+                break
+            # Avancer au-delà de la dernière bougie pour ne pas dupliquer la frontière
+            current_start = df_page.index[-1] + delta
+
+        if not frames:
+            return None
+
+        df = pd.concat(frames).sort_index()
+        df = df[~df.index.duplicated(keep='first')]
+        mask = (df.index >= start_dt) & (df.index <= end_dt)
+        df = df[mask]
+        return self._normalize_ohlcv(df)
 
     def _download_from_broker(self, symbol: str, timeframe: str,
                               start_dt: datetime, end_dt: datetime) -> Optional[pd.DataFrame]:

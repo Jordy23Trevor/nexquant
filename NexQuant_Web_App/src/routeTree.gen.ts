@@ -22,6 +22,7 @@ import { Route as AuthenticatedBillingRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as ApiPublicIngestRouteImport } from './routes/api/public/ingest'
 import { Route as ApiPublicConfigRouteImport } from './routes/api/public/config'
+import { Route as ApiBacktestsRunRouteImport } from './routes/api/backtests/run'
 
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
@@ -87,6 +88,11 @@ const ApiPublicConfigRoute = ApiPublicConfigRouteImport.update({
   path: '/api/public/config',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiBacktestsRunRoute = ApiBacktestsRunRouteImport.update({
+  id: '/api/backtests/run',
+  path: '/api/backtests/run',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -99,6 +105,7 @@ export interface FileRoutesByFullPath {
   '/history': typeof AuthenticatedHistoryRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/strategies': typeof AuthenticatedStrategiesRoute
+  '/api/backtests/run': typeof ApiBacktestsRunRoute
   '/api/public/config': typeof ApiPublicConfigRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
@@ -113,6 +120,7 @@ export interface FileRoutesByTo {
   '/history': typeof AuthenticatedHistoryRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/strategies': typeof AuthenticatedStrategiesRoute
+  '/api/backtests/run': typeof ApiBacktestsRunRoute
   '/api/public/config': typeof ApiPublicConfigRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
@@ -129,6 +137,7 @@ export interface FileRoutesById {
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/strategies': typeof AuthenticatedStrategiesRoute
+  '/api/backtests/run': typeof ApiBacktestsRunRoute
   '/api/public/config': typeof ApiPublicConfigRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
@@ -145,6 +154,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/settings'
     | '/strategies'
+    | '/api/backtests/run'
     | '/api/public/config'
     | '/api/public/ingest'
   fileRoutesByTo: FileRoutesByTo
@@ -159,6 +169,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/settings'
     | '/strategies'
+    | '/api/backtests/run'
     | '/api/public/config'
     | '/api/public/ingest'
   id:
@@ -174,6 +185,7 @@ export interface FileRouteTypes {
     | '/_authenticated/history'
     | '/_authenticated/settings'
     | '/_authenticated/strategies'
+    | '/api/backtests/run'
     | '/api/public/config'
     | '/api/public/ingest'
   fileRoutesById: FileRoutesById
@@ -184,6 +196,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   DesignSystemRoute: typeof DesignSystemRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
+  ApiBacktestsRunRoute: typeof ApiBacktestsRunRoute
   ApiPublicConfigRoute: typeof ApiPublicConfigRoute
   ApiPublicIngestRoute: typeof ApiPublicIngestRoute
 }
@@ -281,6 +294,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicConfigRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/backtests/run': {
+      id: '/api/backtests/run'
+      path: '/api/backtests/run'
+      fullPath: '/api/backtests/run'
+      preLoaderRoute: typeof ApiBacktestsRunRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -311,6 +331,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   DesignSystemRoute: DesignSystemRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
+  ApiBacktestsRunRoute: ApiBacktestsRunRoute,
   ApiPublicConfigRoute: ApiPublicConfigRoute,
   ApiPublicIngestRoute: ApiPublicIngestRoute,
 }

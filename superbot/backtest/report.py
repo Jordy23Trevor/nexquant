@@ -130,7 +130,9 @@ class BacktestReport:
         if path is None:
             RESULTS_DIR.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"backtest_{self.results.symbol}_{self.results.timeframe}_{timestamp}.json"
+            # Sanitize le symbole : 'BTC/USDT' -> 'BTC-USDT' pour ne pas casser le chemin.
+            safe_symbol = self.results.symbol.replace('/', '-')
+            filename = f"backtest_{safe_symbol}_{self.results.timeframe}_{timestamp}.json"
             output_path = RESULTS_DIR / filename
         else:
             output_path = Path(path)
@@ -279,12 +281,19 @@ def compare_walk_forward(
 
     print(sep)
 
-    # Diagnostic global
-    oos_is_ratio = out_sample.total_return_pct / in_sample.total_return_pct if in_sample.total_return_pct != 0 else 0
-    if oos_is_ratio >= 0.7:
-        print("  [OK]  Strategie robuste -- Out-of-Sample >= 70% des performances In-Sample")
-    elif oos_is_ratio >= 0.4:
-        print("  [~~]  Strategie acceptable -- legere degradation Out-of-Sample (normal)")
+    # Diagnostic global de sur-apprentissage.
+    # Le ratio OOS/IS n'a de sens que si l'In-Sample est positif ; sinon on
+    # compare directement les rendements (OOS meilleur ou moins mauvais = pas de dégradation).
+    if in_sample.total_return_pct > 0:
+        oos_is_ratio = out_sample.total_return_pct / in_sample.total_return_pct
+        if oos_is_ratio >= 0.7:
+            print("  [OK]  Strategie robuste -- Out-of-Sample >= 70% des performances In-Sample")
+        elif oos_is_ratio >= 0.4:
+            print("  [~~]  Strategie acceptable -- legere degradation Out-of-Sample (normal)")
+        else:
+            print("  [!!]  Risque de sur-apprentissage -- forte degradation Out-of-Sample")
+    elif out_sample.total_return_pct >= in_sample.total_return_pct:
+        print("  [OK]  Pas de degradation Out-of-Sample (In-Sample negatif, OOS meilleur ou equivalent)")
     else:
-        print("  [!!]  Risque de sur-apprentissage -- forte degradation Out-of-Sample")
+        print("  [!!]  Out-of-Sample encore plus degrade qu'un In-Sample deja negatif")
     print(sep + "\n")

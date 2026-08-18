@@ -12,8 +12,194 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
+      app_versions: {
+        Row: {
+          changelog: string | null
+          created_at: string
+          download_url: string | null
+          id: number
+          is_mandatory: boolean
+          version: string
+        }
+        Insert: {
+          changelog?: string | null
+          created_at?: string
+          download_url?: string | null
+          id?: number
+          is_mandatory?: boolean
+          version: string
+        }
+        Update: {
+          changelog?: string | null
+          created_at?: string
+          download_url?: string | null
+          id?: number
+          is_mandatory?: boolean
+          version?: string
+        }
+        Relationships: []
+      }
+      backtest_results: {
+        Row: {
+          created_at: string
+          end_date: string
+          final_balance: number
+          id: string
+          initial_balance: number
+          max_drawdown: number
+          net_profit: number
+          profit_factor: number
+          start_date: string
+          strategy_config: Json
+          symbol: string
+          timeframe: string
+          total_trades: number
+          user_id: string
+          win_rate: number
+        }
+        Insert: {
+          created_at?: string
+          end_date: string
+          final_balance: number
+          id?: string
+          initial_balance: number
+          max_drawdown: number
+          net_profit: number
+          profit_factor: number
+          start_date: string
+          strategy_config?: Json
+          symbol: string
+          timeframe: string
+          total_trades: number
+          user_id: string
+          win_rate: number
+        }
+        Update: {
+          created_at?: string
+          end_date?: string
+          final_balance?: number
+          id?: string
+          initial_balance?: number
+          max_drawdown?: number
+          net_profit?: number
+          profit_factor?: number
+          start_date?: string
+          strategy_config?: Json
+          symbol?: string
+          timeframe?: string
+          total_trades?: number
+          user_id?: string
+          win_rate?: number
+        }
+        Relationships: []
+      }
+      backtest_trades: {
+        Row: {
+          backtest_id: string
+          created_at: string
+          duration_minutes: number
+          entry_price: number
+          entry_time: string
+          exit_price: number
+          exit_time: string
+          id: string
+          pnl: number
+          pnl_percent: number
+          position_size: number
+          side: string
+          symbol: string
+        }
+        Insert: {
+          backtest_id: string
+          created_at?: string
+          duration_minutes: number
+          entry_price: number
+          entry_time: string
+          exit_price: number
+          exit_time: string
+          id?: string
+          pnl: number
+          pnl_percent: number
+          position_size: number
+          side: string
+          symbol: string
+        }
+        Update: {
+          backtest_id?: string
+          created_at?: string
+          duration_minutes?: number
+          entry_price?: number
+          entry_time?: string
+          exit_price?: number
+          exit_time?: string
+          id?: string
+          pnl?: number
+          pnl_percent?: number
+          position_size?: number
+          side?: string
+          symbol?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "backtest_trades_backtest_id_fkey"
+            columns: ["backtest_id"]
+            isOneToOne: false
+            referencedRelation: "backtest_results"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bot_config: {
+        Row: {
+          is_running: boolean
+          risk_pct: number
+          score_min: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          is_running?: boolean
+          risk_pct?: number
+          score_min?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          is_running?: boolean
+          risk_pct?: number
+          score_min?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       bot_logs: {
         Row: {
           created_at: string
@@ -194,18 +380,57 @@ export type Database = {
           display_name: string | null
           email: string | null
           id: string
+          ingest_token: string
+          role: string | null
+          trial_end: string | null
         }
         Insert: {
           created_at?: string
           display_name?: string | null
           email?: string | null
           id: string
+          ingest_token?: string
+          role?: string | null
+          trial_end?: string | null
         }
         Update: {
           created_at?: string
           display_name?: string | null
           email?: string | null
           id?: string
+          ingest_token?: string
+          role?: string | null
+          trial_end?: string | null
+        }
+        Relationships: []
+      }
+      user_brokers: {
+        Row: {
+          asset_type: string
+          broker_type: string
+          created_at: string
+          encrypted_api_key: string | null
+          encrypted_api_secret: string | null
+          id: string
+          user_id: string
+        }
+        Insert: {
+          asset_type: string
+          broker_type: string
+          created_at?: string
+          encrypted_api_key?: string | null
+          encrypted_api_secret?: string | null
+          id?: string
+          user_id: string
+        }
+        Update: {
+          asset_type?: string
+          broker_type?: string
+          created_at?: string
+          encrypted_api_key?: string | null
+          encrypted_api_secret?: string | null
+          id?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -214,7 +439,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_admin: { Args: never; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
@@ -343,6 +568,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

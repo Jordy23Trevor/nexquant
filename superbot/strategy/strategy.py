@@ -46,7 +46,7 @@ class TradingStrategy:
         # Historique des scores pour analyse
         self.score_history: List[Dict[str, Any]] = []
 
-        # Phase 3.1: ML Scorer
+        # ML Scorer
         try:
             from superbot.ml.probabilistic_scorer import ProbabilisticScorer
             self.ml_scorer = ProbabilisticScorer()
@@ -55,9 +55,10 @@ class TradingStrategy:
             log.warning("ProbabilisticScorer non disponible, fallback sur le score linéaire.")
 
         # Seuils configurables
-        self.score_min = config.get('SCORE_MIN', 6)  # Score minimum pour entrer
-        self.risk_per_trade = config.get('RISK_PCT', 1.0)  # % du compte à risquer par trade
-        self.kelly_fraction = config.get('KELLY_FRACTION', 0.25)  # Fraction de Kelly à utiliser
+        self.score_min = config.get('SCORE_MIN', 6)
+        self._base_score_min = self.score_min  # Référence pour détecter un ajustement externe
+        self.risk_per_trade = config.get('RISK_PCT', 1.0)
+        self.kelly_fraction = config.get('KELLY_FRACTION', 0.25)
 
         # Charger la base de connaissances dynamique v2 (crescendo : Murphy → Elder → Chan)
         try:
@@ -143,7 +144,7 @@ class TradingStrategy:
         latest = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else current_candle
         prev = df_with_indicators.iloc[-3] if len(df_with_indicators) >= 3 else latest
 
-        # Déterminer le régime de marché (HMM Phase 2 si modèle disponible, sinon ADX)
+        # Déterminer le régime de marché (HMM si disponible, sinon ADX)
         market_regime, ml_confidence, hmm_state = self.indicators.get_market_regime_with_confidence(df_with_indicators)
         is_trending = market_regime == 'TRENDING'
 
@@ -174,6 +175,12 @@ class TradingStrategy:
         is_btc_pair = "BTC" in sym_upper and ("USDT" in sym_upper or "USD" in sym_upper)
         is_altcoin = is_crypto and not is_btc_pair
 
+        # Hint d'actif pour le score par signaux (direction du filtre d'extension).
+        asset_hint = ("BTC" if is_btc_pair else
+                      "ALTCOIN" if is_altcoin else
+                      "STOCK" if is_stock else
+                      "FOREX" if is_forex else "")
+
         log.debug(f"[AssetType] {symbol} → crypto={is_crypto}, forex={is_forex}, stock={is_stock}")
 
         # ── Sélection des paramètres spécifiques à l'asset_type ────────────────
@@ -185,10 +192,10 @@ class TradingStrategy:
             sl_mult = self.config.get('SL_ATR_MULT_CRYPTO', 2.0)
             tp_mult = self.config.get('TP_ATR_MULT_CRYPTO', 4.0)
         elif is_forex:
-            ema_fast_col  = 'ema_21'
-            ema_slow_col  = 'ema_55'
-            adx_threshold = self.config.get('ADX_TREND_FOREX', 20)
-            effective_score_min = self.config.get('SCORE_MIN_FOREX', 6)
+            ema_fast_col  = 'ema_14'
+            ema_slow_col  = 'ema_50'
+            adx_threshold = self.config.get('ADX_TREND_FOREX', 18)
+            effective_score_min = self.config.get('SCORE_MIN_FOREX', 5)
             sl_mult = self.config.get('SL_ATR_MULT_FOREX', 1.5)
             tp_mult = self.config.get('TP_ATR_MULT_FOREX', 3.0)
         else:  # stock / ETF
@@ -199,7 +206,12 @@ class TradingStrategy:
             sl_mult = self.config.get('SL_ATR_MULT_STOCK', 1.5)
             tp_mult = self.config.get('TP_ATR_MULT_STOCK', 3.0)
 
-        # ── P0-2 : Vérifier la blacklist crypto ─────────────────────────────
+        # Un ajustement externe du score_min global (cloud, walk-forward, adaptation)
+        # remplace le seuil par classe d'actif.
+        if self.score_min != self._base_score_min:
+            effective_score_min = self.score_min
+
+        # Vérifier la blacklist crypto
         crypto_blacklist = self.config.get('CRYPTO_BLACKLIST', [])
         is_blacklisted = symbol in crypto_blacklist or sym_upper in [b.upper().replace("/","") for b in crypto_blacklist]
         if is_blacklisted:
@@ -209,7 +221,7 @@ class TradingStrategy:
         # Calculer les scores selon le régime
         if is_trending:
             trend_score, trend_details = self._calculate_trending_score(
-                df_with_indicators, ema_fast_col, ema_slow_col, adx_threshold
+                df_with_indicators, ema_fast_col, ema_slow_col, adx_threshold, asset_hint
             )
             ranging_score, ranging_details = 0, {}  # Pas utilisé en tendance
             total_score = trend_score
@@ -222,10 +234,8 @@ class TradingStrategy:
                 log.info(f"🚫 Range trading désactivé pour l'ETF {symbol} (Momentum uniquement)")
                 return self._create_neutral_signal(f"RANGING_STOCK_BLOCKED:{symbol}")
 
-            # NOTE ─ Phase 3 Fix ETF : Le seuil est relevé à 0.65 pour les ETF/stocks
-            # car SPY/QQQ ont un Hurst empiriquement autour de 0.52-0.58 (légèrement
-            # supra-brownien) mais restent très mean-revertants à court terme.
-            # Avec le seuil historique de 0.50, ils étaient bloqués systématiquement.
+            # Seuil Hurst relevé à 0.65 pour les ETF/stocks : SPY/QQQ sont autour de
+            # 0.52-0.58 et restaient systématiquement bloqués avec le seuil de 0.50.
             hurst_block_threshold = 0.65 if is_stock else 0.50
             try:
                 import numpy as np
@@ -261,7 +271,7 @@ class TradingStrategy:
             is_crypto=is_crypto, is_forex=is_forex, is_stock=is_stock
         )
 
-        # ── P2-2 : Volume strict pour BNB/USDT ───────────────────────────────
+        # Volume strict pour BNB/USDT
         bnb_vol_factor = self.config.get('CRYPTO_BNB_VOLUME_FACTOR', 1.5)
         if sym_upper == "BNBUSDT" and (trigger_long or trigger_short):
             latest_v = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else df_with_indicators.iloc[-1]
@@ -294,7 +304,7 @@ class TradingStrategy:
                 sl_price = current_price + (atr * sl_mult)
                 tp_price = current_price - (atr * tp_mult)
         
-        # Ajuster le score avec le facteur de sentiment (Phase 3)
+        # Ajuster le score avec le facteur de sentiment
         adjusted_score = total_score * sentiment_factor
 
         # Valeurs par défaut ajustables dynamiquement par les règles
@@ -313,12 +323,12 @@ class TradingStrategy:
                 'trigger_long': trigger_long,
                 'trigger_short': trigger_short,
                 'latest_bar': latest,
-                'ml_confidence': ml_confidence,   # Phase 2 : confiance HMM
-                'hmm_state': hmm_state,            # Phase 2 : état brut HMM
+                'ml_confidence': ml_confidence,   # confiance HMM
+                'hmm_state': hmm_state,            # état brut HMM
             }
         )
 
-        # Phase 3.5: Modulation du risque selon les 4 régimes HMM
+        # Modulation du risque selon les régimes HMM
         if hmm_label == 'HIGH_VOL_RANGE':
             risk_pct = risk_pct / 2.0
             log.debug(f"[HMM-4] HIGH_VOL_RANGE détecté : réduction du risque à {risk_pct}%")
@@ -330,7 +340,7 @@ class TradingStrategy:
         effective_balance = account_balance if account_balance > 0 else 10000.0
         risk_amount = effective_balance * (risk_pct / 100.0)
 
-        # ── Phase 3.1 : Inférence Probabiliste ML et Matrice E(R) ────────────────
+        # Inférence probabiliste ML et matrice E(R)
         from superbot.strategy.components.scorer import calculate_probabilistic_win_rate
         adx_val = latest.get('adx', 20.0)
         prob_meta = calculate_probabilistic_win_rate(adjusted_score, market_regime, adx_val, rr_ratio)
@@ -341,11 +351,32 @@ class TradingStrategy:
             win_proba = max(win_proba, ml_prob)
             log.debug(f"[ML Scoring] Probabilité de gain calculée: {win_proba:.1%}")
 
+        # Le win rate réalisé récent n'est plus mélangé 50/50 à la probabilité :
+        # c'était une boucle de rétroaction négative (WR faible -> proba faible ->
+        # moins d'entrées -> WR qui ne remonte pas). Il reste ici à titre de
+        # sanity-check (log), pas comme dénominateur de la décision.
+        if real_win_rate is not None and 0.0 < real_win_rate < 1.0:
+            log.info(f"[Sanity] Win rate réalisé récent = {real_win_rate:.1%} (informatif)")
+
         details['win_prob'] = win_proba
         details['expected_value'] = prob_meta['expected_value']
 
-        # Validation Probabiliste : Requis P(Win) >= 55% et score >= minimum
-        is_valid_score = (adjusted_score >= effective_score_min) and (win_proba >= 0.55)
+        # Validation Probabiliste : score >= minimum ET espérance positive.
+        # Seuil de rentabilité P(Win) > 1/(1+RR), avec 2 pts de marge pour les coûts.
+        breakeven_win_rate = 1.0 / (1.0 + rr_ratio) if rr_ratio > 0 else 0.60
+        min_win_proba = min(max(breakeven_win_rate + 0.02, 0.20), 0.70)
+
+        # La porte probabiliste n'est active que si le calibrateur est fitté sur un
+        # historique réel. Avant calibration, le prior prudent (~0.30) est sous le
+        # seuil de rentabilité et bloquerait 100% des signaux (bot inerte) : on
+        # retombe alors sur les seuls garde-fous score + R:R.
+        from superbot.ml.win_rate_calibrator import get_calibrator
+        proba_gate_active = get_calibrator().is_fitted
+
+        if proba_gate_active:
+            is_valid_score = (adjusted_score >= effective_score_min) and (win_proba >= min_win_proba)
+        else:
+            is_valid_score = adjusted_score >= effective_score_min
 
         should_long = (
                 is_valid_score and
@@ -367,9 +398,7 @@ class TradingStrategy:
             should_long = False
             should_short = False
 
-        # ── P0-1 : Filtre tendance de fond via EMA200 D1 (tendance journalière) ──────
-        # NOTE : L'EMA200 est maintenant calculée sur D1 pour représenter la vraie tendance journalière.
-        # Au lieu d'un blocage dur, appliquer une pénalité progressive basée sur l'écart %.
+        # Filtre tendance de fond via EMA200 D1 : pénalité progressive selon l'écart %.
         if is_crypto and should_long:
             latest_bar_p01 = df_with_indicators.iloc[-2] if len(df_with_indicators) >= 2 else df_with_indicators.iloc[-1]
             price_p01 = latest_bar_p01.get('close', 0)
@@ -397,9 +426,7 @@ class TradingStrategy:
                             f"— pénalité mineure: {-penalty:.1f} points"
                         )
 
-        # ── P1-1 : Détecteur de régime inter-sessions (variation BTC 24h) ──────
-        # Si BTC a baissé de > CRYPTO_BUY_BLOCK_BTC_DROP% sur 24h,
-        # bloquer les signaux BUY sur TOUS les altcoins (copycat crash pattern).
+        # Si BTC a baissé de > CRYPTO_BUY_BLOCK_BTC_DROP% sur 24h, bloquer les BUY altcoins.
         if is_altcoin and should_long and btc_change_24h is not None:
             block_threshold = self.config.get('CRYPTO_BUY_BLOCK_BTC_DROP', 2.0)
             if btc_change_24h <= -block_threshold:
@@ -434,7 +461,7 @@ class TradingStrategy:
             'timestamp': latest.name if hasattr(latest.name, 'isoformat') else datetime.now(),
             'symbol': 'UNKNOWN',  # À remplir par l'appelant
             'market_regime': market_regime,
-            'hmm_label': hmm_label,  # Phase 3 §2 — Label HMM détaillé pour les multiplicateurs ATR
+            'hmm_label': hmm_label,  # Label HMM pour les multiplicateurs ATR
             'is_trending': is_trending,
             'trend_score': trend_score,
             'ranging_score': ranging_score,
@@ -500,7 +527,12 @@ class TradingStrategy:
             'details': {'reason': reason}
         }
 
-    def _calculate_trending_score(self, df, ema_fast_col='ema_fast', ema_slow_col='ema_slow', adx_threshold=22.0):
+    def _calculate_trending_score(self, df, ema_fast_col='ema_fast', ema_slow_col='ema_slow',
+                                  adx_threshold=22.0, asset_hint=""):
+        if self.config.get('SCORE_MODE', 'votes') == 'signals':
+            from superbot.strategy.components.scorer import _calculate_trending_score_signals
+            return _calculate_trending_score_signals(
+                self, df, ema_fast_col, ema_slow_col, adx_threshold, asset_hint)
         from superbot.strategy.components.scorer import _calculate_trending_score
         return _calculate_trending_score(self, df, ema_fast_col, ema_slow_col, adx_threshold)
 

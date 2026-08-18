@@ -24,6 +24,12 @@ dev = [
     "mock>=5.1"
 ]
 
+# superbot/ et ses sous-modules n'ont pas d'__init__.py (namespace packages).
+# namespaces=true garantit qu'ils sont inclus dans `pip install -e .` et le build.
+[tool.setuptools.packages.find]
+include = ["superbot*", "resources*"]
+namespaces = true
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"

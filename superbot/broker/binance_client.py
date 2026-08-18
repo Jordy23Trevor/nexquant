@@ -294,10 +294,17 @@ class BinanceClient(Broker):
                     if price <= 0:
                         price = float(self.get_current_price(asset_name))
                 except Exception:
-                    # Fallbacks approximatifs en dernier recours
-                    fallbacks = {"BTC": 67000.0, "ETH": 3500.0, "BNB": 580.0, "SOL": 140.0, "ADA": 0.45}
-                    price = fallbacks.get(asset_name, 1.0)
-                
+                    price = 0.0
+
+                # Ne JAMAIS inventer un prix : un solde sous-estimé est plus sûr
+                # qu'un solde gonflé par un fallback figé (ex: BTC=67000).
+                if price <= 0:
+                    log.warning(
+                        f"Prix indisponible pour {asset_name} — actif exclu du calcul "
+                        f"de solde (pas de fallback arbitraire)."
+                    )
+                    continue
+
                 total_wallet_balance += wb * price
                 total_unrealized_pnl += upnl * price
                 
@@ -418,29 +425,6 @@ class BinanceClient(Broker):
             return self._positions_cache[binance_symbol]
         return {}
 
-    def get_open_positions(self) -> Dict[str, Any]:
-        """
-        Retourne toutes les positions ouvertes sous la forme {symbol_normalise: position_dict}.
-        Le symbole est normalisé avec '/' pour être compatible avec le reste du bot (ex: 'BTC/USDT').
-        """
-        self._refresh_positions_cache()
-        if not self._positions_cache:
-            return {}
-        # Re-normaliser les clés Binance (ex: 'BTCUSDT') → format interne ('BTC/USDT')
-        normalized = {}
-        for raw_sym, pos in self._positions_cache.items():
-            # Essayer de retrouver la clé originale dans le format /
-            # On insère simplement le '/' avant 'USDT', 'BUSD', 'BTC', 'ETH'
-            display = raw_sym
-            for quote in ["USDT", "BUSD", "USDC", "BTC", "ETH", "BNB"]:
-                if raw_sym.endswith(quote) and raw_sym != quote:
-                    base = raw_sym[:-len(quote)]
-                    display = f"{base}/{quote}"
-                    break
-            normalized[display] = {**pos, 'symbol': display}
-        return normalized
-
-
     def close_position(self, symbol: str, reason: str = "") -> bool:
         """Ferme la position ouverte au prix du marché."""
         binance_symbol = symbol.replace("/", "").upper()
@@ -499,13 +483,18 @@ class BinanceClient(Broker):
         # Ajuster pour le levier si applicable
         leveraged_size = base_size * leverage
 
-        # Appliquer les limites du symbole
+        # Appliquer les limites du symbole SANS forcer le minimum : si le sizing
+        # de risque est sous min_qty, on refuse (0) au lieu de sur-allouer.
         symbol_binance = symbol if symbol else "BTC/USDT"
         min_size = self.get_min_order_size(symbol_binance)
-        max_size = self.get_step_size(symbol_binance) * 1000  # Limite arbitraire supérieure
-
-        final_size = max(min(leveraged_size, max_size), min_size)
-        return self._round_qty(symbol_binance, final_size)
+        final_size = self._round_qty(symbol_binance, min(leveraged_size, MAX_POSITION_SIZE))
+        if final_size < min_size:
+            log.warning(
+                f"Taille calculée ({leveraged_size:.6f}) < min_qty ({min_size}) "
+                f"pour {symbol_binance} — ordre rejeté."
+            )
+            return 0.0
+        return final_size
 
     def place_order(self, symbol: str, side: str, amount: float,
                    sl: float, tp: float, reduce_only: bool = False,
