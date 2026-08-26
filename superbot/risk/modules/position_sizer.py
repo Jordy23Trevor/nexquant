@@ -62,7 +62,12 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
             return 0.0, {'error': 'Invalid risk per unit'}
 
         # Formule universelle de risque par unité dans la monnaie de compte
-        risk_per_unit = (price_risk / tick_size) * (tick_value / contract_size)
+        tick_size = max(tick_size, 1e-10)
+        risk_per_unit = (price_risk / tick_size) * tick_value
+        
+        if risk_per_unit <= 0:
+            log.warning(f"Risk per unit is zero or negative for {symbol}")
+            return getattr(rm, 'MIN_POSITION_SIZE', 0.01), {'error': 'Zero risk per unit'}
 
         # 3. Calculer le risque en pourcentage du compte
         base_risk = rm.RISK_PCT
@@ -153,12 +158,23 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
         position_size = float(position_size)
 
         # 8. Récupérer les limites de taille spécifiques au broker
-        min_size = rm.MIN_POSITION_SIZE
+        min_size = getattr(rm, 'MIN_POSITION_SIZE', 0.01)
         step_size = None
         if broker is not None:
             try:
-                min_size = broker.get_min_order_size(symbol)
-                step_size = broker.get_step_size(symbol)
+                if hasattr(broker, 'get_min_order_size'):
+                    min_size = broker.get_min_order_size(symbol)
+                elif hasattr(broker, 'get_symbol_info'):
+                    sym_info = broker.get_symbol_info(symbol)
+                    if isinstance(sym_info, dict) and 'volume_min' in sym_info:
+                        min_size = sym_info['volume_min']
+
+                if hasattr(broker, 'get_step_size'):
+                    step_size = broker.get_step_size(symbol)
+                elif hasattr(broker, 'get_symbol_info'):
+                    sym_info = broker.get_symbol_info(symbol)
+                    if isinstance(sym_info, dict) and 'volume_step' in sym_info:
+                        step_size = sym_info['volume_step']
             except Exception as e:
                 log.warning(f"Impossible de récupérer les limites broker pour {symbol}: {e}")
 
@@ -184,13 +200,14 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
                 log.warning(f"Impossible de récupérer la marge disponible du broker pour {symbol}: {e}")
 
         # Calculer la taille maximale autorisée par la marge disponible (avec 5% de buffer)
-        is_buying_power_direct = (broker is not None and broker.get_asset_type() == "stock")
+        is_buying_power_direct = (broker is not None and hasattr(broker, 'get_asset_type') and broker.get_asset_type() == "stock")
+        unit_notional = entry_price * contract_size
         if is_buying_power_direct:
             max_nominal = free_margin * 0.95
-            max_size_by_margin = max_nominal / entry_price if entry_price > 0 else 0.0
+            max_size_by_margin = max_nominal / unit_notional if unit_notional > 0 else 0.0
         else:
             max_nominal = free_margin * leverage * 0.95
-            max_size_by_margin = max_nominal / entry_price if entry_price > 0 else 0.0
+            max_size_by_margin = max_nominal / unit_notional if unit_notional > 0 else 0.0
 
         # Si la taille maximale par rapport à la marge est inférieure au minimum du symbole
         if max_size_by_margin < min_size:
@@ -219,9 +236,12 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
         position_size = max(min_size, min(position_size, rm.MAX_POSITION_SIZE))
 
         if step_size is not None and step_size > 0:
-            import math
             position_size = math.floor(position_size / step_size) * step_size
             position_size = round(position_size, 8)
+            
+        position_size = max(position_size, min_size)
+        if position_size < min_size:
+            return 0.0, {'error': 'Position size below minimum after step flooring'}
 
         # 9. Calculer le risque réel en pourcentage
         actual_risk_amount = position_size * risk_per_unit

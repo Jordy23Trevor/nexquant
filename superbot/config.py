@@ -238,7 +238,7 @@ TSMOM_PLACE_ORDERS = os.getenv("TSMOM_PLACE_ORDERS", "false").lower() == "true"
 # Mapping univers -> symbole du broker actif (un seul broker à la fois).
 TSMOM_BROKER_SYMBOLS = {
     "alpaca":  {"SPY": "SPY"},
-    "mt5":     {"XAUUSD": "XAUUSD"},
+    "mt5":     {"XAUUSD": "XAUUSD", "BTCUSD": "BTCUSD"},
     "binance": {"BTCUSD": "BTC/USDT"},
 }
 

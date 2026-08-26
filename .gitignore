@@ -57,3 +57,8 @@ _fix_train.py
 
 
 
+.freebuff/
+*.db
+*.db-shm
+*.db-wal
+superbot/db/

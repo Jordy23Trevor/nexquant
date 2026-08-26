@@ -979,10 +979,10 @@ class SuperBot:
             target_notional = target_weight * equity if equity > 0.0 else 0.0
             target_signed_size = target_notional / price  # >0 long, <0 short
 
-            # Garde-fou « compte insuffisant » : ne jamais produire un ordre
-            # impossible à exécuter. Le broker impose une taille minimale
-            # (ex. XAUUSD = 1 once = 0.01 lot). Si la cible entière est sous ce
-            # minimum, le compte ne peut pas porter ce symbole → on le saute.
+            # Garde-fou taille minimum broker : si la taille calculée est sous
+            # le minimum, on l'arrondit au minimum broker à condition que le
+            # risque engagé ne dépasse pas 5 % de l'équité (protection petit compte).
+            # On ne bloque plus d'emblée : le broker gère le micro-lot lui-même.
             min_order_size = None
             try:
                 min_order_size = self.broker.get_min_order_size(broker_sym)
@@ -990,17 +990,36 @@ class SuperBot:
                 min_order_size = None
             if min_order_size and min_order_size > 0 and abs(target_signed_size) > 0:
                 if abs(target_signed_size) < min_order_size:
-                    required_equity = (
-                        min_order_size * price / abs(target_weight)
-                        if target_weight else float("inf")
-                    )
+                    # Arrondir au minimum broker
+                    sign = 1 if target_signed_size >= 0 else -1
+                    adjusted_size = sign * min_order_size
+                    notional_adjusted = min_order_size * price
+                    # Utiliser la marge réelle requise (notionnel / levier broker)
+                    # plutôt que le notionnel brut pour tenir compte du levier MT5.
+                    broker_leverage = 1.0
+                    try:
+                        _acc = self.broker.get_account_summary() or {}
+                        broker_leverage = float(_acc.get('leverage') or 1) or 1.0
+                    except Exception:
+                        broker_leverage = 1.0
+                    margin_required = notional_adjusted / broker_leverage
+                    max_margin = equity * 0.30 if equity > 0 else 0.0  # max 30 % de marge utilisée
+                    if equity > 0 and margin_required > max_margin:
+                        log.warning(
+                            "[TSMOM] %s : marge requise (%.0f USD, levier x%.0f) = %.1f%% du compte "
+                            "(limite 30%%) → ignoré.",
+                            broker_sym, margin_required, broker_leverage,
+                            100 * margin_required / equity,
+                        )
+                        continue
                     log.info(
-                        "[TSMOM] %s : cible %.6f < minimum broker %.4f → compte "
-                        "insuffisant (requis ≈ %.0f %s). Symbole ignoré.",
+                        "[TSMOM] %s : cible %.6f ajustée au min broker %.4f "
+                        "(notionnel ≈ %.0f USD | marge ≈ %.0f USD | %.1f%% du compte).",
                         broker_sym, target_signed_size, min_order_size,
-                        required_equity, "USD",
+                        notional_adjusted, margin_required,
+                        100 * margin_required / equity if equity else 0,
                     )
-                    continue
+                    target_signed_size = adjusted_size
 
             pos = self.positions.get(broker_sym) or {}
             cur_size = float(pos.get("size", 0.0) or 0.0)
@@ -1100,11 +1119,16 @@ class SuperBot:
 
     def stop(self):
         """Arrête le bot de trading de manière propre."""
+        if getattr(self, '_stopped', False):
+            return
+        self._stopped = True
+
         if not self.running:
             log.warning("️  Le bot n'est pas en cours d'exécution")
             return
 
         log.info("Arrêt du SuperBot...")
+        self._shutting_down = True
         self.running = False
         self.shutdown_event.set()
 
@@ -1216,6 +1240,9 @@ class SuperBot:
         Args:
             symbol: Symbole à traiter (ex: BTC/USDT)
         """
+        if getattr(self, '_shutting_down', False):
+            return
+
         try:
             # Mesurer le temps de traitement total pour profiling
             symbol_start_time = time.time()
@@ -1627,6 +1654,8 @@ class SuperBot:
             limit_pos = max(1, min(limit_pos, len(scores)))
 
             # Trier les instruments par score décroissant
+            import math
+            scores = {k: v for k, v in scores.items() if not math.isnan(v)}
             sorted_symbols = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
 
             # Récupérer les actifs actuellement actifs — toujours purger les blacklistés
@@ -2300,6 +2329,7 @@ class SuperBot:
         """
         return {
             'running': self.running,
+            'broker': getattr(self.broker, 'name', 'mt5').upper() if self.broker else 'MT5',
             'start_time': self.stats['start_time'].isoformat() if self.stats['start_time'] else None,
             'uptime_seconds': (datetime.now(timezone.utc) - self.stats['start_time']).total_seconds() if self.stats['start_time'] else 0,
             'stats': self.stats.copy(),

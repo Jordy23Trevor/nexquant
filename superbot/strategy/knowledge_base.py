@@ -73,6 +73,7 @@ def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     delta = close.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    loss = loss.replace(0, 1e-10)
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
@@ -150,6 +151,9 @@ def calculate_supertrend(high: pd.Series, low: pd.Series, close: pd.Series,
     Returns:
         Tuple de (Supertrend line, Trend direction) où Trend direction est 1 pour haussier, -1 pour baissier
     """
+    if len(close) < atr_period + 1:
+        return pd.Series(np.nan, index=close.index), pd.Series(np.nan, index=close.index)
+        
     atr = calculate_atr(high, low, close, atr_period)
     hl2 = (high + low) / 2
     upper_band = hl2 + (multiplier * atr)
@@ -267,6 +271,7 @@ def calculate_vwap(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd
     Returns:
         Série contenant les valeurs du VWAP
     """
+    volume = volume.replace(0, np.nan)
     typical_price = (high + low + close) / 3
     vwap = (typical_price * volume).rolling(window=period).sum() / volume.rolling(window=period).sum()
     return vwap
@@ -316,7 +321,7 @@ def calculate_kelly_fraction(win_rate: float, avg_win: float, avg_loss: float) -
     Returns:
         Fraction de Kelly (0-1)
     """
-    if avg_loss <= 0:
+    if avg_win <= 0 or avg_loss <= 0:
         return 0.0
 
     # Formule de Kelly: f = (bp - q) / b
@@ -472,6 +477,115 @@ def get_higher_timeframe_data(df: pd.DataFrame, htf_multiplier: int = 4) -> pd.D
     return df.copy()
 
 
+def calculate_asian_range(df: pd.DataFrame) -> tuple:
+    """
+    Calcule le range de la session asiatique (00:00–06:59 UTC).
+
+    Args:
+        df: DataFrame OHLCV avec index DatetimeIndex.
+
+    Returns:
+        Tuple (asian_high, asian_low, asian_range).
+        Si aucune donnée asiatique n'est trouvée, retourne les 10 dernières bougies.
+    """
+    if df is None or len(df) < 5:
+        return 0.0, 0.0, 0.0
+
+    if hasattr(df.index, 'hour'):
+        asian_mask = (df.index.hour >= 0) & (df.index.hour < 7) & (df.index.date == df.index[-1].date())
+        asian_bars = df.loc[asian_mask]
+    else:
+        asian_bars = pd.DataFrame()
+
+    if asian_bars.empty or len(asian_bars) < 2:
+        # Fallback : utiliser les 10 dernières bougies
+        asian_bars = df.iloc[-10:]
+
+    asian_high = float(asian_bars['high'].max())
+    asian_low = float(asian_bars['low'].min())
+    asian_range = asian_high - asian_low
+
+    return asian_high, asian_low, asian_range
+
+
+def calculate_hurst_exponent(series: pd.Series, max_lag: int = 20) -> float:
+    """
+    Calcule l'exposant de Hurst via la loi de diffusion / variance-scaling (Ernest Chan).
+
+    std(y_{t+tau} - y_t) ~ tau^H
+
+    H > 0.55 : série persistante (tendance forte)
+    H ~ 0.50 : marche aléatoire (bruit brownien)
+    H < 0.45 : série anti-persistante (retour à la moyenne / stationnaire)
+    """
+    if series is None or len(series) < 20:
+        return 0.5
+
+    ts = np.asarray(series.dropna(), dtype=float)
+    n = len(ts)
+    if n < 20:
+        return 0.5
+
+    lags = range(2, min(max_lag + 1, n // 4))
+    tau = []
+    lagvec = []
+
+    for lag in lags:
+        diffs = ts[lag:] - ts[:-lag]
+        std_val = np.std(diffs)
+        if std_val > 1e-10:
+            tau.append(std_val)
+            lagvec.append(lag)
+
+    if len(lagvec) < 3:
+        return 0.5
+
+    try:
+        poly = np.polyfit(np.log(lagvec), np.log(tau), 1)
+        hurst = float(poly[0])
+        return max(0.0, min(1.0, hurst))
+    except (np.linalg.LinAlgError, ValueError):
+        return 0.5
+
+
+def calculate_half_life(series: pd.Series) -> float:
+    """
+    Calcule la demi-vie d'Ornstein-Uhlenbeck (Ernest Chan).
+
+    Régression OLS : Δy_t = β * y_{t-1} + ε
+    Demi-vie = -ln(2) / β
+
+    Args:
+        series: Série de prix (close).
+
+    Returns:
+        Demi-vie en barres (float). Valeur par défaut 20.0 si incalculable.
+    """
+    if series is None or len(series) < 10:
+        return 20.0
+
+    ts = np.asarray(series.dropna(), dtype=float)
+    if len(ts) < 10:
+        return 20.0
+
+    ts_lag = ts[:-1]
+    ts_diff = np.diff(ts)
+
+    if np.std(ts_lag) < 1e-10:
+        return 20.0
+
+    try:
+        beta, _ = np.polyfit(ts_lag, ts_diff, 1)
+    except (np.linalg.LinAlgError, ValueError):
+        return 20.0
+
+    if beta >= 0:
+        return 100.0  # Non mean-reverting
+
+    half_life = -np.log(2) / beta
+    return float(np.clip(half_life, 1.0, 500.0))
+
+
 # Export des fonctions publiques
 __all__ = [
     'calculate_atr', 'calculate_ema', 'calculate_sma', 'calculate_rsi',
@@ -480,5 +594,7 @@ __all__ = [
     'detect_divergence', 'calculate_kelly_fraction', 'calculate_risk_reward_ratio',
     'is_market_trending', 'calculate_position_size_from_risk',
     'round_to_precision', 'calculate_pip_value', 'resample_data',
-    'get_higher_timeframe_data'
+    'get_higher_timeframe_data',
+    'calculate_asian_range',
+    'calculate_hurst_exponent', 'calculate_half_life',
 ]

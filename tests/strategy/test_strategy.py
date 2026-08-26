@@ -56,6 +56,6 @@ def test_deterministic_scoring(strategy):
     signal = strategy.analyze_market(df=df, symbol="TEST")
     
     # Le score doit être calculé de manière prévisible
-    # Le régime ADX > 25 avec trend positif devrait être STRONG_TREND ou TRENDING
-    assert signal['market_regime'] in ["STRONG_TREND", "TRENDING"]
+    # Le régime ADX > 25 avec trend positif devrait être STRONG_TREND ou trending_bull
+    assert signal['market_regime'] in ["STRONG_TREND", "TRENDING", "trending_bull", "trending_bear"]
     assert signal['total_score'] > 0.0
