@@ -81,9 +81,9 @@ Toutes les stratégies héritent d'une classe abstraite commune `BaseStrategy` g
 * **`BugWatchdog`** : Thread de surveillance indépendant inspectant toutes les 60 secondes la cohérence des positions, l'intégrité de la mémoire, les heartbeats de cycle et la connexion courtier.
 * **`GhostCleaner`** : Détecte et élimine les ordres ou positions désynchronisés entre la mémoire du bot et MetaTrader 5.
 
-Installation rapide
+---
 
-1) Backend (bot Python)
+## 📂 Structure du Dépôt
 
 ```
 nexquant/
@@ -187,11 +187,7 @@ ALLOW_LIVE_TRADING=true
 CYCLE_TIME=15
 ```
 
-- BROKER_TYPE — courtier actif (binance | mt5 | alpaca)
-- INSTRUMENTS — liste d'instruments séparés par des virgules
-- RISK_PCT — pourcentage du capital par trade
-- MAX_DAILY_LOSS_PCT — stop quotidien
-- NEXQUANT_INGEST_TOKEN — (optionnel) jeton de télémétrie pour Supabase
+---
 
 ## 🎮 Lancement du SuperBot
 
@@ -220,7 +216,7 @@ python -m superbot.main --dashboard-port 5000 --webhook-port 5001
 
 Une fois démarré, le Dashboard local est accessible sur `http://localhost:5000` et les métriques Prometheus sur `http://localhost:8000/metrics`.
 
-Licence
+---
 
 ## 🧪 Validation & Tests Automatisés
 
@@ -266,3 +262,4 @@ pytest tests/test_broker_mt5.py -v
 ## 📄 Licence
 
 Propriété exclusive de **NexQuant** — Tous droits réservés. Usage privé et institutionnel.
+
