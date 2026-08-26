@@ -4,7 +4,9 @@
 
 Le système intègre une architecture modulaire robuste, combinant détection de régime de marché multi-timeframes, sélection dynamique de stratégies d'élite, gestion du risque institutionnelle, ingestion de flux fondamentaux/macroéconomiques, et surveillance continue anti-anomalies avec *Kill-Switch*.
 
----
+- Fournir un moteur d'exécution Python léger et asynchrone (SuperBot).
+- Offrir une console Web (React + TypeScript) pour la supervision, la télémétrie et la gestion des abonnements.
+- Garantir la sécurité des clés (chiffrement côté serveur, injection en RAM) et des garde-fous de risque.
 
 ## 🏛️ Architecture & Structure de Fonctionnement
 
@@ -81,9 +83,9 @@ Toutes les stratégies héritent d'une classe abstraite commune `BaseStrategy` g
 * **`BugWatchdog`** : Thread de surveillance indépendant inspectant toutes les 60 secondes la cohérence des positions, l'intégrité de la mémoire, les heartbeats de cycle et la connexion courtier.
 * **`GhostCleaner`** : Détecte et élimine les ordres ou positions désynchronisés entre la mémoire du bot et MetaTrader 5.
 
----
+Installation rapide
 
-## 📂 Structure du Dépôt
+1) Backend (bot Python)
 
 ```
 nexquant/
@@ -187,7 +189,11 @@ ALLOW_LIVE_TRADING=true
 CYCLE_TIME=15
 ```
 
----
+- BROKER_TYPE — courtier actif (binance | mt5 | alpaca)
+- INSTRUMENTS — liste d'instruments séparés par des virgules
+- RISK_PCT — pourcentage du capital par trade
+- MAX_DAILY_LOSS_PCT — stop quotidien
+- NEXQUANT_INGEST_TOKEN — (optionnel) jeton de télémétrie pour Supabase
 
 ## 🎮 Lancement du SuperBot
 
@@ -216,7 +222,7 @@ python -m superbot.main --dashboard-port 5000 --webhook-port 5001
 
 Une fois démarré, le Dashboard local est accessible sur `http://localhost:5000` et les métriques Prometheus sur `http://localhost:8000/metrics`.
 
----
+Licence
 
 ## 🧪 Validation & Tests Automatisés
 
