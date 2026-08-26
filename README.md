@@ -4,9 +4,7 @@
 
 Le système intègre une architecture modulaire robuste, combinant détection de régime de marché multi-timeframes, sélection dynamique de stratégies d'élite, gestion du risque institutionnelle, ingestion de flux fondamentaux/macroéconomiques, et surveillance continue anti-anomalies avec *Kill-Switch*.
 
-- Fournir un moteur d'exécution Python léger et asynchrone (SuperBot).
-- Offrir une console Web (React + TypeScript) pour la supervision, la télémétrie et la gestion des abonnements.
-- Garantir la sécurité des clés (chiffrement côté serveur, injection en RAM) et des garde-fous de risque.
+---
 
 ## 🏛️ Architecture & Structure de Fonctionnement
 
