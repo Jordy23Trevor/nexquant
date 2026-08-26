@@ -54,6 +54,8 @@ superbot/backtest/results/
 NexQuant_Web_App/supabase/.temp/
 scratch/
 _fix_train.py
-
-
-
+.freebuff/
+*.db
+*.db-shm
+*.db-wal
+superbot/db/

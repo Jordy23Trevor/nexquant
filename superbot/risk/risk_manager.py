@@ -103,8 +103,12 @@ class RiskManager:
         Args:
             balance: Nouveau solde du compte
         """
+        if balance <= 0:
+            return  # Ignore zero/negative balance from broker init
+
+        from datetime import timezone
         # Réinitialisation quotidienne
-        today = datetime.now().date()
+        today = datetime.now(timezone.utc).date()
         if today > self.last_daily_reset:
             self.daily_pnl = 0.0
             self.last_daily_reset = today
@@ -121,12 +125,12 @@ class RiskManager:
             log.debug("Réinitialisation du P&L mensuel")
 
         # Mettre à jour le solde
-        if self.starting_balance == 0.0:
+        if self.starting_balance <= 0:
             self.starting_balance = balance
-            if self.day_start_balance == 0.0:
-                self.day_start_balance = balance
-            if self.month_start_balance == 0.0:
-                self.month_start_balance = balance
+        if self.day_start_balance <= 0:
+            self.day_start_balance = balance
+        if self.month_start_balance <= 0:
+            self.month_start_balance = balance
         self.current_balance = balance
 
         # Évite un drawdown erroné quand peak_balance est encore 0 et le solde > 0.
@@ -147,13 +151,21 @@ class RiskManager:
 
     def check_kill_switch(self, account_balance: float) -> bool:
         """
-        Vérifie le Kill-Switch de Drawdown journalier.
+        Vérifie le Kill-Switch de Drawdown journalier et mensuel.
         Retourne True si le bot doit se mettre en auto-pause pour la journée.
         """
         if self.day_start_balance > 0:
             daily_loss_pct = abs(min(0, self.daily_pnl)) / self.day_start_balance * 100
             if daily_loss_pct >= self.MAX_DAILY_LOSS_PCT:
                 log.critical(f"⚠️ KILL-SWITCH ACTIVÉ : Perte journalière ({daily_loss_pct:.2f}%) >= {self.MAX_DAILY_LOSS_PCT}%.")
+                return True
+            if self.daily_pnl <= -self.MAX_DAILY_LOSS_AMOUNT:
+                log.critical(f"⚠️ KILL-SWITCH ACTIVÉ : Perte absolue journalière ({self.daily_pnl:.2f}) <= {-self.MAX_DAILY_LOSS_AMOUNT}.")
+                return True
+        if self.month_start_balance > 0:
+            monthly_loss_pct = abs(min(0, self.monthly_pnl)) / self.month_start_balance * 100
+            if monthly_loss_pct >= self.MAX_MONTHLY_LOSS_PCT:
+                log.critical(f"⚠️ KILL-SWITCH ACTIVÉ : Perte mensuelle ({monthly_loss_pct:.2f}%) >= {self.MAX_MONTHLY_LOSS_PCT}%.")
                 return True
         return False
 
@@ -227,12 +239,16 @@ class RiskManager:
             position['initial_sl'] = position.get('stop_loss', 0.0)
 
         try:
-            if position['side'] == 'LONG':
-                raw_pnl = (current_price - position['entry_price']) * position['size']
-                pnl_pct = (current_price / position['entry_price'] - 1) * 100
+            entry_price = position['entry_price']
+            if entry_price <= 0:
+                raw_pnl = 0.0
+                pnl_pct = 0.0
+            elif position['side'] == 'LONG':
+                raw_pnl = (current_price - entry_price) * position['size']
+                pnl_pct = (current_price / entry_price - 1) * 100
             else:  # SHORT
-                raw_pnl = (position['entry_price'] - current_price) * position['size']
-                pnl_pct = (position['entry_price'] / current_price - 1) * 100
+                raw_pnl = (entry_price - current_price) * position['size']
+                pnl_pct = (entry_price - current_price) / entry_price * 100
 
             sym = position.get('symbol', symbol)
             normalized_sym = sym.strip().upper().replace("/", "")

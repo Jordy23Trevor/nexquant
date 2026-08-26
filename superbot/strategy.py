@@ -1,1 +1,0 @@
-# Ce fichier est obsolète et a été déplacé dans superbot/strategy/strategy.py pour éviter les conflits d'importation.

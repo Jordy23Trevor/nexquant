@@ -95,3 +95,22 @@ class StateManager:
                     json.dump(data, f)
             except Exception as e:
                 log.warning(f"Erreur lors de la sauvegarde de l'état : {e}")
+
+    def clear_state(self):
+        """Réinitialise complètement l'état persistant."""
+        with self._lock:
+            self.failed_execution_cooldowns.clear()
+            self.blocked_symbols.clear()
+            self.session_pnl_by_symbol.clear()
+            self.consecutive_losses.clear()
+            self.adaptation_counter = 0
+            self.is_paused = False
+            self.day_start_balance = 0.0
+            self.last_daily_reset_str = ""
+            if os.path.exists(self.filepath):
+                try:
+                    os.remove(self.filepath)
+                    log.info(f"Fichier d'état supprimé : {self.filepath}")
+                except Exception as e:
+                    log.warning(f"Erreur suppression état : {e}")
+

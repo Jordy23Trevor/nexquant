@@ -42,6 +42,8 @@ def _start_cycle_watchdog(bot, watchdog_timeout: int = 300):
         log.info(f"⏱️ [Watchdog] Démarré — alerte si aucun cycle après {watchdog_timeout}s")
         while getattr(bot, 'running', False) and not bot.shutdown_event.is_set():
             time.sleep(30)  # vérifier toutes les 30 secondes
+            if getattr(bot, 'is_paused', False):
+                continue
             last_hb = getattr(bot, '_last_cycle_heartbeat', None)
             if last_hb is None:
                 continue
@@ -355,6 +357,7 @@ def run_main_loop(bot):
             # ─────────────────────────────────────────────────────────────────
 
             if bot.is_paused:
+                bot._last_cycle_heartbeat = time.time()
                 log.info("😴 Bot en pause. En attente du signal de démarrage depuis la plateforme web...")
                 cycle_duration = time.time() - cycle_start
                 if cycle_duration < target_cycle_time:
@@ -469,21 +472,26 @@ def run_main_loop(bot):
             except Exception as e:
                 log.warning(f"Erreur de synchronisation des positions au cycle #{cycle_count} : {e}")
 
-            # ── 📈 Mode TSMOM : allocation mensuelle au lieu du scan intraday ──
+            # ── 📈 TSMOM mensuel (rebalancement de fond) ──────────────────────
+            # Tourne toujours si TSMOM_ENABLED — ne bloque PAS le scan intraday.
+            # Le throttle interne à _tsmom_cycle() garantit que le calcul lourd
+            # (fetch candles + allocation) n'est fait qu'une fois par jour, et que
+            # les ordres de rebalancement ne sont passés qu'une fois par mois.
             if getattr(bot, 'TSMOM_ENABLED', False):
                 try:
                     bot._tsmom_cycle()
                 except Exception as e:
                     log.error(f"Erreur cycle TSMOM : {e}")
-                scanned_instruments = []
-            else:
-                try:
-                    bot._select_and_rotate_crypto()
-                except Exception as e:
-                    log.warning(f"Erreur lors de la sélection/rotation crypto au cycle #{cycle_count} : {e}")
 
-                scanned_instruments = list(bot.instruments)
+            # ── 🔍 Scan intraday (signaux normaux sur tous les instruments) ────
+            try:
+                bot._select_and_rotate_crypto()
+            except Exception as e:
+                log.warning(f"Erreur lors de la sélection/rotation crypto au cycle #{cycle_count} : {e}")
+
+            scanned_instruments = list(bot.instruments)
             random.shuffle(scanned_instruments)
+
 
             def _process_symbol_safe(bot, sym, timeout):
                 try:

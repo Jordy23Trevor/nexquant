@@ -249,12 +249,23 @@ class BugWatchdog:
 
             diff = len(open_positions) - len(bot_positions)
             if abs(diff) > 2:
+                # Tenter une réconciliation automatique via position_syncer
+                try:
+                    from superbot.components.position_syncer import sync_positions_with_broker
+                    sync_positions_with_broker(self.bot)
+                    open_positions = getattr(rm, "open_positions", {})
+                    bot_positions = getattr(self.bot, "positions", {})
+                    diff = len(open_positions) - len(bot_positions)
+                except Exception:
+                    pass
+
+            if abs(diff) > 2:
                 return (
                     "risk_manager",
                     f"Désynchronisation positions : risk_manager voit {len(open_positions)} positions, "
                     f"bot.positions en a {len(bot_positions)} (écart={diff})",
-                    "Medium",
-                    True,
+                    "Low",
+                    False,
                 )
 
             return None
@@ -264,6 +275,8 @@ class BugWatchdog:
     def _check_cycle_latency(self):
         """Vérifie la latence du dernier cycle de trading."""
         try:
+            if getattr(self.bot, "is_paused", False):
+                return None
             last_hb = getattr(self.bot, "_last_cycle_heartbeat", None)
             if last_hb is None:
                 return None  # Watchdog cycle pas encore démarré

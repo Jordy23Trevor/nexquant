@@ -20,7 +20,7 @@ class TechnicalIndicators:
     Optimisée pour les performances avec mise en cache et calculs incrémentiels.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
         Initialise le calculateur d'indicateurs avec la configuration.
 
@@ -28,7 +28,7 @@ class TechnicalIndicators:
             config: Dictionnaire contenant les paramètres des indicateurs
                    (EMA_FAST, EMA_SLOW, RSI_LEN, etc.)
         """
-        self.config = config
+        self.config = config or {}
         # Détecteur de régime HMM (chargé lazily au premier appel)
         self._regime_detector = None
         self._hmm_loaded = False  # Flag pour éviter les tentatives répétées
@@ -36,7 +36,7 @@ class TechnicalIndicators:
         self._pivot_cache = {}
         self._indicator_cache = {}
         self._last_cache_key = None
-        log.debug(f"TechnicalIndicators initialisé avec config: {list(config.keys())}")
+        log.debug(f"TechnicalIndicators initialisé avec config: {list(self.config.keys())}")
 
     def _get_cache_key(self, df: pd.DataFrame) -> str:
         """Génère une clé de cache basée sur les données d'entrée."""
@@ -206,8 +206,8 @@ class TechnicalIndicators:
         result['ichimoku_chikou'] = ichimoku['chikou_span']
 
         # Le nuage (cloud) est entre senkou_span_a et senkou_span_b
-        result['ichimoku_cloud_top'] = ichimoku['senkou_span_a'].combine_first(ichimoku['senkou_span_b'])
-        result['ichimoku_cloud_bottom'] = ichimoku['senkou_span_b'].combine_first(ichimoku['senkou_span_a'])
+        result['ichimoku_cloud_top'] = np.maximum(ichimoku['senkou_span_a'], ichimoku['senkou_span_b'])
+        result['ichimoku_cloud_bottom'] = np.minimum(ichimoku['senkou_span_a'], ichimoku['senkou_span_b'])
 
         # === VWAP ===
         result['vwap'] = calculate_vwap(high_price, low_price, close_price, volume, self.config.get('VWAP_WINDOW', 14))
@@ -265,6 +265,14 @@ class TechnicalIndicators:
                 s1_series = pd.Series(date_only.map(daily_prev['s1']), index=result.index).ffill().bfill()
                 r2_series = pd.Series(date_only.map(daily_prev['r2']), index=result.index).ffill().bfill()
                 s2_series = pd.Series(date_only.map(daily_prev['s2']), index=result.index).ffill().bfill()
+
+                if pivot_series.isna().all():
+                    typical = (result['high'] + result['low'] + result['close']) / 3
+                    pivot_series = typical
+                    r1_series = (2 * typical) - result['low']
+                    s1_series = (2 * typical) - result['high']
+                    r2_series = typical + (result['high'] - result['low'])
+                    s2_series = typical - (result['high'] - result['low'])
 
                 result['pivot'] = pivot_series
                 result['r1'] = r1_series
@@ -423,6 +431,7 @@ class TechnicalIndicators:
         mean_deviation = typical_price.rolling(window=period).apply(
             lambda x: np.mean(np.abs(x - np.mean(x))), raw=True
         )
+        mean_deviation = mean_deviation.replace(0, 1e-10)
         cci = (typical_price - sma_tp) / (0.015 * mean_deviation)
         return cci
 
@@ -443,8 +452,10 @@ class TechnicalIndicators:
         positive_mf = positive_flow.rolling(window=period).sum()
         negative_mf = negative_flow.rolling(window=period).sum()
 
+        negative_mf = negative_mf.replace(0, 1e-10)
         money_ratio = positive_mf / negative_mf
         mfi = 100 - (100 / (1 + money_ratio))
+        mfi = mfi.fillna(50.0)
         return mfi
 
     def _calculate_obv(self, close: pd.Series, volume: pd.Series) -> pd.Series:
