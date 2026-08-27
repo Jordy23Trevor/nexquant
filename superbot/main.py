@@ -8,6 +8,8 @@ def main():
     """Point d'entrée principal du SuperBot avec support multi-broker CLI."""
     parser = argparse.ArgumentParser(description="SuperBot Trading Unifié MT5 (Forex & Commodities)")
     parser.add_argument("--broker", type=str, default=None, help="Type de broker (mt5)")
+    parser.add_argument("--dashboard-port", type=int, default=None, help="Port pour le dashboard Web local (défaut: 5000)")
+    parser.add_argument("--webhook-port", type=int, default=None, help="Port pour le serveur webhook (défaut: 5001)")
     parser.add_argument("--unpause", action="store_true", help="Forcer le déblocage / reprise du bot")
     parser.add_argument("--reset-state", action="store_true", help="Réinitialiser l'état persistant et le solde journalier")
     args = parser.parse_args()
