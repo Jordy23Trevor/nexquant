@@ -19,6 +19,8 @@ class RuntimeConfig:
     def __init__(self, risk_pct: float, score_min: float):
         self._risk_pct: float = float(risk_pct)
         self._score_min: float = float(score_min)
+        self._session_risk_multiplier: float = 1.0
+        self._session_score_offset: int = 0
         self.risk_manager: Optional[Any] = None
         self.strategy: Optional[Any] = None
 
@@ -55,10 +57,15 @@ class RuntimeConfig:
             self.apply()
         return changed
 
+    def set_session_multipliers(self, risk_multiplier: float = 1.0, score_offset: int = 0):
+        self._session_risk_multiplier = risk_multiplier
+        self._session_score_offset = score_offset
+        self.apply()
+
     def apply(self):
         """Pousse les valeurs courantes vers les composants liés."""
         if self.risk_manager is not None:
-            self.risk_manager.RISK_PCT = self._risk_pct
+            self.risk_manager.RISK_PCT = self._risk_pct * self._session_risk_multiplier
         if self.strategy is not None:
-            self.strategy.score_min = self._score_min
-            self.strategy.risk_per_trade = self._risk_pct
+            self.strategy.score_min = self._score_min + self._session_score_offset
+            self.strategy.risk_per_trade = self._risk_pct * self._session_risk_multiplier

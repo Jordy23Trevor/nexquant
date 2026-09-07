@@ -25,8 +25,28 @@ def record_trade(rm, trade_record: Dict[str, Any]):
         elif isinstance(trade_record['timestamp'], datetime):
             trade_record['timestamp'] = trade_record['timestamp'].isoformat()
 
-        # Ajouter à l'historique uniquement si le trade est clôturé
+        # Ensure _pending_features exists
+        if not hasattr(rm, '_pending_features'):
+            rm._pending_features = {}
+
         is_closed = trade_record.get('status') == 'closed' or trade_record.get('pnl') is not None
+        symbol = trade_record.get('symbol')
+
+        if not is_closed and symbol:
+            rm._pending_features[symbol] = {
+                'symbol': symbol,
+                'side': trade_record.get('side'),
+                'entry_price': trade_record.get('entry_price'),
+                'signal_score': trade_record.get('signal_score'),
+                'market_regime': trade_record.get('market_regime'),
+                'features': trade_record.get('features')
+            }
+        
+        if is_closed and symbol:
+            pending = rm._pending_features.pop(symbol, {})
+            for k, v in pending.items():
+                if k not in trade_record or trade_record[k] is None:
+                    trade_record[k] = v
 
         # Sérialiser les mutations de l'état partagé (trade_history,
         # consecutive_losses, last_trade_close_time) entre threads.
@@ -34,9 +54,11 @@ def record_trade(rm, trade_record: Dict[str, Any]):
             if is_closed:
                 rm.trade_history.append(trade_record)
 
-                # Garder seulement les 100 derniers trades pour éviter l'accumulation illimitée
-                if len(rm.trade_history) > 100:
-                    rm.trade_history = rm.trade_history[-100:]
+                # Garder seulement les 500 derniers trades pour la sécurité mémoire
+                # (la BD SQLite est la vraie source de vérité)
+                if len(rm.trade_history) > 500:
+                    rm.trade_history = rm.trade_history[-500:]
+
 
             # Mise à jour des pertes consécutives
             symbol = trade_record.get('symbol')
@@ -90,8 +112,9 @@ def load_trade_history_from_disk(rm):
                     except Exception:
                         continue
 
-        # Garder les 100 plus récents
-        rm.trade_history = loaded_trades[-100:]
+        # Garder les 500 plus récents pour la sécurité mémoire
+        # (la BD SQLite est la vraie source de vérité)
+        rm.trade_history = loaded_trades[-500:]
         log.info(f"Historique de trading chargé depuis le disque : {len(rm.trade_history)} trades clôturés trouvés.")
     except Exception as e:
         log.error(f"Erreur lors du chargement de l'historique de trades : {e}")
@@ -140,8 +163,20 @@ def merge_broker_history(rm, broker_trades: List[Dict[str, Any]]):
 
     rm.trade_history.sort(key=get_ts)
 
-    # Garder seulement les 100 derniers
-    if len(rm.trade_history) > 100:
-        rm.trade_history = rm.trade_history[-100:]
+    # Garder seulement les 500 derniers pour la sécurité mémoire
+    # (la BD SQLite est la vraie source de vérité)
+    if len(rm.trade_history) > 500:
+        rm.trade_history = rm.trade_history[-500:]
+
+    try:
+        from superbot.config import TRADE_LOG_FILE
+        trades_file = str(TRADE_LOG_FILE)
+        log_dir = os.path.dirname(trades_file)
+        os.makedirs(log_dir, exist_ok=True)
+        with open(trades_file, 'w', encoding='utf-8') as f:
+            for t in rm.trade_history:
+                f.write(json.dumps(t, ensure_ascii=False, default=str) + '\n')
+    except Exception as e:
+        log.error(f"Erreur lors de la sauvegarde post-fusion: {e}")
 
     log.info(f"Fusion de l'historique broker terminée. Total trades en mémoire : {len(rm.trade_history)}")

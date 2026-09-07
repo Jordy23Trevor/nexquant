@@ -334,6 +334,25 @@ class MarketRegimeDetector:
         elif macd_hist < 0:
             votes['trending_bear'] += 5
 
+        # H. RSI Confirmation
+        rsi_ob = thresholds.get('rsi_overbought', 70)
+        rsi_os = thresholds.get('rsi_oversold', 30)
+        if rsi > rsi_ob:
+            votes['trending_bull'] += 10
+            votes['high_volatility'] += 5
+        elif rsi < rsi_os:
+            votes['trending_bear'] += 10
+            votes['high_volatility'] += 5
+
+        # I. Volume Spike Confirmation
+        vol_spike = thresholds.get('volume_spike', 1.5)
+        if volume_factor > vol_spike:
+            votes['breakout'] += 15
+            votes['high_volatility'] += 10
+        elif volume_factor < 0.5:
+            votes['ranging'] += 10
+            votes['choppy_noise'] += 5
+
         # ─── 3. Sélection du régime gagnant & Confiance ────────────────────────
         best_regime = max(votes, key=votes.get)
         total_votes = sum(votes.values())

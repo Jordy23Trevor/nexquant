@@ -155,43 +155,76 @@ pip install -r requirements.txt
 ```
 
 ### 3. Configuration du Fichier `.env`
-Créez un fichier `.env` à la racine du dossier `nexquant/` en vous basant sur l'exemple ci-dessous :
+Créez un fichier `.env` à la racine du dossier `nexquant/` (ou copiez `.env.example`) en vous basant sur le modèle ci-dessous :
 
 ```env
-# Configuration Broker MT5
+# ======================
+# SÉLECTION DU BROKER
+# ======================
 BROKER_TYPE=mt5
-MT5_ACCOUNT=384002
+
+# ======================
+# METATRADER 5 (Fusion Markets, IC Markets, etc.)
+# ======================
+MT5_LOGIN=123456
 MT5_PASSWORD=votre_mot_de_passe
 MT5_SERVER=FusionMarkets-Demo
-MT5_PATH=C:\Program Files\MetaTrader 5\terminal64.exe
+MT5_PATH=C:\Program Files\MetaTrader 5
 
-# Univers d'instruments tradés (Forex & Matières Premières)
-INSTRUMENTS=EURUSD,GBPUSD,USDJPY,USDCAD,NZDUSD,EURJPY,GBPJPY,USDCHF,AUDUSD,EURGBP,XAUUSD,XAGUSD,XTIUSD,XBRUSD
-
-# Paramètres de Gestion du Risque
-RISK_PCT=1.0
-MAX_OPEN_POSITIONS=4
-MAX_DAILY_LOSS_PCT=2.0
-MAX_MONTHLY_LOSS_PCT=5.0
-MAX_SPREAD_PIPS=2.5
-MAX_FOREX_CURRENCY_EXPOSURE=2
-
-# Trailing Stops & Sécurisation
-BE_DYN_RR=true
-SL_ATR_MULT=1.5
-TP_ATR_MULT=3.0
-DAILY_PROFIT_TARGET=200.0
-
-# Sécurité Opérationnelle
-ALLOW_LIVE_TRADING=true
+# ======================
+# PARAMÈTRES DE TRADING
+# ======================
+INSTRUMENTS_MT5=EURUSD,GBPUSD,USDJPY,USDCAD,NZDUSD,EURJPY,GBPJPY,XAUUSD,XAGUSD,WTIUSD,USDCHF,AUDUSD,EURGBP
+GRANULARITY=15m
 CYCLE_TIME=15
+
+# ======================
+# GESTION DU RISQUE V3
+# ======================
+RISK_PCT=1.0                  # % du capital risqué par trade
+MAX_DAILY_LOSS_PCT=2.0        # % max de perte journalière avant arrêt
+MAX_MONTHLY_LOSS_PCT=5.0      # % max de perte mensuelle
+MAX_OPEN_POSITIONS_MT5=3      # Nombre max de positions simultanées
+MAX_SPREAD_PIPS=2.5           # Spread maximal toléré
+MAX_FOREX_CURRENCY_EXPOSURE=2 # Exposition max par devise
+SL_ATR_MULT=1.5               # Multiplicateur ATR Stop Loss
+TP_ATR_MULT=3.0               # Multiplicateur ATR Take Profit
+TRAIL_ATR_MULT=2.0            # Multiplicateur ATR Trailing Stop
+BE_ATR_MULT=1.5               # Multiplicateur ATR Break-Even
+BE_DYN_RR=true                # Break-Even dynamique activé
+
+# ======================
+# STRATÉGIE
+# ======================
+SCORE_MIN=6
+SCORE_MIN_FOREX=6
+EMA_FAST_FOREX=21
+EMA_SLOW_FOREX=55
+ADX_TREND_FOREX=20
+SL_ATR_MULT_FOREX=1.5
+TP_ATR_MULT_FOREX=3.0
+
+# ======================
+# NOUVELLES & MACRO
+# ======================
+NEWS_ASSETS_MT5=EUR,USD,GBP,JPY,CAD,CHF,AUD,NZD
+NEWS_AVOIDANCE_BEFORE=30      # Minutes d'évitement avant news HIGH impact
+NEWS_AVOIDANCE_AFTER=15       # Minutes d'évitement après news HIGH impact
+
+# ======================
+# TSMOM (Macro Momentum)
+# ======================
+TSMOM_ENABLED=true
+TSMOM_PLACE_ORDERS=true
+TSMOM_TARGET_VOL=0.12
+TSMOM_MAX_LEVERAGE=1.5
 ```
 
-- BROKER_TYPE — courtier actif (binance | mt5 | alpaca)
-- INSTRUMENTS — liste d'instruments séparés par des virgules
-- RISK_PCT — pourcentage du capital par trade
-- MAX_DAILY_LOSS_PCT — stop quotidien
-- NEXQUANT_INGEST_TOKEN — (optionnel) jeton de télémétrie pour Supabase
+- **`BROKER_TYPE`** — Courtier actif (`mt5`)
+- **`MT5_LOGIN`** — Numéro de compte MetaTrader 5
+- **`INSTRUMENTS_MT5`** — Liste des actifs surveillés (Forex, Or, Argent, Pétrole)
+- **`RISK_PCT`** — Pourcentage de risque alloué par position
+- **`MAX_DAILY_LOSS_PCT`** — Limite de perte journalière (déclenche le Kill-Switch)
 
 ## 🎮 Lancement du SuperBot
 
@@ -213,9 +246,9 @@ Permet de débloquer manuellement le bot s'il a été mis en pause :
 python -m superbot.main --unpause
 ```
 
-### Personnaliser les Ports du Dashboard Web et Webhook
+### Personnaliser le Port du Dashboard Web
 ```bash
-python -m superbot.main --dashboard-port 5000 --webhook-port 5001
+python -m superbot.main --dashboard-port 5000
 ```
 
 Une fois démarré, le Dashboard local est accessible sur `http://localhost:5000` et les métriques Prometheus sur `http://localhost:8000/metrics`.

@@ -78,7 +78,7 @@ class PerformanceLearner:
 
         # Blocages dynamiques (symboles et stratégies)
         self._blocked_strategies: Dict[str, datetime] = {}  # strategy -> blocked_until
-        self._symbol_consecutive_losses: Dict[str, int] = {}  # symbol -> count
+        self._symbol_consecutive_losses: Dict[str, Dict] = {}  # symbol -> {'count': int, 'blocked_at': Optional[datetime]}
 
         log.info("PerformanceLearner V3 initialisé")
 
@@ -306,13 +306,17 @@ class PerformanceLearner:
         rr = trade.get('rr_ratio', 0)
 
         # Mise à jour des pertes consécutives
+        if symbol not in self._symbol_consecutive_losses:
+            self._symbol_consecutive_losses[symbol] = {'count': 0, 'blocked_at': None}
+            
         if pnl < 0:
-            self._symbol_consecutive_losses[symbol] = self._symbol_consecutive_losses.get(symbol, 0) + 1
-            count = self._symbol_consecutive_losses[symbol]
+            self._symbol_consecutive_losses[symbol]['count'] += 1
+            count = self._symbol_consecutive_losses[symbol]['count']
             if count >= 3:
+                self._symbol_consecutive_losses[symbol]['blocked_at'] = datetime.now(timezone.utc)
                 log.warning(f"🚫 {symbol} : {count} pertes consécutives → blocage automatique 24h")
         else:
-            self._symbol_consecutive_losses[symbol] = 0  # Reset en cas de gain
+            self._symbol_consecutive_losses[symbol] = {'count': 0, 'blocked_at': None}  # Reset en cas de gain
 
         # Mise à jour de la stratégie
         if self._strategy_engine:
@@ -328,8 +332,8 @@ class PerformanceLearner:
         return {
             'symbol': symbol,
             'pnl': pnl,
-            'consecutive_losses': self._symbol_consecutive_losses.get(symbol, 0),
-            'symbol_blocked': self._symbol_consecutive_losses.get(symbol, 0) >= 3,
+            'consecutive_losses': self._symbol_consecutive_losses.get(symbol, {}).get('count', 0),
+            'symbol_blocked': self.is_symbol_blocked(symbol),
         }
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -369,10 +373,11 @@ class PerformanceLearner:
 
     def _get_blocked_symbols(self) -> set:
         """Retourne les symboles bloqués (3+ pertes consécutives)."""
-        return {
-            sym for sym, count in self._symbol_consecutive_losses.items()
-            if count >= 3
-        }
+        blocked = set()
+        for sym in list(self._symbol_consecutive_losses.keys()):
+            if self.is_symbol_blocked(sym):
+                blocked.add(sym)
+        return blocked
 
     def _update_symbol_profiles(self, trades: List[Dict]):
         """Met à jour les profils de symboles dans la DB."""
@@ -414,6 +419,14 @@ class PerformanceLearner:
             pnl = trade.get('pnl', 0)
             rr = trade.get('rr_ratio', 0)
             self._strategy_engine.record_trade_result(strategy, symbol, pnl, rr)
+            
+        leaderboard = self._strategy_engine.get_strategy_leaderboard()
+        for stat in leaderboard:
+            strat_name = stat['name']
+            if stat['trades'] >= 10 and stat['win_rate'] < 0.30:
+                if strat_name not in self._blocked_strategies or self._blocked_strategies[strat_name] < datetime.now(timezone.utc):
+                    self._blocked_strategies[strat_name] = datetime.now(timezone.utc) + timedelta(days=7)
+                    log.warning(f"⛔ Stratégie {strat_name} bloquée pour 7 jours (WinRate {stat['win_rate']:.1%} sur {stat['trades']} trades)")
 
     def _update_consecutive_losses(self, trades: List[Dict]):
         """
@@ -428,10 +441,15 @@ class PerformanceLearner:
         for trade in trades:
             sym = trade.get('symbol', '')
             pnl = trade.get('pnl', 0)
+            if sym not in self._symbol_consecutive_losses:
+                self._symbol_consecutive_losses[sym] = {'count': 0, 'blocked_at': None}
+                
             if pnl < 0:
-                self._symbol_consecutive_losses[sym] = self._symbol_consecutive_losses.get(sym, 0) + 1
+                self._symbol_consecutive_losses[sym]['count'] += 1
+                if self._symbol_consecutive_losses[sym]['count'] >= 3:
+                    self._symbol_consecutive_losses[sym]['blocked_at'] = datetime.now(timezone.utc)
             else:
-                self._symbol_consecutive_losses[sym] = 0
+                self._symbol_consecutive_losses[sym] = {'count': 0, 'blocked_at': None}
 
     def _log_adjustment(
         self, param: str, old_val: float, new_val: float,
@@ -466,7 +484,19 @@ class PerformanceLearner:
 
     def is_symbol_blocked(self, symbol: str) -> bool:
         """Vérifie si un symbole est bloqué (pertes consécutives)."""
-        return self._symbol_consecutive_losses.get(symbol, 0) >= 3
+        info = self._symbol_consecutive_losses.get(symbol)
+        if not info:
+            return False
+            
+        blocked_at = info.get('blocked_at')
+        if info.get('count', 0) >= 3 and blocked_at:
+            if datetime.now(timezone.utc) < blocked_at + timedelta(hours=24):
+                return True
+            else:
+                # Blocage expiré, on reset
+                self._symbol_consecutive_losses[symbol] = {'count': 0, 'blocked_at': None}
+                
+        return False
 
     def get_learning_report(self) -> Dict[str, Any]:
         """Retourne un rapport d'apprentissage complet."""

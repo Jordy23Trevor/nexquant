@@ -69,6 +69,18 @@ class Broker(abc.ABC):
         """
         pass
 
+    def close_all_positions(self, reason: str = "") -> bool:
+        """
+        Ferme toutes les positions ouvertes chez le courtier.
+
+        Args:
+            reason: Raison de la fermeture d'urgence (pour logging)
+
+        Returns:
+            True si toutes les fermetures ont réussi, False sinon
+        """
+        return False
+
     @abc.abstractmethod
     def place_order(self, symbol: str, side: str, amount: float,
                    sl: float, tp: float, reduce_only: bool = False,
@@ -212,37 +224,31 @@ class Broker(abc.ABC):
 
 def create_broker(broker_type: str = None, **kwargs) -> Broker:
     """
-    Factory function pour créer une instance de courtier selon le type configuré.
+    Factory function pour créer une instance de courtier MT5.
 
     Args:
-        broker_type: Type de courtier ('binance', 'alpaca', 'mt5')
+        broker_type: Type de courtier (seul 'mt5' est supporté)
                     Si None, lit la variable d'environnement BROKER_TYPE
-        **kwargs: Arguments supplémentaires passés au constructeur du courtier
+        **kwargs: Arguments supplémentaires passés au constructeur
 
     Returns:
-        Instance de broker prête à l'emploi
+        Instance de broker MT5 prête à l'emploi
 
     Raises:
-        ValueError: Si le type de courtier n'est pas supporté
+        ValueError: Si le type de courtier n'est pas 'mt5'
     """
     if broker_type is None:
-        broker_type = os.getenv("BROKER_TYPE", "binance").lower()
+        broker_type = os.getenv("BROKER_TYPE", "mt5").lower()
 
     broker_type = broker_type.lower()
 
-    if broker_type == "binance":
-        from superbot.broker.binance_client import BinanceClient
-        return BinanceClient(**kwargs)
-    elif broker_type == "alpaca":
-        from superbot.broker.alpaca_client import AlpacaClient
-        return AlpacaClient(**kwargs)
-    elif broker_type == "mt5":
+    if broker_type == "mt5":
         from superbot.broker.mt5_client import MT5Client
         return MT5Client(**kwargs)
     else:
-        supported = ["binance", "alpaca", "mt5"]
         raise ValueError(
             f"Broker '{broker_type}' non supporté.\n"
-            f"Brokers disponibles : {', '.join(supported)}\n"
-            f"→ Définissez BROKER_TYPE dans votre fichier .env"
+            f"Seul le broker 'mt5' (MetaTrader 5) est disponible.\n"
+            f"→ Définissez BROKER_TYPE=mt5 dans votre fichier .env"
         )
+

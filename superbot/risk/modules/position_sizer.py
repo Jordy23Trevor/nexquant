@@ -51,8 +51,8 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
         raw_price_risk = abs(entry_price - stop_loss)
 
         # Intégrer les coûts de transaction dans le risque par unité
-        from superbot.config import COMMISSION_PCT, SLIPPAGE_PCT
-        cost_pct = (COMMISSION_PCT * 2) + SLIPPAGE_PCT
+        from superbot.config import SIMULATED_COMMISSION_PCT, SIMULATED_SLIPPAGE_POINTS
+        cost_pct = (SIMULATED_COMMISSION_PCT * 2) + (SIMULATED_SLIPPAGE_POINTS * tick_size / max(entry_price, 1e-10) * 100)
         cost_abs = entry_price * (cost_pct / 100.0)
 
         price_risk = raw_price_risk + cost_abs

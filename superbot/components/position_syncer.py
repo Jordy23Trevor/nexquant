@@ -120,6 +120,7 @@ def sync_positions_with_broker(bot):
                 if bot.risk_manager:
                     # Propager le régime de marché et les features ML de l'ouverture vers la clôture.
                     market_regime_at_open = old_pos.get('market_regime', 'UNKNOWN')
+                    strategy_name = old_pos.get('strategy_name', 'UNKNOWN')
                     features_at_open = old_pos.get('features', {})
                     trade_record = {
                         'symbol': symbol,
@@ -131,6 +132,7 @@ def sync_positions_with_broker(bot):
                         'timestamp': datetime.now(timezone.utc).isoformat(),
                         'status': 'closed',
                         'market_regime': market_regime_at_open,
+                        'strategy_name': strategy_name,
                         'broker': getattr(bot, 'active_broker_type', BROKER_TYPE),
                         'target': 1 if pnl > 0 else 0
                     }
@@ -146,6 +148,17 @@ def sync_positions_with_broker(bot):
                         log.debug(f"[BUG-A03] Solde mis à jour post-clôture {symbol}: {new_balance:.2f}")
                     except Exception as _e:
                         log.debug(f"[BUG-A03] Impossible de rafraîchir le solde post-clôture: {_e}")
+
+                    # 🧠 V3 : Apprentissage de performance (Stats Stratégies + Blocage Symboles + SQLite DB)
+                    if getattr(bot, 'performance_learner', None):
+                        try:
+                            res_pl = bot.performance_learner.on_trade_closed(trade_record)
+                            log.info(
+                                f"🧠 [PerformanceLearner] Trade appris : {symbol} ({strategy_name}) | "
+                                f"PnL={pnl:+.2f}€ | Pertes consécutives={res_pl.get('consecutive_losses', 0)}"
+                            )
+                        except Exception as e:
+                            log.debug(f"Erreur performance_learner : {e}")
 
                     # 🧠 V3 : Apprentissage en ligne
                     if getattr(bot, 'online_learner', None):

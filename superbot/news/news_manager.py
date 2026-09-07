@@ -16,7 +16,7 @@ import re
 
 # Importer la configuration
 from superbot.config import (
-    FEAR_GREED_API, COINGECKO_API, CRYPTOCOMPARE_API, FOREXFACTORY_API,
+    FEAR_GREED_API, FOREXFACTORY_API,
     NEWS_AVOIDANCE_BEFORE, NEWS_AVOIDANCE_AFTER, NEWS_RISK_REDUCTION_FACTOR,
     NEWS_HIGH_IMPACT_ONLY, NEWS_ASSETS, NEWS_UPDATE_INTERVAL,
     FEAR_GREED_EXTREME_FEAR, FEAR_GREED_EXTREME_GREED
@@ -330,7 +330,7 @@ class NewsManager:
                 return
 
             # Obtenir les tendances de recherche
-            url = f"{COINGECKO_API}/search/trending"
+            url = "https://api.coingecko.com/api/v3/search/trending"
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
                 data = response.json()

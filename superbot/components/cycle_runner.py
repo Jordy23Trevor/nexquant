@@ -148,30 +148,6 @@ def run_main_loop(bot):
             # Ne PAS réinitialiser _cached_balance : il sert de fallback si get_balance() échoue.
 
             now_time = time.time()
-            
-            # Déclencheur Walk-Forward adaptatif asynchrone
-            if not hasattr(bot, 'walk_forward_optimizer'):
-                try:
-                    from superbot.ml.walk_forward import WalkForwardOptimizer
-                    bot.walk_forward_optimizer = WalkForwardOptimizer()
-                except ImportError:
-                    bot.walk_forward_optimizer = None
-
-            if getattr(bot, 'walk_forward_optimizer', None):
-                wf = bot.walk_forward_optimizer
-                # Recalibrer tous les 30 jours (2592000 secondes)
-                if now_time - wf.last_calibration_time > 2592000 and not wf.is_optimizing:
-                    def walk_forward_task():
-                        if bot.risk_manager and hasattr(bot.risk_manager, 'trade_history'):
-                            import pandas as pd
-                            trades_df = pd.DataFrame(bot.risk_manager.trade_history)
-                            new_params = wf.optimize(trades_df)
-                            # Mettre à jour la stratégie à chaud
-                            if hasattr(bot, 'strategy'):
-                                bot.strategy.score_min = new_params.get('SCORE_MIN', bot.strategy.score_min)
-                                bot.adaptive_score_min = bot.strategy.score_min
-                    
-                    threading.Thread(target=walk_forward_task, daemon=True).start()
             # 📡 TÉLÉMÉTRIE CLOUD : Synchronisation et heartbeat (fréquence réduite)
             _last_cloud_sync = getattr(bot, '_last_cloud_sync', 0.0)
             if bot.telemetry.enabled and (now_time - _last_cloud_sync >= bot.CLOUD_SYNC_INTERVAL):
@@ -275,19 +251,30 @@ def run_main_loop(bot):
                 bot._last_balance_update = now_time
                 try:
                     acc_summary = bot.broker.get_account_summary()
+                    balance = 0.0
                     equity = 0.0
                     if acc_summary:
-                        equity = float(acc_summary.get("equity") or acc_summary.get("balance") or 0.0)
-                    if equity <= 0.0:
+                        balance = float(acc_summary.get("balance") or 0.0)
+                        equity = float(acc_summary.get("equity") or balance or 0.0)
+                    if balance <= 0.0:
                         bal = bot.broker.get_balance()
                         if bal > 0.0:
-                            equity = bal
-                    if equity > 0.0 and bot.risk_manager:
-                        bot.risk_manager.update_account_balance(equity)
-                        if bot.risk_manager.check_kill_switch(equity):
+                            balance = bal
+                            if equity <= 0.0:
+                                equity = bal
+                    if balance > 0.0 and bot.risk_manager:
+                        bot.risk_manager.update_account_balance(balance)
+                        if equity > 0.0 and hasattr(bot.risk_manager, 'update_equity'):
+                            bot.risk_manager.update_equity(equity)
+                        if bot.risk_manager.check_kill_switch(balance):
                             log.critical("🛑 KILL-SWITCH ACTIVÉ : Auto-pause d'urgence déclenchée pour protéger le capital.")
                             bot.is_paused = True
                             bot._save_cooldowns()
+                            try:
+                                log.warning("🛑 [KillSwitch] Fermeture d'urgence de toutes les positions ouvertes...")
+                                bot.broker.close_all_positions(reason="Kill-Switch déclenché")
+                            except Exception as _ce:
+                                log.error(f"Erreur lors de la fermeture d'urgence des positions: {_ce}")
                 except Exception as e:
                     log.debug(f"Erreur mise à jour solde/kill-switch : {e}")
 

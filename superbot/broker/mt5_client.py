@@ -728,6 +728,24 @@ class MT5Client(Broker):
 
         return success
 
+    def close_all_positions(self, reason: str = "") -> bool:
+        """Ferme toutes les positions ouvertes sur l'ensemble des symboles."""
+        if not mt5:
+            return False
+        positions = self._call_api(mt5.positions_get, [])
+        if not positions:
+            log.info("Aucune position ouverte à fermer.")
+            return True
+
+        symbols = list(set([p.symbol for p in positions]))
+        log.warning(f"🚨 [EmergencyClose] Fermeture globale de {len(positions)} positions sur {len(symbols)} symboles: {symbols}. Motif: {reason}")
+        all_success = True
+        for sym in symbols:
+            ok = self.close_position(sym, reason=reason)
+            if not ok:
+                all_success = False
+        return all_success
+
     def cancel_all_orders(self, symbol: str = "") -> bool:
         """Annule tous les ordres en attente (pending orders)."""
         if not mt5:

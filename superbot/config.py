@@ -12,7 +12,7 @@ load_dotenv(dotenv_path=env_path)
 # =============================================================================
 # BROKER CONFIGURATION
 # =============================================================================
-BROKER_TYPE = os.getenv("BROKER_TYPE", "mt5").lower()  # mt5 (prioritaire V3), binance, alpaca
+BROKER_TYPE = os.getenv("BROKER_TYPE", "mt5").lower()  # mt5 (prioritaire V3)
 ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "false").lower() == "true"
 
 # =============================================================================
@@ -22,24 +22,6 @@ MT5_LOGIN = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
 MT5_SERVER = os.getenv("MT5_SERVER", "FusionMarkets-Demo")
 MT5_PATH = os.getenv("MT5_PATH", "")  # Path to terminal64.exe (optional)
-
-# =============================================================================
-# BINANCE FUTURES CONFIGURATION
-# =============================================================================
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
-BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
-BINANCE_TESTNET = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
-LEVERAGE = int(os.getenv("LEVERAGE", "5"))
-
-# =============================================================================
-# ALPACA MARKETS CONFIGURATION (for ETFs/US stocks)
-# =============================================================================
-ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
-ALPACA_API_SECRET = os.getenv("ALPACA_API_SECRET", "")
-_alpaca_use_paper = os.getenv("ALPACA_USE_PAPER", "true").lower() == "true"
-_default_alpaca_url = "https://paper-api.alpaca.markets" if _alpaca_use_paper else "https://api.alpaca.markets"
-ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", _default_alpaca_url)
-ALPACA_API_VERSION = os.getenv("ALPACA_API_VERSION", "v2")
 
 # =============================================================================
 # FOREX DATA PROVIDERS (utilisé par MT5)
@@ -54,36 +36,6 @@ FOREX_DATA_PROVIDER = os.getenv("FOREX_DATA_PROVIDER", "twelvedata")
 # =============================================================================
 # TRADING INSTRUMENTS & TIMEFRAMES
 # =============================================================================
-# Instruments to trade - format depends on broker
-# For Binance: "BTC/USDT", "ETH/USDT"
-# For Alpaca: "SPY", "QQQ", "AAPL"
-# For MT5: "EURUSD", "GBPUSD", "USDJPY"
-INSTRUMENTS_STR = os.getenv("INSTRUMENTS", "BTC/USDT")
-INSTRUMENTS = [s.strip() for s in INSTRUMENTS_STR.split(",")]
-
-# Corrections crypto
-# SOL/USDT blacklisté (0% WR) tant que le filtre de dominance BTC n'est pas corrigé.
-# ADA/USDT remplacé par XRP/USDT (corrélation BTC plus faible).
-CRYPTO_BLACKLIST_STR = os.getenv("CRYPTO_BLACKLIST", "SOL/USDT")
-CRYPTO_BLACKLIST: list = [s.strip() for s in CRYPTO_BLACKLIST_STR.split(",") if s.strip()]
-
-# Score minimum plus strict pour la crypto : le bot générait trop de signaux BNB en range.
-CRYPTO_SCORE_MIN = int(os.getenv("CRYPTO_SCORE_MIN", "7"))
-
-# Si BTC baisse de plus de X% sur 24h, bloquer tous les BUY sur les altcoins
-# (crash copycat observé sur SOL/ADA/BNB).
-CRYPTO_BUY_BLOCK_BTC_DROP = float(os.getenv("CRYPTO_BUY_BLOCK_BTC_DROP", "2.0"))
-
-# Volume minimum BNB/USDT : 150% de la moyenne mobile 20 périodes
-# pour réduire l'overtrading en range.
-CRYPTO_BNB_VOLUME_FACTOR = float(os.getenv("CRYPTO_BNB_VOLUME_FACTOR", "1.5"))
-
-# =============================================================================
-# TRANSACTION COSTS
-# =============================================================================
-COMMISSION_PCT = float(os.getenv("COMMISSION_PCT", "0.1"))
-SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.05"))
-
 # Timeframes for analysis
 GRANULARITY = os.getenv("GRANULARITY", "1h")  # Main trading timeframe
 HTF_GRANULARITY = os.getenv("HTF_GRANULARITY", "4h")  # Higher timeframe for trend confirmation
@@ -105,17 +57,6 @@ W1_EMA = int(os.getenv("W1_EMA", "20"))  # Weekly EMA (Elder)
 # =============================================================================
 # PARAMÈTRES PAR CLASSE D'ACTIFS (override des paramètres globaux)
 # =============================================================================
-# --- CRYPTO (Binance Futures) ---
-# EMA(21,55) : moins de bruit sur H1 crypto vs EMA(9,21) trop rapides
-# ADX 25     : seuil plus élevé car la crypto est volatile même en range
-# SCORE_MIN 7 : confirmation supplémentaire nécessaire sur marchés manipulables
-EMA_FAST_CRYPTO = int(os.getenv("EMA_FAST_CRYPTO", "21"))
-EMA_SLOW_CRYPTO = int(os.getenv("EMA_SLOW_CRYPTO", "55"))
-ADX_TREND_CRYPTO = int(os.getenv("ADX_TREND_CRYPTO", "25"))
-SCORE_MIN_CRYPTO = int(os.getenv("SCORE_MIN_CRYPTO", "7"))
-SL_ATR_MULT_CRYPTO = float(os.getenv("SL_ATR_MULT_CRYPTO", "2.0"))  # SL plus large (crypto volatile)
-TP_ATR_MULT_CRYPTO = float(os.getenv("TP_ATR_MULT_CRYPTO", "4.0"))  # TP plus ambitieux
-
 # --- FOREX (MetaTrader 5 — marchés institutionnels) ---
 # EMA(14,50) : Plus réactif pour capter les tendances de moyen terme
 # ADX 18     : Abaissé pour permettre plus de signaux en tendance faible
@@ -128,19 +69,6 @@ SL_ATR_MULT_FOREX = float(os.getenv("SL_ATR_MULT_FOREX", "1.5"))   # SL standard
 TP_ATR_MULT_FOREX = float(os.getenv("TP_ATR_MULT_FOREX", "3.0"))   # TP standard
 # News économiques maçjeures à éviter (nombres en minutes avant/après)
 FOREX_NEWS_AVOID_MINUTES = int(os.getenv("FOREX_NEWS_AVOID_MINUTES", "30"))
-
-# --- ETF/STOCKS (Alpaca US Markets) ---
-# EMA(20,50) : références institutionnelles US (EMA20 = SMA20 standard, EMA50 clé)
-# ADX 20     : ETF trend est stable, seuil standard
-# SCORE_MIN 5 : ETF moins volatils, moins de signal à filtrer
-# ALLOW_SHORT_STOCK false : éviter les shorts sur ETF (PDT rule, margin costs)
-EMA_FAST_STOCK = int(os.getenv("EMA_FAST_STOCK", "20"))
-EMA_SLOW_STOCK = int(os.getenv("EMA_SLOW_STOCK", "50"))
-ADX_TREND_STOCK = int(os.getenv("ADX_TREND_STOCK", "20"))
-SCORE_MIN_STOCK = int(os.getenv("SCORE_MIN_STOCK", "5"))
-SL_ATR_MULT_STOCK = float(os.getenv("SL_ATR_MULT_STOCK", "1.5"))   # SL standard
-TP_ATR_MULT_STOCK = float(os.getenv("TP_ATR_MULT_STOCK", "3.0"))   # TP standard
-ALLOW_SHORT_STOCK = os.getenv("ALLOW_SHORT_STOCK", "false").lower() == "true"  # Désactivé par défaut
 
 # RSI
 RSI_LEN = int(os.getenv("RSI_LEN", "14"))
@@ -237,9 +165,7 @@ TSMOM_UNIVERSE = {
 TSMOM_PLACE_ORDERS = os.getenv("TSMOM_PLACE_ORDERS", "false").lower() == "true"
 # Mapping univers -> symbole du broker actif (un seul broker à la fois).
 TSMOM_BROKER_SYMBOLS = {
-    "alpaca":  {"SPY": "SPY"},
     "mt5":     {"XAUUSD": "XAUUSD", "BTCUSD": "BTCUSD"},
-    "binance": {"BTCUSD": "BTC/USDT"},
 }
 
 # Drawdown limits (Elder's rules & Hard Daily Cap)
@@ -387,23 +313,12 @@ NEWS_UPDATE_INTERVAL = int(os.getenv("NEWS_UPDATE_INTERVAL", "300"))  # 5 minute
 
 # News API endpoints (free tiers)
 FEAR_GREED_API = "https://api.alternative.me/fng/"
-COINGECKO_API = "https://api.coingecko.com/api/v3"
-CRYPTOCOMPARE_API = "https://min-api.cryptocompare.com/data"
-CRYPTOCOMPARE_API_KEY = os.getenv("CRYPTOCOMPARE_API_KEY", "")
 FOREXFACTORY_API = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 # For ETFs/news, we could use Finnhub, IEX Cloud, etc. but keeping free sources for now
 
 # Fear & Greed thresholds (for contrarian signals)
 FEAR_GREED_EXTREME_FEAR = int(os.getenv("FEAR_GREED_EXTREME_FEAR", "20"))  # < 20 = buying opportunity
 FEAR_GREED_EXTREME_GREED = int(os.getenv("FEAR_GREED_EXTREME_GREED", "80"))  # > 80 = selling opportunity
-
-# =============================================================================
-# WEBHOOK CONFIGURATION (for TradingView alerts)
-# =============================================================================
-WEBHOOK_ENABLED = os.getenv("WEBHOOK_ENABLED", "false").lower() == "true"
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "change_this_to_a_strong_secret")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
-WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "5000"))
 
 # =============================================================================
 # ⏰ TRADING SESSIONS & LIQUIDITY FILTERS
@@ -414,13 +329,6 @@ FOREX_SESSIONS_UTC = [
     (7, 16),   # London session
     (12, 20),  # New York session
     (23, 6),   # Tokyo session (overnight)
-]
-
-# Crypto and ETFs can use liquidity filters based on high-volume hours
-USE_LIQUIDITY_FILTER = os.getenv("USE_LIQUIDITY_FILTER", "false").lower() == "true"
-HIGH_LIQUIDITY_HOURS_UTC = [
-    (8, 16),   # London/New York overlap
-    (0, 6),    # Asian session
 ]
 
 # =============================================================================
@@ -461,11 +369,9 @@ PROFIT_CB_STOP_RETRACEMENT = float(os.getenv("PROFIT_CB_STOP_RETRACEMENT", "0.25
 # DEVELOPMENT & TESTING
 # =============================================================================
 # ENABLE_PAPER_TRADING supprimé — utiliser le broker alpaca avec paper-api.alpaca.markets pour simuler
-BACKTEST_MODE = os.getenv("BACKTEST_MODE", "false").lower() == "true"
 LOG_TRADES = os.getenv("LOG_TRADES", "true").lower() == "true"
 ENABLE_DASHBOARD = os.getenv("ENABLE_DASHBOARD", "true").lower() == "true"
 # V3: Chemin base de données SQLite persistante
-import tempfile as _tmpfile
 _default_db_path = str(Path(__file__).parent / "db" / "nexquant.db")
 DB_PATH = os.getenv("DB_PATH", _default_db_path)
 
@@ -475,18 +381,18 @@ DB_PATH = os.getenv("DB_PATH", _default_db_path)
 def validate_config():
     """
     Validates key configuration settings to ensure safe trading conditions.
-    Only checks broker credentials if NOT in backtesting mode.
+    Only checks broker credentials if not using SaaS mode.
     """
     errors = []
 
     # 1. Broker type check
-    valid_brokers = ["binance", "alpaca", "mt5"]
+    valid_brokers = ["mt5"]
     if BROKER_TYPE.lower() not in valid_brokers:
         errors.append(f"BROKER_TYPE '{BROKER_TYPE}' est invalide. Doit être l'un de : {valid_brokers}")
 
-    # 2. Broker credentials check (only if not backtesting and not using SaaS mode)
+    # 2. Broker credentials check (only if not using SaaS mode)
     using_saas = bool(os.getenv("NEXQUANT_USER_ID") and os.getenv("NEXQUANT_INGEST_TOKEN"))
-    if not BACKTEST_MODE and not using_saas:
+    if not using_saas:
         if BROKER_TYPE.lower() == "mt5":
             if MT5_LOGIN <= 0:
                 errors.append("MT5_LOGIN doit être un entier positif (votre identifiant de compte).")
@@ -494,12 +400,7 @@ def validate_config():
                 errors.append("MT5_PASSWORD ne doit pas être vide.")
             if not MT5_SERVER:
                 errors.append("MT5_SERVER ne doit pas être vide.")
-        elif BROKER_TYPE.lower() == "binance":
-            if not BINANCE_API_KEY or not BINANCE_API_SECRET:
-                errors.append("BINANCE_API_KEY et BINANCE_API_SECRET doivent être configurés.")
-        elif BROKER_TYPE.lower() == "alpaca":
-            if not ALPACA_API_KEY or not ALPACA_API_SECRET:
-                errors.append("ALPACA_API_KEY et ALPACA_API_SECRET doivent être configurés.")
+        
 
     # 3. Risk parameter bounds checks
     if not (0.1 <= RISK_PCT <= 10.0):  # V3: élargi à 10% max pour stratégies agressives
@@ -545,7 +446,6 @@ validate_config()
 __all__ = [
     "validate_config",
     # Crypto-specific filters (rapport 2026-07-02)
-    "CRYPTO_BLACKLIST", "CRYPTO_SCORE_MIN", "CRYPTO_BUY_BLOCK_BTC_DROP", "CRYPTO_BNB_VOLUME_FACTOR",
     # Broker
     "BROKER_TYPE", "ALLOW_LIVE_TRADING",
 
@@ -556,18 +456,12 @@ __all__ = [
     "MT5_CRYPTO_ENABLED", "MT5_CRYPTO_SYMBOLS", "MT5_CRYPTO_SCORE_MIN",
     "MT5_CRYPTO_SL_ATR", "MT5_CRYPTO_TP_ATR", "MT5_CRYPTO_MAX_SPREAD",
 
-    # Binance
-    "BINANCE_API_KEY", "BINANCE_API_SECRET", "BINANCE_TESTNET", "LEVERAGE",
-
-    # Alpaca
-    "ALPACA_API_KEY", "ALPACA_API_SECRET", "ALPACA_BASE_URL", "ALPACA_API_VERSION",
-
     # Forex data providers (utilisés par MT5)
     "TWELVEDATA_API_KEY", "ALPHAVANTAGE_API_KEY", "FOREX_DATA_PROVIDER",
     "FOREX_DEFAULT_LEVERAGE", "FOREX_MARGIN_CALL_LEVEL", "FOREX_STOP_OUT_LEVEL",
 
     # Trading
-    "INSTRUMENTS", "GRANULARITY", "HTF_GRANULARITY", "D1_GRANULARITY",
+    "GRANULARITY", "HTF_GRANULARITY", "D1_GRANULARITY",
     "W1_GRANULARITY", "N_CANDLES",
 
     # Indicators
@@ -578,13 +472,8 @@ __all__ = [
     "ICHIMOKU_SENKOU_SPAN_B", "ICHIMOKU_DISPLACEMENT", "VWAP_WINDOW",
 
     # Paramètres par classe d'actifs
-    "EMA_FAST_CRYPTO", "EMA_SLOW_CRYPTO", "ADX_TREND_CRYPTO", "SCORE_MIN_CRYPTO",
-    "SL_ATR_MULT_CRYPTO", "TP_ATR_MULT_CRYPTO",
     "EMA_FAST_FOREX", "EMA_SLOW_FOREX", "ADX_TREND_FOREX", "SCORE_MIN_FOREX",
     "SL_ATR_MULT_FOREX", "TP_ATR_MULT_FOREX", "FOREX_NEWS_AVOID_MINUTES",
-    "EMA_FAST_STOCK", "EMA_SLOW_STOCK", "ADX_TREND_STOCK", "SCORE_MIN_STOCK",
-    "SL_ATR_MULT_STOCK", "TP_ATR_MULT_STOCK", "ALLOW_SHORT_STOCK",
-
     # Risk Management
     "RISK_PCT", "SL_ATR_MULT", "TP_ATR_MULT", "TRAIL_ATR_MULT", "TRAIL_ACTIVATE_ATR_MULT", "BE_ATR_MULT",
     "SCORE_MIN", "SCORE_MODE", "MAX_DAILY_LOSS_PCT", "MAX_MONTHLY_LOSS_PCT", "MAX_OPEN_POSITIONS",
@@ -629,20 +518,16 @@ __all__ = [
     # News & Sentiment
     "NEWS_AVOIDANCE_BEFORE", "NEWS_AVOIDANCE_AFTER", "NEWS_RISK_REDUCTION_FACTOR",
     "NEWS_HIGH_IMPACT_ONLY", "NEWS_ASSETS", "NEWS_UPDATE_INTERVAL",
-    "FEAR_GREED_API", "COINGECKO_API", "CRYPTOCOMPARE_API", "CRYPTOCOMPARE_API_KEY", "FOREXFACTORY_API",
+    "FEAR_GREED_API", "FOREXFACTORY_API",
     "FEAR_GREED_EXTREME_FEAR", "FEAR_GREED_EXTREME_GREED",
 
     # Webhook
-    "WEBHOOK_ENABLED", "WEBHOOK_SECRET", "WEBHOOK_HOST", "WEBHOOK_PORT",
-
     # Sessions
-    "FOREX_SESSIONS_UTC", "USE_LIQUIDITY_FILTER", "HIGH_LIQUIDITY_HOURS_UTC",
-
-    # Logging
+    "FOREX_SESSIONS_UTC", # Logging
     "LOG_LEVEL", "LOG_DIR", "LOG_FILE", "TRADE_LOG_FILE", "ERROR_LOG_FILE", "BUG_LOG_FILE",
 
     # Development
-    "BACKTEST_MODE", "LOG_TRADES", "ENABLE_DASHBOARD",
+    "LOG_TRADES", "ENABLE_DASHBOARD",
 
     # DB
     "DB_PATH",

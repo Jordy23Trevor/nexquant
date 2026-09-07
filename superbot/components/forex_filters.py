@@ -1,14 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 log = logging.getLogger("forex_filters")
-
-
-def is_london_session() -> bool:
-    """
-    [DEPRECATED — utilisez is_market_open()] Compatibilité ascendante.
-    """
-    return is_market_open()
 
 
 def is_market_open() -> bool:
@@ -26,7 +19,7 @@ def is_market_open() -> bool:
     Returns:
         True si au moins une session est ouverte et ce n'est pas le week-end.
     """
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc)
     hour = now_utc.hour
     weekday = now_utc.weekday()  # 0=Lundi, 5=Samedi, 6=Dimanche
 

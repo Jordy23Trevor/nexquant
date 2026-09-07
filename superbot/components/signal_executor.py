@@ -47,10 +47,23 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
                 bot.failed_execution_cooldowns.pop(symbol, None)
             bot._save_cooldowns()
             
-    # Bloquer le pyramidage si une position existe déjà (vérifier avec le symbole normalisé)
-    if bot.positions.get(normalized_symbol, {}).get('size', 0) > 0:
-        log.info(f"🚫 Trade {symbol} rejeté : Position déjà ouverte (pyramidage bloqué).")
-        return
+    # Bloquer le pyramidage ou clôturer en cas de signal inverse confirmé
+    existing_pos = bot.positions.get(normalized_symbol, {})
+    existing_size = existing_pos.get('size', 0)
+    if existing_size > 0:
+        existing_side = existing_pos.get('side', '')  # 'LONG' ou 'SHORT'
+        cand_side = "LONG" if signal_data.get('should_long') else ("SHORT" if signal_data.get('should_short') else "")
+        if existing_side and cand_side and existing_side != cand_side:
+            log.warning(
+                f"🔄 [Reversal] Inversion de marché détectée sur {symbol} : Position {existing_side} ouverte, "
+                f"nouveau signal {cand_side} (Score: {signal_data.get('total_score', 0):.1f}). "
+                f"Fermeture immédiate de la position {existing_side} pour protéger le capital..."
+            )
+            bot.broker.close_position(normalized_symbol, reason=f"Reversal -> {cand_side}")
+            return
+        else:
+            log.info(f"🚫 Trade {symbol} rejeté : Position déjà ouverte dans la même direction (pyramidage bloqué).")
+            return
 
     # ── Audit post-freeze (fix 24/07/2026) ──────────────────────────────────
     # Après un freeze long du cycle (ex: 6h26 à cause d'une erreur DNS),
@@ -175,10 +188,10 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         if not check_crypto_volume(symbol, df_with_indicators):
             return
 
-    # 2c. Filtre de dominance BTC pour les altcoins
+    # 2c. Filtre de dominance BTC pour les altcoins (MT5 crypto CFDs)
     # Ne pas ouvrir un SHORT sur un altcoin si BTC est en tendance haussière forte
     if symbol_asset_class == "crypto" and 'BTC' not in symbol.upper():
-        btc_symbol = 'BTC/USDT'
+        btc_symbol = 'BTCUSD'
         if btc_symbol in bot.market_data and not bot.market_data[btc_symbol].empty:
             btc_df = bot.market_data[btc_symbol]
             btc_last = btc_df.iloc[-1]
@@ -194,14 +207,6 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
             if signal_data['should_long'] and btc_bearish_trend:
                 log.info(f"🚨 Filtre dominance BTC : LONG {symbol} rejeté — BTC est en tendance baissière forte (ADX={btc_adx:.1f})")
                 return
-
-    # 2e. Blocage double-filet des SHORTs sur ETF/Stocks (Alpaca)
-    # Même si la stratégie laisse passer un SHORT, l'executor bloque en dernière ligne
-    if bot.broker.get_asset_type() in ('stock', 'alpaca', 'equity'):
-        allow_short = getattr(bot, 'config', {}).get('ALLOW_SHORT_STOCK', False)
-        if signal_data.get('should_short') and not allow_short:
-            log.info(f"🚫 SHORT {symbol} bloqué au niveau executor (ETF/Stock — ALLOW_SHORT_STOCK=false)")
-            return
 
     # 3. Déterminer le stop loss et take profit via le Risk Manager
     atr_value = float(df_with_indicators.iloc[-1].get('atr', 0))
@@ -296,6 +301,33 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
             f"Boost de taille : ×{conviction_boost:.2f}"
         )
 
+    # ── VALIDATION MACHINE LEARNING (OnlineLearner / EnsembleScorer) ─────────
+    win_prob = 0.5
+    if getattr(bot, 'online_learner', None):
+        try:
+            latest_bar = df_with_indicators.iloc[-1]
+            ml_ctx = {
+                'regime': signal_data.get('market_regime', 'ranging'),
+                'session': getattr(bot.session_manager.get_current_session(), 'name', 'LONDON') if getattr(bot, 'session_manager', None) else 'LONDON',
+                'spread_pips': max_open_corr,
+                'strategy_name': signal_data.get('strategy_used', 'UNKNOWN'),
+            }
+            win_prob = bot.online_learner.get_prediction(latest_bar, ml_ctx)
+            if 'details' not in signal_data or not isinstance(signal_data['details'], dict):
+                signal_data['details'] = {}
+            signal_data['details']['win_prob'] = win_prob
+
+            # Si le modèle est entraîné et prédit une faible probabilité de succès (<35%), on rejette
+            scorer = getattr(bot.online_learner, 'scorer', None)
+            if scorer and getattr(scorer, 'is_trained', False) and win_prob < 0.35:
+                log.warning(f"🤖 [OnlineLearner] Trade {symbol} rejeté : Probabilité ML de gain trop faible ({win_prob:.1%})")
+                return
+            elif win_prob > 0.65:
+                conviction_boost = min(conviction_boost * 1.15, 1.50)
+                log.info(f"🤖 [OnlineLearner] Boost probabilité ML ({win_prob:.1%}) appliqué pour {symbol} -> Boost={conviction_boost:.2f}")
+        except Exception as _ml_e:
+            log.debug(f"Erreur prédiction OnlineLearner ({symbol}): {_ml_e}")
+
     # 3. Calculer la taille de position avec le Risk Manager
     position_size, size_details = bot.risk_manager.calculate_position_size(
         account_balance=account_balance,
@@ -384,6 +416,9 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
             'win_prob': float(signal_data.get('details', {}).get('win_prob', 0.0))
         }
 
+        # Stratégie ayant généré le signal
+        strat_name = signal_data.get('strategy_used', signal_data.get('strategy_name', 'MURPHY_TREND'))
+
         # Enregistrer le trade pour le suivi du risque
         trade_record = {
             'symbol': symbol,
@@ -396,6 +431,7 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'signal_score': signal_data['total_score'],
             'market_regime': signal_data['market_regime'],
+            'strategy_name': strat_name,
             'broker': getattr(bot, 'active_broker_type', BROKER_TYPE)
         }
         # Inclure les indicateurs pour le Walk-Forward et la traçabilité des paramètres
@@ -409,8 +445,9 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
 
         # Mettre à jour la position suivie
         bot._update_position_tracking(symbol, side, position_size, entry_price, sl_price, tp_price,
-                                        market_regime=signal_data.get('market_regime', 'UNKNOWN'),
-                                        features=features_dict)
+                                      market_regime=signal_data.get('market_regime', 'UNKNOWN'),
+                                      features=features_dict,
+                                      strategy_name=strat_name)
 
     else:
         log.error(f"Échec de l'exécution du trade pour {symbol}. Activation du cooldown de 15 minutes.")

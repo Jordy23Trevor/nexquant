@@ -20,18 +20,25 @@ class TradingStrategy:
     Stratégie de trading unifiée pour MT5 (Matières Premières & Devises).
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, db=None, indicators=None, **kwargs):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, db=None, indicators=None, online_learner=None, knowledge_feeder=None, **kwargs):
         from superbot.brain.strategy_engine import StrategyEngine
         from superbot.brain.regime_detector import MarketRegimeDetector
 
         self.config = config or {}
         self.db = db
         self.indicators = indicators
+        self.online_learner = online_learner
+        self.knowledge_feeder = knowledge_feeder
         self.score_min = int(self.config.get('SCORE_MIN', 6))
         self.risk_per_trade = float(self.config.get('RISK_PCT', 1.0))
 
         self.regime_detector = MarketRegimeDetector(db=db)
-        self.strategy_engine = StrategyEngine(config=self.config, db=db)
+        self.strategy_engine = StrategyEngine(
+            config=self.config,
+            db=db,
+            online_learner=self.online_learner,
+            knowledge_feeder=self.knowledge_feeder
+        )
         log.info("TradingStrategy MT5 adaptative initialisée avec succès")
 
     def _calculate_potential_rr(self, latest: pd.Series, current_price: float, sl_atr_mult: float = 1.5, tp_atr_mult: float = 3.0, direction: str = 'long'):

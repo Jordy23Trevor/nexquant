@@ -56,7 +56,7 @@ class DataFetcher:
         '1h': '1h', '4h': '4h', '1d': '1d', '1w': '1wk',
     }
 
-    def __init__(self, broker_type: str = 'binance', cache_dir: Optional[Path] = None):
+    def __init__(self, broker_type: str = 'mt5', cache_dir: Optional[Path] = None):
         """
         Args:
             broker_type: Type de broker ('binance', 'alpaca', 'mt5', 'yfinance')

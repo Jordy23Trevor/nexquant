@@ -32,10 +32,12 @@ class StrategyEngine:
     Moteur de sélection dynamique et exécution des stratégies.
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, db=None, session_manager=None, **kwargs):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, db=None, session_manager=None, online_learner=None, knowledge_feeder=None, **kwargs):
         self.config = config or {}
         self.db = db
         self.session_manager = session_manager
+        self.online_learner = online_learner
+        self.knowledge_feeder = knowledge_feeder
 
         # Instanciation de la suite des 6 stratégies
         self.strategies: Dict[str, BaseStrategy] = {
@@ -46,6 +48,10 @@ class StrategyEngine:
             "LONDON_BREAKOUT": LondonBreakoutStrategy(self.config),
             "INTERMARKET_MOMENTUM": IntermarketMomentumStrategy(self.config),
         }
+        self._strategy_stats: Dict[str, Dict] = {
+            name: {"trades": 0, "wins": 0, "total_pnl": 0.0}
+            for name in self.strategies
+        }
         log.info("StrategyEngine MT5 initialisé avec 6 stratégies d'élite")
 
     def select_best_strategy(self, regime: str, session_name: Optional[str] = None, **kwargs) -> Tuple[str, float]:
@@ -53,7 +59,42 @@ class StrategyEngine:
         candidates = self._get_candidate_strategies(regime, [session_name] if session_name else ["LONDON"])
         if not candidates:
             return ('MURPHY_TREND', 0.5)
-        return (candidates[0], 1.0)
+            
+        best_strat = candidates[0]
+        best_score = -1.0
+        
+        for cand in candidates:
+            stats = self._strategy_stats.get(cand, {})
+            trades = stats.get("trades", 0)
+            wins = stats.get("wins", 0)
+            win_rate = wins / trades if trades > 0 else 0.5
+            
+            score = win_rate
+            if trades > 10:
+                if win_rate > 0.5:
+                    score += 0.2
+                elif win_rate < 0.3:
+                    score -= 0.2
+                    
+            if score > best_score:
+                best_score = score
+                best_strat = cand
+                
+        confidence = min(max(best_score, 0.1), 1.0)
+        return (best_strat, confidence)
+
+    def record_trade_result(self, strategy_name: str, symbol: str, pnl: float, rr: float = 0.0) -> None:
+        """Enregistre le résultat d'un trade pour une stratégie."""
+        if strategy_name not in self._strategy_stats:
+            self._strategy_stats[strategy_name] = {"trades": 0, "wins": 0, "total_pnl": 0.0}
+            
+        stats = self._strategy_stats[strategy_name]
+        stats["trades"] += 1
+        if pnl > 0:
+            stats["wins"] += 1
+        stats["total_pnl"] += pnl
+        
+        log.debug(f"Résultat trade pour {strategy_name} ({symbol}): PnL={pnl:.2f}, total_pnl={stats['total_pnl']:.2f}")
 
     def evaluate(
         self,
@@ -110,17 +151,13 @@ class StrategyEngine:
 
         # Si aucune stratégie ne déclenche avec 'should_long/should_short', on prend la première candidate par défaut
         if best_signal is None:
-            if not candidates:
-                first_strat = self.strategies["MURPHY_TREND"]
-            else:
-                first_strat = self.strategies.get(candidates[0], self.strategies["MURPHY_TREND"])
-            best_signal = first_strat.analyze(
-                df=df,
-                symbol=symbol,
-                regime=regime,
-                asset_class=asset_class,
-                current_price=current_price,
-                pip_size=pip_size
+            return SignalResult(
+                strategy_name="NONE",
+                market_regime=regime_type,
+                reason="Aucun signal déclenché",
+                should_long=False,
+                should_short=False,
+                confidence=0.0
             )
 
         return best_signal
@@ -141,11 +178,15 @@ class StrategyEngine:
             ]
 
         # 2. Régimes de Range / Oscillations
-        elif regime_type in ["ranging", "choppy_noise"]:
+        elif regime_type == "ranging":
             candidates = [
                 "CHAN_MEAN_REVERSION",
                 "VOLMAN_PRICE_ACTION"
             ]
+
+        # 2b. Bruit / Choppy
+        elif regime_type == "choppy_noise":
+            candidates = []
 
         # 3. Régimes de Compression / Breakout
         elif regime_type in ["pre_breakout", "breakout"]:
@@ -180,9 +221,18 @@ class StrategyEngine:
         return candidates
 
     def get_strategy_leaderboard(self) -> list:
-        return sorted(
-            [{'name': name, 'trades': 0, 'win_rate': 0.0, 'pnl': 0.0}
-             for name in self.strategies],
-            key=lambda x: x.get('pnl', 0), reverse=True
-        )
+        board = []
+        for name in self.strategies:
+            stats = self._strategy_stats.get(name, {})
+            trades = stats.get("trades", 0)
+            wins = stats.get("wins", 0)
+            win_rate = wins / trades if trades > 0 else 0.0
+            pnl = stats.get("total_pnl", 0.0)
+            board.append({
+                'name': name,
+                'trades': trades,
+                'win_rate': win_rate,
+                'pnl': pnl
+            })
+        return sorted(board, key=lambda x: x['pnl'], reverse=True)
 

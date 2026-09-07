@@ -136,13 +136,6 @@ def load_global_trades():
     ORPHAN_THRESHOLD_HOURS = 24
 
     def infer_broker(symbol):
-        sym = symbol.upper()
-        crypto_keywords = ["USDT", "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOT", "LINK"]
-        if any(kw in sym for kw in crypto_keywords):
-            return "binance"
-        stock_keywords = ["SPY", "QQQ", "AAPL", "TSLA", "MSFT"]
-        if any(kw in sym for kw in stock_keywords):
-            return "alpaca"
         return "mt5"
 
     def is_orphan(t):
@@ -2758,13 +2751,7 @@ function renderSignalsAndTradesTable() {
   });
 
   function inferBrokerFromSymbol(symbol) {
-    if (!symbol) return 'mt5';
-    const sym = symbol.toUpperCase();
-    const crypto_keywords = ["USDT", "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOT", "LINK"];
-    if (crypto_keywords.some(kw => sym.includes(kw))) return "binance";
-    const stock_keywords = ["SPY", "QQQ", "AAPL", "TSLA", "MSFT"];
-    if (stock_keywords.some(kw => sym.includes(kw))) return "alpaca";
-    return "mt5";
+    return 'mt5';
   }
 
   let filtered = combined;

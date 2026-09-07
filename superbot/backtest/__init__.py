@@ -8,8 +8,8 @@ Usage :
     from superbot.backtest.engine import BacktestEngine
     from superbot.backtest.report import BacktestReport
 
-    fetcher = DataFetcher(broker_type='binance')
-    df = fetcher.fetch('BTCUSDT', '1h', start='2024-01-01', end='2024-12-31')
+    fetcher = DataFetcher(broker_type='mt5')
+    df = fetcher.fetch('EURUSD', '1h', start='2024-01-01', end='2024-12-31')
 
     engine = BacktestEngine(df, config)
     results = engine.run(strategy)

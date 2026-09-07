@@ -126,7 +126,6 @@ class BugWatchdog:
         checks = [
             self._check_broker_connectivity,
             self._check_api_response_integrity,
-            self._check_webhook_integrity,
             self._check_risk_manager_coherence,
             self._check_cycle_latency,
             self._check_unhandled_exceptions,
@@ -193,32 +192,6 @@ class BugWatchdog:
         except Exception as e:
             return ("broker_api", f"Erreur vérification intégrité API: {e}", "Medium", False)
 
-    def _check_webhook_integrity(self):
-        """Vérifie que le serveur webhook est toujours actif si activé."""
-        try:
-            from superbot.config import WEBHOOK_ENABLED
-            if not WEBHOOK_ENABLED:
-                return None
-            webhook_server = getattr(self.bot, "webhook_server", None)
-            if webhook_server is None:
-                return (
-                    "webhook",
-                    "Webhook activé dans la config mais serveur non initialisé",
-                    "Medium",
-                    False,
-                )
-            # Vérifier si le thread du serveur est vivant
-            server_thread = getattr(webhook_server, "_thread", None) or getattr(webhook_server, "thread", None)
-            if server_thread and not server_thread.is_alive():
-                return (
-                    "webhook",
-                    "Thread du serveur webhook n'est plus actif",
-                    "High",
-                    False,
-                )
-            return None
-        except Exception as e:
-            return ("webhook", f"Erreur vérification webhook: {e}", "Low", False)
 
     def _check_risk_manager_coherence(self):
         """Vérifie la cohérence du risk_manager : paramètres valides, positions cohérentes."""

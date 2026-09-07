@@ -487,50 +487,17 @@ class TechnicalIndicators:
 
     def get_market_regime_with_confidence(self, df: pd.DataFrame) -> tuple:
         """
-        Détermine le régime de marché avec un score de confiance ML.
-
-        Utilise le modèle HMM (Phase 2) si le fichier .pkl est disponible,
-        sinon replie sur la règle ADX classique (ADX > seuil -> TRENDING).
-
-        Args:
-            df: DataFrame avec les indicateurs calculés
-
-        Returns:
-            Tuple (regime: str, confidence: float, hmm_state: int)
-            - regime     : 'TRENDING' ou 'RANGING'
-            - confidence : probabilité de l'état prédit (0.5 si fallback ADX)
-            - hmm_state  : index de l'état HMM (-1 si fallback ADX)
+        Détermine le régime de marché simple (TRENDING ou RANGING) via ADX.
         """
         if len(df) == 0:
             return 'RANGING', 0.5, -1
 
-        # Chargement lazy du modèle HMM (une seule fois)
-        if not self._hmm_loaded:
-            self._hmm_loaded = True
-            try:
-                from superbot.ml.regime_detector import MarketRegimeDetector
-                self._regime_detector = MarketRegimeDetector.load()
-                if self._regime_detector._is_trained:
-                    log.info("[TechnicalIndicators] Modèle HMM chargé avec succès.")
-                else:
-                    log.info("[TechnicalIndicators] HMM non entraîné — fallback ADX actif.")
-            except Exception as e:
-                log.debug(f"[TechnicalIndicators] HMM indisponible ({e}) — fallback ADX.")
-                self._regime_detector = None
-
-        # Prédiction HMM si disponible
-        if self._regime_detector is not None and self._regime_detector._is_trained:
-            try:
-                regime, confidence, hmm_state = self._regime_detector.predict(df)
-                return regime, confidence, hmm_state
-            except Exception as e:
-                log.debug(f"[TechnicalIndicators] Erreur HMM ({e}) — fallback ADX")
-
-        # Fallback : heuristique ADX + squeeze Bollinger (discriminante).
-        from superbot.ml.regime_detector import heuristic_regime
+        last_row = df.iloc[-1]
+        adx = float(last_row.get('adx', 20.0))
         adx_threshold = self.config.get('ADX_TREND', 22.0)
-        regime = heuristic_regime(df, adx_threshold)
-        return regime, 0.50, -1
+        regime = 'TRENDING' if adx >= adx_threshold else 'RANGING'
+        conf = min(0.9, 0.5 + abs(adx - adx_threshold) / 50.0)
+        return regime, conf, -1
 
     def is_uptrend(self, df: pd.DataFrame) -> bool:
         """

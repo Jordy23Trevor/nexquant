@@ -22,12 +22,7 @@ if "--dashboard-port" in sys.argv:
     except IndexError:
         pass
 
-if "--webhook-port" in sys.argv:
-    try:
-        idx = sys.argv.index("--webhook-port")
-        os.environ["WEBHOOK_PORT"] = sys.argv[idx + 1]
-    except IndexError:
-        pass
+
 # ----------------------------------------
 
 # S'assurer que le dossier racine du projet est dans le path
@@ -68,9 +63,8 @@ import traceback
 
 # Importer les modules du SuperBot
 from superbot.config import (
-    BROKER_TYPE, ALLOW_LIVE_TRADING, INSTRUMENTS, GRANULARITY,
-    LOG_LEVEL, LOG_FILE, ENABLE_DASHBOARD, WEBHOOK_ENABLED,
-    WEBHOOK_SECRET, WEBHOOK_HOST, WEBHOOK_PORT,
+    BROKER_TYPE, ALLOW_LIVE_TRADING, GRANULARITY,
+    LOG_LEVEL, LOG_FILE, ENABLE_DASHBOARD,
     
     # Risk Management
     RISK_PCT, MAX_DAILY_LOSS_PCT, MAX_MONTHLY_LOSS_PCT, MAX_OPEN_POSITIONS,
@@ -91,20 +85,12 @@ from superbot.config import (
     ICHIMOKU_SENKOU_SPAN_B, ICHIMOKU_DISPLACEMENT, VWAP_WINDOW,
 
     # Paramètres par classe d'actifs (P0 — refactoring stratégie)
-    EMA_FAST_CRYPTO, EMA_SLOW_CRYPTO, ADX_TREND_CRYPTO, SCORE_MIN_CRYPTO,
-    SL_ATR_MULT_CRYPTO, TP_ATR_MULT_CRYPTO,
     EMA_FAST_FOREX, EMA_SLOW_FOREX, ADX_TREND_FOREX, SCORE_MIN_FOREX,
     SL_ATR_MULT_FOREX, TP_ATR_MULT_FOREX, FOREX_NEWS_AVOID_MINUTES,
-    EMA_FAST_STOCK, EMA_SLOW_STOCK, ADX_TREND_STOCK, SCORE_MIN_STOCK,
-    SL_ATR_MULT_STOCK, TP_ATR_MULT_STOCK, ALLOW_SHORT_STOCK,
     # News & Sentiment
     NEWS_ASSETS, NEWS_UPDATE_INTERVAL, NEWS_AVOIDANCE_BEFORE, NEWS_AVOIDANCE_AFTER,
     NEWS_RISK_REDUCTION_FACTOR, NEWS_HIGH_IMPACT_ONLY, FEAR_GREED_EXTREME_FEAR,
-    FEAR_GREED_EXTREME_GREED, CRYPTOCOMPARE_API_KEY,
-
-    # Filtres crypto
-    CRYPTO_BLACKLIST, CRYPTO_SCORE_MIN, CRYPTO_BUY_BLOCK_BTC_DROP, CRYPTO_BNB_VOLUME_FACTOR,
-    COMMISSION_PCT, SLIPPAGE_PCT,
+    FEAR_GREED_EXTREME_GREED,
 
     # ⚡ V3 — Cycle, performances et sessions
     CYCLE_TIME, SYMBOL_TIMEOUT_SECONDS, MAX_PARALLEL_SYMBOLS,
@@ -548,13 +534,9 @@ class SuperBot:
 
     def _build_strategy(self, active_broker_type: str):
         """Construit la TradingStrategy avec les paramètres par classe d'actif."""
-        # Ajuster les commissions et slippage selon le broker actif pour éviter de brider le R:R
-        actual_commission = COMMISSION_PCT
-        actual_slippage = SLIPPAGE_PCT
-        if active_broker_type == "alpaca":
-            actual_commission = 0.0  # Commission zéro sur Alpaca US Stocks/ETFs
-        elif active_broker_type == "binance":
-            actual_commission = 0.04  # Commission moyenne Binance Futures (0.02% maker, 0.04% taker)
+        # On ne traite que MT5, pas besoin d'ajustement particulier pour commission selon binance/alpaca
+        actual_commission = COMMISSION_PCT if 'COMMISSION_PCT' in globals() else 0.0
+        actual_slippage = SLIPPAGE_PCT if 'SLIPPAGE_PCT' in globals() else 0.0
 
         return TradingStrategy({
             'SCORE_MIN': self.adaptive_score_min,
@@ -584,22 +566,10 @@ class SuperBot:
             'ICHIMOKU_SENKOU_SPAN_B': ICHIMOKU_SENKOU_SPAN_B,
             'ICHIMOKU_DISPLACEMENT': ICHIMOKU_DISPLACEMENT,
             'VWAP_WINDOW': VWAP_WINDOW,
-            # Filtres crypto
-            'CRYPTO_BLACKLIST': CRYPTO_BLACKLIST,
-            'CRYPTO_SCORE_MIN': CRYPTO_SCORE_MIN,
-            'CRYPTO_BUY_BLOCK_BTC_DROP': CRYPTO_BUY_BLOCK_BTC_DROP,
-            'CRYPTO_BNB_VOLUME_FACTOR': CRYPTO_BNB_VOLUME_FACTOR,
             'COMMISSION_PCT': actual_commission,
             'SLIPPAGE_PCT': actual_slippage,
             # Paramètres par classe d'actifs
             'BROKER_TYPE': active_broker_type,
-            # Crypto (Binance Futures)
-            'EMA_FAST_CRYPTO': EMA_FAST_CRYPTO,
-            'EMA_SLOW_CRYPTO': EMA_SLOW_CRYPTO,
-            'ADX_TREND_CRYPTO': ADX_TREND_CRYPTO,
-            'SCORE_MIN_CRYPTO': SCORE_MIN_CRYPTO,
-            'SL_ATR_MULT_CRYPTO': SL_ATR_MULT_CRYPTO,
-            'TP_ATR_MULT_CRYPTO': TP_ATR_MULT_CRYPTO,
             # Forex (MT5)
             'EMA_FAST_FOREX': EMA_FAST_FOREX,
             'EMA_SLOW_FOREX': EMA_SLOW_FOREX,
@@ -608,15 +578,7 @@ class SuperBot:
             'SL_ATR_MULT_FOREX': SL_ATR_MULT_FOREX,
             'TP_ATR_MULT_FOREX': TP_ATR_MULT_FOREX,
             'FOREX_NEWS_AVOID_MINUTES': FOREX_NEWS_AVOID_MINUTES,
-            # ETF/Stocks (Alpaca)
-            'EMA_FAST_STOCK': EMA_FAST_STOCK,
-            'EMA_SLOW_STOCK': EMA_SLOW_STOCK,
-            'ADX_TREND_STOCK': ADX_TREND_STOCK,
-            'SCORE_MIN_STOCK': SCORE_MIN_STOCK,
-            'SL_ATR_MULT_STOCK': SL_ATR_MULT_STOCK,
-            'TP_ATR_MULT_STOCK': TP_ATR_MULT_STOCK,
-            'ALLOW_SHORT_STOCK': ALLOW_SHORT_STOCK,
-        }, indicators=self.technical_indicators)
+        }, indicators=self.technical_indicators, online_learner=self.online_learner, knowledge_feeder=self.knowledge_feeder)
 
     def _build_news_manager(self):
         """Construit le gestionnaire de nouvelles."""
@@ -629,7 +591,7 @@ class SuperBot:
             'NEWS_HIGH_IMPACT_ONLY': NEWS_HIGH_IMPACT_ONLY,
             'FEAR_GREED_EXTREME_FEAR': FEAR_GREED_EXTREME_FEAR,
             'FEAR_GREED_EXTREME_GREED': FEAR_GREED_EXTREME_GREED,
-            'CRYPTOCOMPARE_API_KEY': CRYPTOCOMPARE_API_KEY
+            'CRYPTOCOMPARE_API_KEY': os.getenv('CRYPTOCOMPARE_API_KEY', '')
         })
 
     def _initialize_components(self):
@@ -716,7 +678,7 @@ class SuperBot:
                     self.initial_balance = 10000.0
 
             # Déterminer les instruments selon le broker (clés spécifiques au broker en priorité)
-            broker_type = active_broker_type  # "binance", "alpaca", "mt5"
+            broker_type = active_broker_type
             broker_key = f"INSTRUMENTS_{broker_type.upper()}"  # ex: INSTRUMENTS_MT5
             env_instruments_broker = os.getenv(broker_key)
             env_instruments_generic = os.getenv("INSTRUMENTS")
@@ -752,23 +714,8 @@ class SuperBot:
                 except Exception as e:
                     log.warning(f"Impossible de charger les instruments crypto MT5 : {e}")
 
-            # Filtre multi-devises : ne rejeter les paires croisées que sur Binance
-            # (MT5 convertit nativement le PnL des croisées).
-            supported_instruments = []
-            for symbol in self.instruments:
-                normalized = symbol.upper().replace("/", "")
-                # Pour Alpaca, pas de concept de paires de devises croisées (ce sont des actions/ETFs cotés en USD)
-                if active_broker_type == "alpaca":
-                    supported_instruments.append(symbol)
-                # MT5 gère nativement les paires croisées — les accepter toutes
-                elif active_broker_type == "mt5":
-                    supported_instruments.append(symbol)
-                # Si le symbole finit par USD (ou USDT, USDC, BUSD) ou commence par USD, on l'accepte
-                elif normalized.endswith("USD") or normalized.endswith("USDT") or normalized.endswith("USDC") or normalized.endswith("BUSD") or normalized.startswith("USD"):
-                    supported_instruments.append(symbol)
-                else:
-                    log.warning(f"🚨 PAIRE CROISÉE DÉTECTÉE ({symbol}) : La conversion PnL automatique sans USD comme devise de base ou de cotation n'est pas supportée. Actif désactivé.")
-            self.instruments = supported_instruments
+            # MT5 gère nativement les paires croisées — les accepter toutes
+            pass
 
             news_broker_key = f"NEWS_ASSETS_{active_broker_type.upper()}"
             env_news_assets_broker = os.getenv(news_broker_key)
@@ -881,7 +828,7 @@ class SuperBot:
           4. au changement de mois, rapproche les positions de la cible :
              ordres market si TSMOM_PLACE_ORDERS=true, sinon dry-run (log seul).
 
-        Un seul broker à la fois : alpaca→SPY, mt5→XAUUSD, binance→BTC/USDT.
+        Un seul broker à la fois : mt5→XAUUSD.
         sl/tp = 0 signifie « pas de stop » (hold mensuel) — comportement à
         valider par broker avant tout placement réel.
         """
@@ -1084,21 +1031,6 @@ class SuperBot:
             except Exception as e:
                 log.error(f"Erreur lors du démarrage du dashboard : {e}")
 
-        # Démarrer le webhook server si activé
-        if WEBHOOK_ENABLED:
-            try:
-                from superbot.webhook.server import WebhookServer
-                self.webhook_server = WebhookServer(
-                    host=WEBHOOK_HOST,
-                    port=WEBHOOK_PORT,
-                    webhook_secret=WEBHOOK_SECRET,
-                    callback_func=self._process_webhook_signal
-                )
-                self.webhook_server.start()
-                log.info(f"Serveur Webhook démarré sur {WEBHOOK_HOST}:{WEBHOOK_PORT}")
-            except Exception as e:
-                log.error(f"Erreur lors du démarrage du serveur Webhook : {e}")
-
         # Démarrer la boucle principale dans un thread séparé
         self.main_thread = threading.Thread(target=self._main_loop, daemon=True)
         self.main_thread.start()
@@ -1157,14 +1089,6 @@ class SuperBot:
                 log.info("Dashboard arrêté")
             except Exception as e:
                 log.error(f"Erreur lors de l'arrêt du dashboard : {e}")
-
-        # Arrêter le serveur webhook
-        if hasattr(self, 'webhook_server') and self.webhook_server:
-            try:
-                self.webhook_server.stop()
-                log.info("Serveur Webhook arrêté")
-            except Exception as e:
-                log.error(f"Erreur lors de l'arrêt du serveur Webhook : {e}")
 
         # Attendre la fin du thread principal
         if hasattr(self, 'main_thread') and self.main_thread.is_alive():
@@ -1319,22 +1243,6 @@ class SuperBot:
                     # Ne pas chercher à ouvrir de nouvelles positions sur cet actif
                     return
 
-            # 🕒 FILTRE SESSION US (Alpaca/Stocks)
-            if self.broker.get_asset_type() == "stock":
-                market_is_open = True
-                
-                # Vérification API officielle Alpaca
-                if hasattr(self.broker, '_api') and hasattr(self.broker._api, 'get_clock'):
-                    try:
-                        clock = self.broker._api.get_clock()
-                        market_is_open = clock.is_open
-                    except Exception as e:
-                        log.warning(f"Erreur vérification horloge Alpaca : {e}")
-                        market_is_open = False # Par précaution
-                        
-                if not market_is_open:
-                    log.debug(f"Marché US fermé (Alpaca API) : skip {symbol}")
-                    return
 
             # 3. Analyser le marché et générer un signal de trading (avec cache de cycle)
             strategy_start = time.time()
@@ -1519,26 +1427,41 @@ class SuperBot:
         new_sl = pos_risk.get('stop_loss', 0.0)
         theoretical_tp = pos_risk.get('take_profit', 0.0)
 
-        # Recalculer le TP théorique si manquant
-        if theoretical_tp == 0.0:
-            entry_price = pos_risk.get('entry_price', current_price)
-            side = pos_risk.get('side', 'LONG')
-            _, theoretical_tp = self.risk_manager.calculate_sl_tp_levels(
+        # Recalculer le SL et/ou TP théorique si manquant (ex: TSMOM ou ordre ouvert sans SL/TP)
+        entry_price = pos_risk.get('entry_price', current_price)
+        side = pos_risk.get('side', 'LONG')
+        
+        calc_sl, calc_tp = 0.0, 0.0
+        if new_sl == 0.0 or broker_sl == 0.0 or theoretical_tp == 0.0 or broker_tp == 0.0:
+            calc_sl, calc_tp = self.risk_manager.calculate_sl_tp_levels(
                 entry_price=entry_price,
                 atr_value=atr_value,
                 position_side=side,
                 asset_type=self.broker.get_asset_type(),
                 symbol=symbol
             )
+
+        if (new_sl == 0.0 or broker_sl == 0.0) and calc_sl > 0:
+            new_sl = calc_sl
+            with self.risk_manager._history_lock:
+                if symbol in self.risk_manager.open_positions:
+                    self.risk_manager.open_positions[symbol]['stop_loss'] = new_sl
+            with self._lock:
+                if symbol in self.positions:
+                    self.positions[symbol]['stop_loss'] = new_sl
+            log.info(f"🛡️ Protection SL d'urgence calculée pour {symbol} : {new_sl:.5f}")
+
+        if (theoretical_tp == 0.0 or broker_tp == 0.0) and calc_tp > 0:
+            theoretical_tp = calc_tp
             with self.risk_manager._history_lock:
                 if symbol in self.risk_manager.open_positions:
                     self.risk_manager.open_positions[symbol]['take_profit'] = theoretical_tp
             with self._lock:
                 if symbol in self.positions:
                     self.positions[symbol]['take_profit'] = theoretical_tp
-            log.info(f"Recalcul du Take Profit théorique pour {symbol} : {theoretical_tp:.5f}")
+            log.info(f"🎯 Recalcul du Take Profit théorique pour {symbol} : {theoretical_tp:.5f}")
 
-        # Mettre à jour si le SL a changé de manière significative (Deadband > 0.2 ATR)
+        # Mettre à jour si le SL a changé de manière significative (Deadband > 0.2 ATR) ou si le broker n'a pas de SL/TP
         significant_move = abs(new_sl - old_sl) > (atr_value * 0.2)
         should_update_broker = (significant_move and new_sl > 0) or (broker_sl == 0.0 and new_sl > 0) or (broker_tp == 0.0 and theoretical_tp > 0)
 
@@ -1785,7 +1708,8 @@ class SuperBot:
 
     def _update_position_tracking(self, symbol: str, side: str, size: float, entry_price: float,
                                    stop_loss: float = 0.0, take_profit: float = 0.0,
-                                   market_regime: str = 'UNKNOWN', features: dict = None):
+                                   market_regime: str = 'UNKNOWN', features: dict = None,
+                                   strategy_name: str = 'UNKNOWN'):
         """
         Met à jour le suivi des positions ouvertes.
 
@@ -1798,6 +1722,7 @@ class SuperBot:
             take_profit: Niveau de Take Profit
             market_regime: Régime de marché au moment de l'ouverture
             features: Dictionnaire optionnel de caractéristiques (ML features)
+            strategy_name: Nom de la stratégie qui a initié le trade
         """
         position_side = "LONG" if side == "buy" else "SHORT"
 
@@ -1817,6 +1742,7 @@ class SuperBot:
                 'status': 'open',
                 # Régime de marché conservé pour être propagé à la clôture.
                 'market_regime': market_regime,
+                'strategy_name': strategy_name,
                 'features': features or {}
             }
 
@@ -1838,209 +1764,7 @@ class SuperBot:
             except Exception as e:
                 log.debug(f"Erreur envoi position (update tracking) télémétrie : {e}")
 
-    def _process_webhook_signal(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Traite un signal de trading reçu via Webhook (ex: TradingView).
-        """
-        try:
-            log.info(f"Traitement du signal Webhook : {data}")
 
-            # Vérifier le secret si configuré
-            secret = data.get('secret')
-            if WEBHOOK_SECRET and secret != WEBHOOK_SECRET:
-                log.warning("Secret de webhook invalide dans le payload")
-                return {"status": "error", "reason": "invalid_secret"}
-
-            # Adapter le payload pour TradingView (ticker -> symbol, position/strategy_position -> action, close -> price)
-            symbol = data.get('symbol') or data.get('ticker')
-            action = data.get('action') or data.get('strategy_position') or data.get('position')
-            if action:
-                action = str(action).lower()
-            else:
-                action = ''
-                
-            price = data.get('price') or data.get('close')
-            if price is not None:
-                try:
-                    price = float(price)
-                except (ValueError, TypeError):
-                    price = None
-            
-            if not symbol or not action:
-                log.warning(f"Champs manquants ou invalides dans le webhook : symbol={symbol}, action={action}")
-                return {"status": "error", "reason": "missing_fields"}
-
-            # Normaliser le symbole pour le broker
-            symbol = self.broker.normalize_symbol(symbol)
-
-            # 1. Action de fermeture / sortie
-            if action in ['exit', 'close', 'sell_all', 'buy_all']:
-                log.info(f"Demande de fermeture de position reçue via webhook pour {symbol}")
-                success = self.broker.close_position(symbol, reason="Webhook exit request")
-                if success:
-                    # Mettre à jour l'état local sous verrou : ce thread peut tourner
-                    # en parallèle des workers du cycle et du sync.
-                    with self._lock:
-                        if symbol in self.positions:
-                            del self.positions[symbol]
-                        if self.risk_manager and symbol in self.risk_manager.open_positions:
-                            del self.risk_manager.open_positions[symbol]
-                    return {"status": "success", "action": "closed", "symbol": symbol}
-                else:
-                    return {"status": "error", "reason": "failed_to_close", "symbol": symbol}
-
-            # 2. Action d'entrée (buy/sell)
-            if action not in ['buy', 'sell']:
-                return {"status": "error", "reason": f"unknown_action: {action}"}
-
-            # 🔒 Filtres de sécurité webhook (même pipeline que le trading automatique)
-
-            # A. Vérifier si le bot est en pause
-            if self.is_paused:
-                return {"status": "skipped", "reason": "bot_paused"}
-
-            # B. Vérifier les actifs bloqués
-            if symbol in self.blocked_symbols:
-                return {"status": "skipped", "reason": "symbol_blocked", "symbol": symbol}
-
-            # C. Vérifier si une position est déjà ouverte (anti-pyramidage)
-            if symbol in self.positions:
-                return {"status": "skipped", "reason": "position_already_open", "symbol": symbol}
-
-            # D. Vérifier le cooldown
-            with self._state_lock:
-                if symbol in self.failed_execution_cooldowns:
-                    time_since = time.time() - self.failed_execution_cooldowns[symbol]
-                    if time_since < 900:
-                        return {"status": "skipped", "reason": "cooldown_active", "symbol": symbol}
-
-            # E. Filtre session US (stocks/ETFs)
-            if self.broker.get_asset_type() == "stock":
-                market_is_open = True
-                # 1) Horloge officielle Alpaca (autoritaire, gère DST + jours fériés)
-                if hasattr(self.broker, '_api') and hasattr(self.broker._api, 'get_clock'):
-                    try:
-                        market_is_open = bool(self.broker._api.get_clock().is_open)
-                    except Exception as e:
-                        log.warning(f"Erreur horloge Alpaca (webhook) : {e}")
-                        market_is_open = False
-                else:
-                    # 2) Fallback DST-aware + week-end (pas d'API dispo)
-                    try:
-                        import zoneinfo
-                        et_tz = zoneinfo.ZoneInfo("America/New_York")
-                        now_et = datetime.now(et_tz)
-                        open_t = datetime.strptime("09:30", "%H:%M").time()
-                        close_t = datetime.strptime("16:00", "%H:%M").time()
-                        market_is_open = (now_et.weekday() < 5 and open_t <= now_et.time() <= close_t)
-                    except Exception:
-                        market_is_open = False
-                if not market_is_open:
-                    return {"status": "skipped", "reason": "outside_us_session", "symbol": symbol}
-
-            # F. Bloquer les SHORTs sur ETF/Stocks si non autorisé
-            if self.broker.get_asset_type() in ('stock', 'alpaca', 'equity'):
-                if action == 'sell' and not ALLOW_SHORT_STOCK:
-                    return {"status": "skipped", "reason": "short_blocked_stocks", "symbol": symbol}
-
-            if getattr(self, 'news_manager', None):
-                should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
-            else:
-                should_avoid, news_event = False, None
-            if should_avoid:
-                log.info(f"Signal webhook évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
-                return {"status": "skipped", "reason": "news_avoidance", "news_event": str(news_event) if news_event else None}
-
-            # Récupérer les prix SL/TP optionnels ou les calculer
-            sl_price = float(data.get('sl', 0))
-            tp_price = float(data.get('tp', 0))
-
-            # Si non fournis dans le webhook, essayer de les calculer avec l'ATR si on a des données de marché
-            if sl_price == 0 or tp_price == 0:
-                df = self._fetch_market_data(symbol)
-                if df is not None and not df.empty:
-                    df_with_indicators = self.technical_indicators.calculate_all_indicators(df.copy())
-                    atr_value = df_with_indicators.iloc[-1].get('atr', 0)
-                    if atr_value > 0:
-                        position_side = "LONG" if action == 'buy' else "SHORT"
-                        sl_price, tp_price = self.risk_manager.calculate_sl_tp_levels(
-                            price or self.broker.get_current_price(symbol), atr_value, position_side
-                        )
-                
-                # Fallback fixe si toujours pas calculable
-                if sl_price == 0 or tp_price == 0:
-                    entry = price or self.broker.get_current_price(symbol)
-                    risk_pct = RISK_PCT / 100.0
-                    if action == 'buy':
-                        sl_price = entry * (1 - risk_pct)
-                        tp_price = entry * (1 + risk_pct * 2)
-                    else:
-                        sl_price = entry * (1 + risk_pct)
-                        tp_price = entry * (1 - risk_pct * 2)
-
-            # Calculer la taille de position
-            account_balance = self.broker.get_balance()
-            entry_price = price or self.broker.get_current_price(symbol)
-            
-            position_size, size_details = self.risk_manager.calculate_position_size(
-                account_balance=account_balance,
-                entry_price=entry_price,
-                stop_loss=sl_price,
-                symbol=symbol,
-                sentiment_factor=self.news_manager.get_risk_factor() if self.news_manager else 1.0,
-                broker=self.broker
-            )
-
-            if position_size <= 0:
-                log.warning(f"Taille de position calculée nulle pour {symbol}")
-                return {"status": "error", "reason": "zero_position_size"}
-
-            # Vérifier les limites de risque globales (avec symbol pour check position existante)
-            if not self.risk_manager._can_take_new_trade(account_balance, symbol=symbol):
-                log.info(f"Limites de risque atteintes, pas d'exécution de webhook pour {symbol}")
-                return {"status": "skipped", "reason": "risk_limit_reached"}
-
-            # Exécuter l'ordre
-            log.info(f"Exécution du trade webhook : {action.upper()} {position_size:.6f} {symbol} @ {entry_price:.4f} | SL: {sl_price:.4f} | TP: {tp_price:.4f}")
-            order_result = self.broker.place_order(
-                symbol=symbol,
-                side=action,
-                amount=position_size,
-                sl=sl_price,
-                tp=tp_price,
-                comment=f"TradingView webhook signal - {action.upper()}"
-            )
-
-            if order_result:
-                with self._state_lock:
-                    self.stats['trades_executed'] += 1
-                
-                # Enregistrer le trade pour le suivi du risque
-                trade_record = {
-                    'symbol': symbol,
-                    'side': action,
-                    'entry_price': entry_price,
-                    'position_size': position_size,
-                    'stop_loss': sl_price,
-                    'take_profit': tp_price,
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                    'signal_score': data.get('strength', 1.0) * 10,
-                    'market_regime': 'Webhook Alert',
-                    'broker': self.active_broker_type
-                }
-                self.risk_manager.record_trade(trade_record)
-
-                # Mettre à jour la position suivie
-                self._update_position_tracking(symbol, action, position_size, entry_price, sl_price, tp_price)
-                return {"status": "success", "action": action, "symbol": symbol, "size": position_size, "entry": entry_price}
-            else:
-                log.error(f"Échec de l'exécution du trade webhook pour {symbol}")
-                return {"status": "error", "reason": "order_placement_failed"}
-
-        except Exception as e:
-            log.error(f"Erreur inattendue dans _process_webhook_signal : {e}")
-            log.debug(traceback.format_exc())
-            return {"status": "error", "reason": str(e)}
 
     def _update_dashboard(self):
         """
@@ -2201,21 +1925,23 @@ class SuperBot:
 
                 se = getattr(self, 'strategy_engine', None)
                 if se:
-                    lb = se.get_strategy_leaderboard()[:1]
+                    lb = se.get_strategy_leaderboard()
                     if lb:
                         top = lb[0]
                         brain_data['strategy'] = {
-                            'name': top.get('strategy', ''),
-                            'confidence': top.get('wr', 0),
+                            'name': top.get('name', 'MURPHY_TREND'),
+                            'confidence': top.get('win_rate', 0.0),
                             'trades': top.get('trades', 0),
+                            'pnl': top.get('pnl', 0.0)
                         }
 
                 pl = getattr(self, 'performance_learner', None)
                 if pl:
                     brain_data['learner_params'] = pl.get_current_params()
+                    blocked_set = pl._get_blocked_symbols() if hasattr(pl, '_get_blocked_symbols') else getattr(pl, '_blocked_symbols', set())
                     brain_data['blocked_symbols'] = [
                         {'symbol': sym, 'reason': '3 pertes consécutives'}
-                        for sym in getattr(pl, '_blocked_symbols', set())
+                        for sym in (blocked_set if isinstance(blocked_set, (set, list)) else [])
                     ]
                     brain_data['recent_decisions'] = getattr(pl, '_decisions_log', [])
 

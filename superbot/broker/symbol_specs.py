@@ -27,6 +27,9 @@ COMMODITY_ALIASES: Dict[str, str] = {
     # WTI Oil
     "XTIUSD": "XTIUSD",
     "WTI": "XTIUSD",
+    "WTIUSD": "XTIUSD",
+    "OIL": "XTIUSD",
+    "WTICRUDE": "XTIUSD",
     "USOIL": "XTIUSD",
     "USOILCASH": "XTIUSD",
     "WTICASH": "XTIUSD",
@@ -34,6 +37,7 @@ COMMODITY_ALIASES: Dict[str, str] = {
     # Brent Oil
     "XBRUSD": "XBRUSD",
     "BRENT": "XBRUSD",
+    "BRENTUSD": "XBRUSD",
     "UKOIL": "XBRUSD",
     "UKOILCASH": "XBRUSD",
     "BRN": "XBRUSD",
