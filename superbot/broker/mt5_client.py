@@ -319,6 +319,32 @@ class MT5Client(Broker):
             "filling_mode": getattr(info, "filling_mode", 0),
         }
 
+    def calculate_margin(self, symbol: str, volume: float, price: float = 0.0, side: str = "buy") -> Optional[float]:
+        """
+        Calcule la marge exacte requise en devise du compte via MT5 API.
+        Prend en compte l'effet de levier réel de l'instrument et les taux de conversion.
+        """
+        symbol = self.normalize_symbol(symbol)
+        if not mt5:
+            return None
+        try:
+            self._call_api(lambda: mt5.symbol_select(symbol, True), False)
+            order_type = mt5.ORDER_TYPE_BUY if side.lower() in ("buy", "long") else mt5.ORDER_TYPE_SELL
+            calc_price = price
+            if calc_price <= 0:
+                tick = self._call_api(lambda: mt5.symbol_info_tick(symbol), None)
+                if tick:
+                    calc_price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
+                else:
+                    return None
+            margin = self._call_api(lambda: mt5.order_calc_margin(order_type, symbol, volume, calc_price), None)
+            if margin is not None and margin > 0:
+                return float(margin)
+            return None
+        except Exception as e:
+            log.warning(f"Erreur lors du calcul de marge MT5 pour {symbol}: {e}")
+            return None
+
     def get_current_price(self, symbol: str) -> float:
         """Retourne le mid price actuel du symbole."""
         symbol = self.normalize_symbol(symbol)

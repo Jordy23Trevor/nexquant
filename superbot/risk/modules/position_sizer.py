@@ -200,35 +200,59 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
                 log.warning(f"Impossible de récupérer la marge disponible du broker pour {symbol}: {e}")
 
         # Calculer la taille maximale autorisée par la marge disponible (avec 5% de buffer)
-        is_buying_power_direct = (broker is not None and hasattr(broker, 'get_asset_type') and broker.get_asset_type() == "stock")
-        unit_notional = entry_price * contract_size
-        if is_buying_power_direct:
-            max_nominal = free_margin * 0.95
-            max_size_by_margin = max_nominal / unit_notional if unit_notional > 0 else 0.0
-        else:
-            max_nominal = free_margin * leverage * 0.95
-            max_size_by_margin = max_nominal / unit_notional if unit_notional > 0 else 0.0
+        side = 'buy' if entry_price >= stop_loss else 'sell'
+        margin_for_min_size = None
+        if broker is not None and hasattr(broker, 'calculate_margin') and free_margin is not None:
+            try:
+                margin_for_min_size = broker.calculate_margin(symbol, min_size, entry_price, side)
+            except Exception:
+                margin_for_min_size = None
 
-        # Si la taille maximale par rapport à la marge est inférieure au minimum du symbole
-        if max_size_by_margin < min_size:
-            log.warning(
-                f"❌ Marge disponible insuffisante pour la taille minimale sur {symbol}. "
-                f"Taille min requise: {min_size:.6f}, Max autorisé par marge: {max_size_by_margin:.6f} "
-                f"(Marge dispo: {free_margin:.2f}, Levier: {leverage}x)"
-            )
-            return 0.0, {
-                'error': 'Insufficient margin for minimum position size',
-                'free_margin': free_margin,
-                'leverage': leverage,
-                'min_size': min_size,
-                'max_size_by_margin': max_size_by_margin
-            }
+        if margin_for_min_size is not None and margin_for_min_size > 0:
+            usable_margin = free_margin * 0.95
+            if usable_margin < margin_for_min_size:
+                log.warning(
+                    f"❌ Marge disponible insuffisante pour la taille minimale sur {symbol}. "
+                    f"Taille min requise: {min_size:.6f}, Marge requise: {margin_for_min_size:.2f}€ "
+                    f"(Marge dispo: {free_margin:.2f}€)"
+                )
+                return 0.0, {
+                    'error': 'Insufficient margin for minimum position size',
+                    'free_margin': free_margin,
+                    'margin_required': margin_for_min_size,
+                    'min_size': min_size,
+                }
+            max_size_by_margin = (usable_margin / margin_for_min_size) * min_size
+        else:
+            is_buying_power_direct = (broker is not None and hasattr(broker, 'get_asset_type') and broker.get_asset_type() == "stock")
+            unit_notional = entry_price * contract_size
+            if is_buying_power_direct:
+                max_nominal = free_margin * 0.95
+                max_size_by_margin = max_nominal / unit_notional if unit_notional > 0 else 0.0
+            else:
+                max_nominal = free_margin * leverage * 0.95
+                max_size_by_margin = max_nominal / unit_notional if unit_notional > 0 else 0.0
+
+            # Si la taille maximale par rapport à la marge est inférieure au minimum du symbole
+            if max_size_by_margin < min_size:
+                log.warning(
+                    f"❌ Marge disponible insuffisante pour la taille minimale sur {symbol}. "
+                    f"Taille min requise: {min_size:.6f}, Max autorisé par marge: {max_size_by_margin:.6f} "
+                    f"(Marge dispo: {free_margin:.2f}, Levier: {leverage}x)"
+                )
+                return 0.0, {
+                    'error': 'Insufficient margin for minimum position size',
+                    'free_margin': free_margin,
+                    'leverage': leverage,
+                    'min_size': min_size,
+                    'max_size_by_margin': max_size_by_margin
+                }
 
         if position_size > max_size_by_margin:
             log.info(
                 f"⚠️ Taille de position restreinte par la marge disponible pour {symbol} : "
                 f"{position_size:.6f} -> {max_size_by_margin:.6f} "
-                f"(Marge disponible: {free_margin:.2f}, Levier: {leverage}x, Max nominal: {max_nominal:.2f})"
+                f"(Marge disponible: {free_margin:.2f}€, Max autorisé: {max_size_by_margin:.4f})"
             )
             position_size = max_size_by_margin
 
@@ -337,6 +361,8 @@ def _calculate_kelly_fraction_impl(rm) -> Optional[float]:
         wins_r = []
         for t in winning_trades:
             pnl = t.get('pnl', 0)
+            if pnl <= 0:
+                continue
             # Tenter de trouver le risque initial
             initial_risk = t.get('initial_risk_amount')
             if not initial_risk:
@@ -347,13 +373,17 @@ def _calculate_kelly_fraction_impl(rm) -> Optional[float]:
                     initial_risk = abs(entry - sl) * size
             # Fallback empirique pour les vieux trades: on assume que les gains sont de ~1.5 R
             if not initial_risk or initial_risk <= 0:
-                initial_risk = abs(pnl) / 1.5
+                initial_risk = max(abs(pnl) / 1.5, 1e-4)
 
-            wins_r.append(pnl / initial_risk)
+            if initial_risk > 0:
+                wins_r.append(pnl / initial_risk)
 
         losses_r = []
         for t in losing_trades:
             pnl = abs(t.get('pnl', 0))
+            if pnl <= 0:
+                losses_r.append(0.0)
+                continue
             initial_risk = t.get('initial_risk_amount')
             if not initial_risk:
                 entry = t.get('entry_price', 0)
@@ -363,24 +393,25 @@ def _calculate_kelly_fraction_impl(rm) -> Optional[float]:
                     initial_risk = abs(entry - sl) * size
             # Fallback empirique: on assume qu'une perte correspond à 1 R complet
             if not initial_risk or initial_risk <= 0:
-                initial_risk = abs(pnl)
+                initial_risk = max(pnl, 1e-4)
 
-            losses_r.append(pnl / initial_risk)
+            if initial_risk > 0:
+                losses_r.append(pnl / initial_risk)
 
         if not wins_r or not losses_r:
             log.debug(f"Kelly: pas de données R-Multiples valides pour le calcul")
             return None
 
         # Utiliser la médiane des R-Multiples pour réduire l'impact des valeurs aberrantes
-        avg_win = np.median(wins_r) if wins_r else 0
-        avg_loss = np.median(losses_r) if losses_r else 0
+        avg_win = float(np.median(wins_r)) if wins_r else 0.0
+        avg_loss = float(np.median(losses_r)) if losses_r else 0.0
 
-        if avg_loss == 0:
-            log.debug("Kelly: avg_loss = 0, impossible de calculer")
+        if avg_loss <= 0 or avg_win <= 0:
+            log.debug(f"Kelly: avg_loss={avg_loss} ou avg_win={avg_win} <= 0, impossible de calculer")
             return None
 
         # Ratio gain/perte
-        win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 0
+        win_loss_ratio = avg_win / avg_loss
 
         if win_loss_ratio <= 0:
             log.debug(f"Kelly: win_loss_ratio={win_loss_ratio} <= 0")

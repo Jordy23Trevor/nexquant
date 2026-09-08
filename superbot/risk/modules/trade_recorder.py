@@ -106,8 +106,10 @@ def load_trade_history_from_disk(rm):
                     try:
                         trade = json.loads(line.strip())
                         # Ne conserver que les trades clôturés AVEC un P&L valide
-                        # Un trade ouvert n'a pas de champ 'pnl' ou a 'status' != 'closed'
-                        if trade.get('status') == 'closed' and trade.get('pnl') is not None:
+                        # Un trade ouvert n'a pas de champ 'pnl'
+                        status = trade.get('status', 'closed' if trade.get('pnl') is not None else 'open')
+                        if status == 'closed' and trade.get('pnl') is not None:
+                            trade['status'] = 'closed'
                             loaded_trades.append(trade)
                     except Exception:
                         continue
@@ -149,6 +151,7 @@ def merge_broker_history(rm, broker_trades: List[Dict[str, Any]]):
             ts_str = str(ts)
             t_copy = t.copy()
 
+        t_copy.setdefault('status', 'closed')
         key = (t_copy.get('symbol'), t_copy.get('side'), ts_str)
         if key not in existing_keys:
             new_trades.append(t_copy)
