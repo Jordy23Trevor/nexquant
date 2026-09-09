@@ -15,6 +15,9 @@ class FrozenClock:
     def utcnow(self):
         return self._now
 
+    def now(self, tz=None):
+        return self._now
+
     def fromisoformat(self, value):
         return _dt.datetime.fromisoformat(value)
 

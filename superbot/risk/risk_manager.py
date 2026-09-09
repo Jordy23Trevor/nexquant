@@ -59,6 +59,7 @@ class RiskManager:
             # Paires JPY plus volatiles (150-250 pips/jour vs 60-100) : SL/TP élargis
             # pour éviter les fermetures prématurées tout en gardant un R:R de 1:2.
             'forex_jpy': {'sl': 2.0, 'tp': 4.0},
+            'commodity': {'sl': 1.8, 'tp': 3.6},
             'stock': {'sl': 2.0, 'tp': 4.0},
             'crypto': {'sl': 2.5, 'tp': 5.0}
         }
@@ -158,6 +159,11 @@ class RiskManager:
             daily_loss_pct = abs(min(0, self.daily_pnl)) / self.day_start_balance * 100
             if daily_loss_pct >= self.MAX_DAILY_LOSS_PCT:
                 log.critical(f"⚠️ KILL-SWITCH ACTIVÉ : Perte journalière ({daily_loss_pct:.2f}%) >= {self.MAX_DAILY_LOSS_PCT}%.")
+            effective_max_daily = self.MAX_DAILY_LOSS_PCT
+            if self.day_start_balance < 200.0:
+                effective_max_daily = max(self.MAX_DAILY_LOSS_PCT, 15.0)
+            if daily_loss_pct >= effective_max_daily:
+                log.critical(f"⚠️ KILL-SWITCH ACTIVÉ : Perte journalière ({daily_loss_pct:.2f}%) >= {effective_max_daily}%.")
                 return True
             if self.daily_pnl <= -self.MAX_DAILY_LOSS_AMOUNT:
                 log.critical(f"⚠️ KILL-SWITCH ACTIVÉ : Perte absolue journalière ({self.daily_pnl:.2f}) <= {-self.MAX_DAILY_LOSS_AMOUNT}.")
@@ -166,6 +172,11 @@ class RiskManager:
             monthly_loss_pct = abs(min(0, self.monthly_pnl)) / self.month_start_balance * 100
             if monthly_loss_pct >= self.MAX_MONTHLY_LOSS_PCT:
                 log.critical(f"⚠️ KILL-SWITCH ACTIVÉ : Perte mensuelle ({monthly_loss_pct:.2f}%) >= {self.MAX_MONTHLY_LOSS_PCT}%.")
+            effective_max_monthly = self.MAX_MONTHLY_LOSS_PCT
+            if self.month_start_balance < 200.0:
+                effective_max_monthly = max(self.MAX_MONTHLY_LOSS_PCT, 25.0)
+            if monthly_loss_pct >= effective_max_monthly:
+                log.critical(f"⚠️ KILL-SWITCH ACTIVÉ : Perte mensuelle ({monthly_loss_pct:.2f}%) >= {effective_max_monthly}%.")
                 return True
         return False
 

@@ -345,7 +345,24 @@ def run_main_loop(bot):
 
             if bot.is_paused:
                 bot._last_cycle_heartbeat = time.time()
-                log.info("😴 Bot en pause. En attente du signal de démarrage depuis la plateforme web...")
+                if getattr(bot, 'auto_unpause', False):
+                    if not hasattr(bot, '_paused_since') or bot._paused_since is None:
+                        bot._paused_since = time.time()
+                    elapsed_pause = time.time() - bot._paused_since
+                    delay = getattr(bot, 'auto_unpause_delay', 180)
+                    if elapsed_pause >= delay:
+                        log.info(f"🔄 [Auto-Unpause] Relance automatique du trading après {elapsed_pause:.0f}s de pause.")
+                        bot.is_paused = False
+                        bot._paused_since = None
+                        if hasattr(bot, '_drift_pause_until'):
+                            del bot._drift_pause_until
+                        if hasattr(bot, 'state_manager'):
+                            bot.state_manager.is_paused = False
+                            bot._save_cooldowns()
+                    else:
+                        log.info(f"😴 Bot en pause. Auto-unpause prévu dans {max(0, int(delay - elapsed_pause))}s...")
+                else:
+                    log.info("😴 Bot en pause. En attente du signal de démarrage depuis la plateforme web...")
                 cycle_duration = time.time() - cycle_start
                 if cycle_duration < target_cycle_time:
                     sleep_time = target_cycle_time - cycle_duration
@@ -354,6 +371,9 @@ def run_main_loop(bot):
                         time.sleep(min(1, sleep_time - slept))
                         slept += 1
                 continue
+            else:
+                if hasattr(bot, '_paused_since') and bot._paused_since is not None:
+                    bot._paused_since = None
 
             # 📅 RESET QUOTIDIEN DES BLOCAGES D'ACTIFS + BRAIN V3
             today = datetime.now().date()
@@ -471,12 +491,19 @@ def run_main_loop(bot):
                     log.error(f"Erreur cycle TSMOM : {e}")
 
             # ── 🔍 Scan intraday (signaux normaux sur tous les instruments) ────
+            # ── 🔍 Scan intraday (instruments actifs : week-end = crypto, semaine = matières 1ères + 5 majeures) ────
+            if hasattr(bot, 'get_active_trading_instruments'):
+                scanned_instruments = list(bot.get_active_trading_instruments())
+            else:
+                scanned_instruments = list(bot.instruments)
+
             try:
-                bot._select_and_rotate_crypto()
+                has_crypto = any(getattr(bot, 'is_crypto', lambda s: False)(s) for s in scanned_instruments)
+                if has_crypto:
+                    bot._select_and_rotate_crypto()
             except Exception as e:
                 log.warning(f"Erreur lors de la sélection/rotation crypto au cycle #{cycle_count} : {e}")
 
-            scanned_instruments = list(bot.instruments)
             random.shuffle(scanned_instruments)
 
 

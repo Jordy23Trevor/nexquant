@@ -9,9 +9,10 @@ def main():
     parser = argparse.ArgumentParser(description="SuperBot Trading Unifié MT5 (Forex & Commodities)")
     parser.add_argument("--broker", type=str, default=None, help="Type de broker (mt5)")
     parser.add_argument("--dashboard-port", type=int, default=None, help="Port pour le dashboard Web local (défaut: 5000)")
-    parser.add_argument("--webhook-port", type=int, default=None, help="Port pour le serveur webhook (défaut: 5001)")
     parser.add_argument("--unpause", action="store_true", help="Forcer le déblocage / reprise du bot")
     parser.add_argument("--reset-state", action="store_true", help="Réinitialiser l'état persistant et le solde journalier")
+    parser.add_argument("--auto-unpause", action="store_true", help="Relancer automatiquement le bot après mise en pause")
+    parser.add_argument("--auto-unpause-delay", type=int, default=180, help="Délai en secondes avant relance automatique (défaut: 180s)")
     args = parser.parse_args()
 
     broker = args.broker or os.environ.get('BROKER_TYPE', 'mt5')
@@ -19,8 +20,6 @@ def main():
 
     if args.dashboard_port:
         os.environ["DASHBOARD_PORT"] = str(args.dashboard_port)
-    if args.webhook_port:
-        os.environ["WEBHOOK_PORT"] = str(args.webhook_port)
 
     from superbot.orchestrator import SuperBot
 
@@ -30,6 +29,8 @@ def main():
 
     # Créer et démarrer le bot
     bot = SuperBot()
+    bot.auto_unpause = args.auto_unpause
+    bot.auto_unpause_delay = args.auto_unpause_delay
 
     if args.reset_state:
         print("🔄 Réinitialisation de l'état persistant demandée (--reset-state)...")

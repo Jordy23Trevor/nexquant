@@ -1818,9 +1818,7 @@ td.name { color: var(--txt); font-weight: 600; }
                   <!-- Broker Filter -->
                   <select id="filter-broker" class="token-select" onchange="resetHistoryPageAndRender()" style="padding: 4px 10px; font-size: 11px; height: auto; outline: none; border-color: var(--border);">
                     <option value="all">Tous les Brokers</option>
-                    <option value="binance">Binance (Crypto)</option>
-                    <option value="alpaca">Alpaca (ETF)</option>
-                    <option value="mt5">MT5 (Forex)</option>
+                    <option value="mt5">MetaTrader 5 (MT5)</option>
                   </select>
                 </div>
               </div>

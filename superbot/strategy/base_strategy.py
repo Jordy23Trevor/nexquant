@@ -29,6 +29,7 @@ class SignalResult:
     sl_price: float = 0.0
     tp_price: float = 0.0
     rr_ratio: float = 0.0
+    decision_rationale: str = ""      # Rationale détaillé du Pourquoi et Comment de la décision
     reason: str = ""
     extra_data: Dict[str, Any] = field(default_factory=dict)
 
@@ -46,6 +47,7 @@ class SignalResult:
             "sl_price": round(self.sl_price, 5),
             "tp_price": round(self.tp_price, 5),
             "rr_ratio": round(self.rr_ratio, 2),
+            "decision_rationale": self.decision_rationale,
             "reason": self.reason,
             "extra_data": self.extra_data,
         }

@@ -181,7 +181,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 
     parser = argparse.ArgumentParser(description='NexQuant Ghost Position Cleaner')
-    parser.add_argument('--broker', choices=['mt5', 'binance', 'alpaca'], default='mt5')
+    parser.add_argument('--broker', choices=['mt5'], default='mt5')
     parser.add_argument('--dry-run', action='store_true', help='Ne pas supprimer, juste reporter')
     parser.add_argument('--state-file', help='Chemin vers state_<broker>.json', default=None)
     args = parser.parse_args()

@@ -1,3 +1,4 @@
+WEBHOOK_ENABLED = False  # Rétro-compatibilité : Webhook désactivé (architecture MT5 pure)
 """
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╩
 """
@@ -169,6 +170,8 @@ class SuperBot:
         # État du bot
         self.running = False
         self.is_paused = False
+        self.auto_unpause = True
+        self.auto_unpause_delay = 180
         self.telemetry = telemetry_client
         self.shutdown_event = threading.Event()
         self.active_broker_type = BROKER_TYPE
@@ -196,6 +199,8 @@ class SuperBot:
         self.positions: Dict[str, Dict] = {}   # Symbol -> position info
         self.active_orders: Dict[str, Dict] = {} # Symbol -> ordre info
         self.instruments: List[str] = []
+        self.weekday_instruments: List[str] = []
+        self.crypto_instruments: List[str] = []
         self.news_assets: List[str] = []
         self.initial_balance: float = 10000.0
 
@@ -422,6 +427,7 @@ class SuperBot:
                 strategy_engine=self.strategy_engine,
                 performance_learner=self.performance_learner,
                 knowledge_feeder=self.knowledge_feeder,
+                bot=self,
             )
             self.report_generator.start_daily_scheduler()
             log.info("📝 ReportGenerator initialisé + scheduler 22h30 UTC")
@@ -534,9 +540,9 @@ class SuperBot:
 
     def _build_strategy(self, active_broker_type: str):
         """Construit la TradingStrategy avec les paramètres par classe d'actif."""
-        # On ne traite que MT5, pas besoin d'ajustement particulier pour commission selon binance/alpaca
-        actual_commission = COMMISSION_PCT if 'COMMISSION_PCT' in globals() else 0.0
-        actual_slippage = SLIPPAGE_PCT if 'SLIPPAGE_PCT' in globals() else 0.0
+        # Paramètres d'exécution MT5 réalistes
+        actual_commission = SIMULATED_COMMISSION_PCT if 'SIMULATED_COMMISSION_PCT' in globals() else 0.0
+        actual_slippage = (SIMULATED_SLIPPAGE_POINTS / 10000.0) if 'SIMULATED_SLIPPAGE_POINTS' in globals() else 0.0
 
         return TradingStrategy({
             'SCORE_MIN': self.adaptive_score_min,
@@ -578,7 +584,8 @@ class SuperBot:
             'SL_ATR_MULT_FOREX': SL_ATR_MULT_FOREX,
             'TP_ATR_MULT_FOREX': TP_ATR_MULT_FOREX,
             'FOREX_NEWS_AVOID_MINUTES': FOREX_NEWS_AVOID_MINUTES,
-        }, indicators=self.technical_indicators, online_learner=self.online_learner, knowledge_feeder=self.knowledge_feeder)
+        }, indicators=self.technical_indicators, online_learner=self.online_learner, knowledge_feeder=self.knowledge_feeder,
+           strategy_engine=self.strategy_engine, regime_detector=self.regime_detector, session_manager=self.session_manager)
 
     def _build_news_manager(self):
         """Construit le gestionnaire de nouvelles."""
@@ -699,7 +706,8 @@ class SuperBot:
                     MT5_CRYPTO_ENABLED and
                     hasattr(self.broker, 'get_crypto_instruments')):
                 try:
-                    crypto_instruments = self.broker.get_crypto_instruments()
+                    res = self.broker.get_crypto_instruments() if hasattr(self.broker, 'get_crypto_instruments') else []
+                    crypto_instruments = res if isinstance(res, (list, tuple, set)) else []
                     if crypto_instruments:
                         # Ajouter uniquement les crypto pas déjà dans la liste
                         existing = set(self.instruments)
@@ -716,6 +724,13 @@ class SuperBot:
 
             # MT5 gère nativement les paires croisées — les accepter toutes
             pass
+            from superbot.broker.symbol_specs import get_asset_class, MT5_CRYPTO_SYMBOLS
+            self.weekday_instruments = [s for s in self.instruments if get_asset_class(s) != 'crypto']
+            self.crypto_instruments = [s for s in self.instruments if get_asset_class(s) == 'crypto']
+            if not self.crypto_instruments and (MT5_CRYPTO_ENABLED or active_broker_type == "mt5"):
+                self.crypto_instruments = list(MT5_CRYPTO_SYMBOLS)
+            log.info(f"📅 Instruments Semaine (Matières 1ères + 5 Majeures) : {self.weekday_instruments}")
+            log.info(f"🌴 Instruments Week-end (Crypto uniquement) : {self.crypto_instruments}")
 
             news_broker_key = f"NEWS_ASSETS_{active_broker_type.upper()}"
             env_news_assets_broker = os.getenv(news_broker_key)
@@ -1168,6 +1183,19 @@ class SuperBot:
             return
 
         try:
+            # 0. Filtrer calendrier : le week-end, uniquement la crypto. En semaine, uniquement commodities + 5 majeures.
+            from superbot.broker.symbol_specs import is_weekend_market, get_asset_class
+            from superbot.config import BACKTEST_MODE
+            if not BACKTEST_MODE:
+                _is_we = is_weekend_market()
+                _ac = get_asset_class(symbol)
+                if _is_we and _ac != 'crypto':
+                    log.debug(f"Marché fermé le week-end pour {symbol} (seule la crypto est autorisée)")
+                    return
+                if not _is_we and _ac == 'crypto':
+                    log.debug(f"Crypto {symbol} mise en veille en semaine (réservée au week-end)")
+                    return
+
             # Mesurer le temps de traitement total pour profiling
             symbol_start_time = time.time()
 
@@ -1354,6 +1382,7 @@ class SuperBot:
             # Afficher le score_min effectif (par asset_type) plutôt que le global
             score_min = signal_data.get('score_min', self.strategy.score_min)
             rr = signal_data['rr_ratio']
+            rationale = signal_data.get('decision_rationale', '')
             if getattr(self, 'news_manager', None):
                 should_avoid, news_event = self.news_manager.should_avoid_trading_due_to_news(symbol)
             else:
@@ -1361,10 +1390,30 @@ class SuperBot:
             news_ok = not should_avoid
             log.info(
                 f"Signal DEBUG {symbol}: regime={signal_data['market_regime']} "
+                f"strategy={signal_data.get('strategy_used', 'none')} "
                 f"score_raw={score_raw:.1f} score_min={score_min} "
                 f"should_long={signal_data['should_long']} should_short={signal_data['should_short']} "
                 f"RR={rr:.2f} news_ok={news_ok}"
             )
+            if rationale:
+                log.info(f"💡 Rationale [{symbol}]: {rationale}")
+
+            # Enregistrer l'événement d'analyse préalable dans le ReportGenerator
+            if getattr(self, 'report_generator', None):
+                try:
+                    dec_type = 'BUY' if signal_data.get('should_long') else ('SELL' if signal_data.get('should_short') else 'NO_SIGNAL')
+                    self.report_generator.record_analysis_event(
+                        symbol=symbol,
+                        regime=signal_data.get('market_regime', 'unknown'),
+                        strategy=signal_data.get('strategy_used', 'none'),
+                        score=float(score_raw),
+                        score_min=float(score_min),
+                        rr=float(rr),
+                        decision=dec_type,
+                        rationale=rationale
+                    )
+                except Exception as _re:
+                    log.debug(f"Erreur recording analyse ReportGenerator ({symbol}): {_re}")
 
             if should_avoid:
                 log.info(f"Trading évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
@@ -1376,7 +1425,7 @@ class SuperBot:
                 trade_time = time.time() - trade_start
             else:
                 log.info(
-                    f"Scan {symbol} : {signal_data['market_regime']} | "
+                    f"Scan {symbol} : {signal_data['market_regime']} | {signal_data.get('strategy_used', '')} | "
                     f"Score: {score_raw:.1f}/{score_min} | "
                     f"Pas de signal (Trigger L: {signal_data['trigger_long']}, S: {signal_data['trigger_short']}, R:R: {rr:.2f})"
                 )
@@ -1511,14 +1560,26 @@ class SuperBot:
         plus performant que l'un des actifs sélectionnés.
         """
         try:
-            if not self.broker or self.broker.get_asset_type() != "crypto":
+            from superbot.broker.symbol_specs import is_weekend_market
+            is_weekend = is_weekend_market()
+            is_crypto_broker = bool(self.broker and hasattr(self.broker, 'get_asset_type') and self.broker.get_asset_type() == "crypto")
+            if not is_weekend and not is_crypto_broker:
                 return
 
             # 1. Calculer les scores pour TOUS les instruments crypto configurés
             # Exclure d'emblée les symboles en blacklist pour qu'ils ne polluent jamais la rotation
             crypto_blacklist = set(self.config.get('CRYPTO_BLACKLIST', []))
             scores = {}
-            for symbol in self.instruments:
+            if hasattr(self, 'get_active_trading_instruments'):
+                target_instruments = [s for s in self.get_active_trading_instruments() if self.is_crypto(s)]
+            else:
+                target_instruments = [s for s in self.instruments if self.is_crypto(s)]
+            if not target_instruments and hasattr(self.broker, 'get_crypto_instruments'):
+                try:
+                    target_instruments = list(self.broker.get_crypto_instruments())
+                except Exception:
+                    pass
+            for symbol in target_instruments:
                 # Exclure les symboles en blacklist AVANT de calculer leur score
                 sym_clean = symbol.replace('/', '').upper()
                 if any(b.replace('/', '').upper() == sym_clean for b in crypto_blacklist):
@@ -2045,6 +2106,22 @@ class SuperBot:
     def _detect_model_drift(self):
         from superbot.components.drift_detector import detect_model_drift
         detect_model_drift(self)
+
+    def is_crypto(self, symbol: str) -> bool:
+        """Retourne True si le symbole est un cryptoactif."""
+        from superbot.broker.symbol_specs import get_asset_class
+        return get_asset_class(symbol) == "crypto"
+
+    def get_active_trading_instruments(self) -> List[str]:
+        """
+        Retourne la liste des instruments actifs selon le calendrier de trading :
+        - Le week-end (vendredi 22h UTC au dimanche 21h UTC) : UNIQUEMENT crypto CFDs.
+        - En semaine : UNIQUEMENT matières premières et les 5 paires majeures.
+        """
+        from superbot.broker.symbol_specs import is_weekend_market
+        if is_weekend_market():
+            return list(getattr(self, 'crypto_instruments', []))
+        return list(getattr(self, 'weekday_instruments', self.instruments))
 
     def get_status(self) -> Dict:
         """

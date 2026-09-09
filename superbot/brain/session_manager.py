@@ -35,6 +35,17 @@ log = logging.getLogger("nexquant.session_manager")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 SESSION_DEFINITIONS = {
+    "WEEKEND_CRYPTO": {
+        "start_utc": 0, "end_utc": 24,
+        "description": "Session Weekend Crypto (Marchés Forex & Matières premières fermés, scan & trading exclusif crypto)",
+        "liquidity": "high",
+        "score_multiplier": 1.0,
+        "max_positions_ratio": 1.0,
+        "risk_multiplier": 1.0,
+        "priority_assets": ["BTCUSD", "ETHUSD", "BNBUSD", "XRPUSD", "SOLUSD"],
+        "pnl_target_pct": 0.50,
+        "allow_new_trades": True,
+    },
     "PRE_LONDON": {
         "start_utc": 5, "end_utc": 7,
         "description": "Pré-London (préparation, faible liquidité)",
@@ -42,40 +53,40 @@ SESSION_DEFINITIONS = {
         "score_multiplier": 1.1,      # +10% score requis
         "max_positions_ratio": 0.5,   # 50% des positions max
         "risk_multiplier": 0.7,       # -30% de risque
-        "priority_assets": ["EURUSD", "GBPUSD", "USDJPY"],
+        "priority_assets": ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"],
         "pnl_target_pct": 0.10,       # 10% de l'objectif journalier
         "allow_new_trades": True,
     },
     "LONDON": {
         "start_utc": 7, "end_utc": 12,
-        "description": "Session London (haute liquidité Forex)",
+        "description": "Session London (haute liquidité Forex & Matières Premières)",
         "liquidity": "high",
         "score_multiplier": 1.0,      # Score standard
         "max_positions_ratio": 1.0,   # 100% des positions max
         "risk_multiplier": 1.0,       # Risque standard
-        "priority_assets": ["EURUSD", "GBPUSD", "EURGBP", "USDJPY", "GBPJPY"],
+        "priority_assets": ["EURUSD", "GBPUSD", "EURGBP", "EURJPY", "USDJPY", "XAUUSD", "XTIUSD", "XBRUSD"],
         "pnl_target_pct": 0.40,       # 40% de l'objectif journalier
         "allow_new_trades": True,
     },
     "OVERLAP": {
         "start_utc": 12, "end_utc": 16,
-        "description": "London+NY Overlap (meilleure session Forex + Crypto)",
+        "description": "London+NY Overlap (pic de liquidité Forex & Matières Premières)",
         "liquidity": "very_high",
         "score_multiplier": 0.95,     # Légèrement plus permissif (très liquide)
         "max_positions_ratio": 1.2,   # +20% positions autorisées
         "risk_multiplier": 1.1,       # Légèrement plus agressif
-        "priority_assets": ["EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD"],
+        "priority_assets": ["EURUSD", "GBPUSD", "EURGBP", "EURJPY", "USDJPY", "XAUUSD", "XAGUSD", "XTIUSD", "XBRUSD"],
         "pnl_target_pct": 0.35,       # 35% de l'objectif journalier
         "allow_new_trades": True,
     },
     "NEW_YORK": {
         "start_utc": 16, "end_utc": 21,
-        "description": "Session New York (USD dominant)",
+        "description": "Session New York (USD dominant & Matières Premières)",
         "liquidity": "high",
         "score_multiplier": 1.0,
         "max_positions_ratio": 1.0,
         "risk_multiplier": 1.0,
-        "priority_assets": ["EURUSD", "USDJPY", "USDCAD", "BTCUSD", "ETHUSD"],
+        "priority_assets": ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "XTIUSD", "XNGUSD"],
         "pnl_target_pct": 0.30,
         "allow_new_trades": True,
     },
@@ -86,38 +97,52 @@ SESSION_DEFINITIONS = {
         "score_multiplier": 1.3,      # +30% score requis
         "max_positions_ratio": 0.4,   # Seulement 40% des positions
         "risk_multiplier": 0.5,       # -50% risque (protection nocturne)
-        "priority_assets": ["BTCUSD", "ETHUSD"],  # Crypto seulement
+        "priority_assets": ["XAUUSD", "BTCUSD", "ETHUSD"],
         "pnl_target_pct": 0.05,
-        "allow_new_trades": True,     # Uniquement crypto
+        "allow_new_trades": True,
     },
     "ASIA": {
         "start_utc": 0, "end_utc": 5,
-        "description": "Session Asiatique (Tokyo/JPY)",
+        "description": "Session Asiatique (Tokyo / JPY / Or)",
         "liquidity": "medium",
         "score_multiplier": 1.15,
         "max_positions_ratio": 0.6,
         "risk_multiplier": 0.8,
-        "priority_assets": ["USDJPY", "AUDUSD", "NZDUSD", "BTCUSD"],
+        "priority_assets": ["USDJPY", "EURJPY", "XAUUSD"],
         "pnl_target_pct": 0.15,
         "allow_new_trades": True,
     },
 }
 
-# Mapping heure → nom de session
-def _get_session_name_for_hour(hour_utc: int) -> str:
-    """Retourne le nom de la session pour une heure UTC donnée."""
-    if 5 <= hour_utc < 7:
+# Mapping heure / date → nom de session
+def _get_session_name_for_datetime(now_utc: Optional[datetime] = None) -> str:
+    """Retourne le nom de la session pour une date et heure UTC donnée (gère le weekend)."""
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    
+    from superbot.broker.symbol_specs import is_weekend_market
+    if is_weekend_market(now_utc):
+        return "WEEKEND_CRYPTO"
+
+    hour = now_utc.hour
+    if 5 <= hour < 7:
         return "PRE_LONDON"
-    elif 7 <= hour_utc < 12:
+    elif 7 <= hour < 12:
         return "LONDON"
-    elif 12 <= hour_utc < 16:
+    elif 12 <= hour < 16:
         return "OVERLAP"
-    elif 16 <= hour_utc < 21:
+    elif 16 <= hour < 21:
         return "NEW_YORK"
-    elif 21 <= hour_utc < 24:
+    elif 21 <= hour < 24:
         return "OFF_HOURS"
     else:  # 0-5
         return "ASIA"
+
+
+def _get_session_name_for_hour(hour_utc: int) -> str:
+    """Retourne le nom de la session pour une heure UTC donnée (fallback)."""
+    now_utc = datetime.now(timezone.utc).replace(hour=hour_utc)
+    return _get_session_name_for_datetime(now_utc)
 
 
 class SessionManager:
@@ -172,10 +197,9 @@ class SessionManager:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _update_current_session(self):
-        """Met à jour la session active selon l'heure UTC actuelle."""
+        """Met à jour la session active selon l'heure UTC actuelle et le statut weekend."""
         now_utc = datetime.now(timezone.utc)
-        hour = now_utc.hour
-        new_session_name = _get_session_name_for_hour(hour)
+        new_session_name = _get_session_name_for_datetime(now_utc)
 
         with self._lock:
             if new_session_name != self._current_session_name:
@@ -343,11 +367,34 @@ class SessionManager:
             return False, f"Session {self._current_session_name} : nouveaux trades désactivés"
 
         # Vérification OFF_HOURS : seulement crypto
+        from superbot.broker.symbol_specs import normalize_symbol_name, get_asset_class
+        norm = normalize_symbol_name(symbol)
+        asset_class = get_asset_class(symbol)
+        is_crypto = (asset_class == "crypto")
+        is_commodity = asset_class.startswith("commodity")
+        allowed_majors = {"EURUSD", "GBPUSD", "EURGBP", "EURJPY", "USDJPY"}
+        is_allowed_forex = norm in allowed_majors
+
+        # 1. En Session WEEKEND_CRYPTO : STRICTEMENT CRYPTO
+        if self._current_session_name == "WEEKEND_CRYPTO":
+            if not is_crypto:
+                return False, f"Weekend : Marchés traditionnels fermés. Scan & trading réservés aux cryptos (pas {symbol})"
+            return True, "OK (Crypto Weekend)"
+
+        # 2. En Semaine : Interdiction de la crypto (réservée au weekend) et devises hors 5 majeures
+        if is_crypto:
+            return False, f"Crypto réservée au week-end (en semaine, focus matières premières et 5 majeures FX)"
+        if not (is_commodity or is_allowed_forex):
+            return False, f"{symbol} non autorisé : le bot surveille uniquement les matières premières et EURUSD, GBPUSD, EURGBP, EURJPY, USDJPY en semaine."
+
+        # 3. Vérification OFF_HOURS nocturne (faible liquidité)
         if self._current_session_name == "OFF_HOURS":
             from superbot.broker.mt5_client import _detect_asset_class_mt5
             asset_class = _detect_asset_class_mt5(symbol)
             if asset_class not in ('crypto', 'commodity'):
                 return False, f"OFF_HOURS : seulement crypto/commodity autorisés, pas {symbol}"
+            if not (is_commodity or norm in ("XAUUSD", "GOLD")):
+                return False, f"OFF_HOURS : liquidité réduite, seules matières premières autorisées (pas {symbol})"
 
         return True, "OK"
 

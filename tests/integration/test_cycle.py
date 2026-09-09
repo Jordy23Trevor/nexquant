@@ -30,6 +30,7 @@ def mock_bot():
             bot.telemetry = MagicMock()
             bot.telemetry.enabled = False
             bot.WARMUP_SECONDS = 0  # skip the 5s broker warmup in tests
+            bot.is_paused = False
             
             return bot
 
@@ -61,6 +62,8 @@ def test_cycle_runner_processes_symbols(mock_bot):
     
     # On mock _process_symbol pour vérifier s'il est appelé
     mock_bot._process_symbol = MagicMock()
+    mock_bot._sync_positions_with_broker = MagicMock()
+    mock_bot._select_and_rotate_crypto = MagicMock()
     mock_bot.running = True
     
     # Lancer la boucle

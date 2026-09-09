@@ -77,6 +77,7 @@ def test_broker_network_failure_handling(mock_bot):
     from superbot.components.signal_executor import execute_signal_trade
     
     # 1. On lance le trade qui va déclencher l'Exception Chaos
+    mock_bot.online_learner = None
     execute_signal_trade(mock_bot, symbol, signal_data, df_with_indicators)
     
     # 2. Assertions de survie

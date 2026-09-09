@@ -14,6 +14,7 @@ load_dotenv(dotenv_path=env_path)
 # =============================================================================
 BROKER_TYPE = os.getenv("BROKER_TYPE", "mt5").lower()  # mt5 (prioritaire V3)
 ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "false").lower() == "true"
+BACKTEST_MODE = os.getenv("BACKTEST_MODE", "false").lower() == "true"
 
 # =============================================================================
 # METATRADER 5 (MT5) CONFIGURATION (associated with Fusion Markets)
@@ -24,14 +25,11 @@ MT5_SERVER = os.getenv("MT5_SERVER", "FusionMarkets-Demo")
 MT5_PATH = os.getenv("MT5_PATH", "")  # Path to terminal64.exe (optional)
 
 # =============================================================================
-# FOREX DATA PROVIDERS (utilisé par MT5)
+# FOREX LEVERAGE & MARGIN (MT5)
 # =============================================================================
 FOREX_DEFAULT_LEVERAGE = int(os.getenv("FOREX_DEFAULT_LEVERAGE", "30"))  # Typical forex leverage
 FOREX_MARGIN_CALL_LEVEL = float(os.getenv("FOREX_MARGIN_CALL_LEVEL", "0.5"))  # 50% margin used triggers call
 FOREX_STOP_OUT_LEVEL = float(os.getenv("FOREX_STOP_OUT_LEVEL", "0.2"))  # 20% margin used triggers stop out
-TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "")
-ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY", "")
-FOREX_DATA_PROVIDER = os.getenv("FOREX_DATA_PROVIDER", "twelvedata")
 
 # =============================================================================
 # TRADING INSTRUMENTS & TIMEFRAMES
@@ -241,7 +239,7 @@ SIMULATED_COMMISSION_PCT = float(os.getenv("SIMULATED_COMMISSION_PCT", "0.003"))
 # Ces symboles sont disponibles 24h/24 7j/7 sur MT5
 MT5_CRYPTO_ENABLED = os.getenv("MT5_CRYPTO_ENABLED", "true").lower() == "true"
 # Symboles crypto disponibles sur Fusion Markets MT5 (format sans /)
-MT5_CRYPTO_SYMBOLS_STR = os.getenv("MT5_CRYPTO_SYMBOLS", "BTCUSD,ETHUSD,BNBUSD,XRPUSD")
+MT5_CRYPTO_SYMBOLS_STR = os.getenv("MT5_CRYPTO_SYMBOLS", "BTCUSD,ETHUSD,BNBUSD,XRPUSD,SOLUSD")
 MT5_CRYPTO_SYMBOLS: list = [s.strip() for s in MT5_CRYPTO_SYMBOLS_STR.split(",") if s.strip()]
 # Paramètres crypto MT5 (CFD avec spread, pas de funding)
 MT5_CRYPTO_SCORE_MIN = int(os.getenv("MT5_CRYPTO_SCORE_MIN", "7"))
@@ -383,6 +381,8 @@ def validate_config():
     Validates key configuration settings to ensure safe trading conditions.
     Only checks broker credentials if not using SaaS mode.
     """
+    if BACKTEST_MODE:
+        return
     errors = []
 
     # 1. Broker type check
@@ -456,8 +456,7 @@ __all__ = [
     "MT5_CRYPTO_ENABLED", "MT5_CRYPTO_SYMBOLS", "MT5_CRYPTO_SCORE_MIN",
     "MT5_CRYPTO_SL_ATR", "MT5_CRYPTO_TP_ATR", "MT5_CRYPTO_MAX_SPREAD",
 
-    # Forex data providers (utilisés par MT5)
-    "TWELVEDATA_API_KEY", "ALPHAVANTAGE_API_KEY", "FOREX_DATA_PROVIDER",
+    # Forex leverage & margin (MT5)
     "FOREX_DEFAULT_LEVERAGE", "FOREX_MARGIN_CALL_LEVEL", "FOREX_STOP_OUT_LEVEL",
 
     # Trading

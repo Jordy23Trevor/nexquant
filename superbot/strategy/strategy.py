@@ -10,6 +10,7 @@ import pandas as pd
 import logging
 
 from superbot.strategy.base_strategy import SignalResult
+from superbot.brain.regime_detector import RegimeResult
 from superbot.broker.symbol_specs import get_asset_class, get_pip_size, get_active_sessions
 
 log = logging.getLogger("nexquant.trading_strategy")
@@ -20,7 +21,18 @@ class TradingStrategy:
     Stratégie de trading unifiée pour MT5 (Matières Premières & Devises).
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, db=None, indicators=None, online_learner=None, knowledge_feeder=None, **kwargs):
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        db=None,
+        indicators=None,
+        online_learner=None,
+        knowledge_feeder=None,
+        strategy_engine=None,
+        regime_detector=None,
+        session_manager=None,
+        **kwargs
+    ):
         from superbot.brain.strategy_engine import StrategyEngine
         from superbot.brain.regime_detector import MarketRegimeDetector
 
@@ -29,13 +41,15 @@ class TradingStrategy:
         self.indicators = indicators
         self.online_learner = online_learner
         self.knowledge_feeder = knowledge_feeder
+        self.session_manager = session_manager
         self.score_min = int(self.config.get('SCORE_MIN', 6))
         self.risk_per_trade = float(self.config.get('RISK_PCT', 1.0))
 
-        self.regime_detector = MarketRegimeDetector(db=db)
-        self.strategy_engine = StrategyEngine(
+        self.regime_detector = regime_detector or MarketRegimeDetector(db=db)
+        self.strategy_engine = strategy_engine or StrategyEngine(
             config=self.config,
             db=db,
+            session_manager=self.session_manager,
             online_learner=self.online_learner,
             knowledge_feeder=self.knowledge_feeder
         )
@@ -94,7 +108,11 @@ class TradingStrategy:
         current_price = float(last.get('close', 0.0))
         asset_class = get_asset_class(symbol)
         pip_size = get_pip_size(symbol)
-        active_sessions = get_active_sessions()
+        if self.session_manager:
+            curr_sess = self.session_manager.get_current_session()
+            active_sessions = [curr_sess.get('name', 'LONDON')]
+        else:
+            active_sessions = get_active_sessions()
 
         # 1. Détection automatique du régime de marché
         regime: RegimeResult = self.regime_detector.detect(
@@ -104,7 +122,7 @@ class TradingStrategy:
             store_in_db=bool(self.db is not None)
         )
 
-        # 2. Évaluation des stratégies adaptatives par le moteur
+        # 2. Évaluation des stratégies adaptatives par le moteur (processus séquentiel approfondi)
         sig: SignalResult = self.strategy_engine.evaluate(
             df=df,
             symbol=symbol,
@@ -125,5 +143,6 @@ class TradingStrategy:
         result_dict["hurst_exponent"] = regime.hurst_exponent
         result_dict["half_life_bars"] = regime.half_life
         result_dict["active_sessions"] = active_sessions
+        result_dict["decision_rationale"] = sig.decision_rationale
 
         return result_dict

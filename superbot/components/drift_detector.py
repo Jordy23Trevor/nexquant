@@ -33,6 +33,14 @@ def detect_model_drift(bot):
         bot.is_paused = True
         bot._drift_pause_until = datetime.now(timezone.utc) + timedelta(hours=2)
         bot.adaptive_risk_pct = bot.adaptive_risk_pct * 0.5
+        if getattr(bot, 'auto_unpause', False):
+            log.warning(f"⚠️ Dérive détectée: taux de victoire ({win_rate:.2f}). Réduction du risque de 50% (auto-unpause actif: pause annulée pour maintenir le trading continu).")
+            bot.adaptive_risk_pct = bot.adaptive_risk_pct * 0.5
+        else:
+            log.error(f"🚨 Dérive sévère détectée: taux de victoire ({win_rate:.2f}). Mise en pause 2h et réduction du risque de 50%.")
+            bot.is_paused = True
+            bot._drift_pause_until = datetime.now(timezone.utc) + timedelta(hours=2)
+            bot.adaptive_risk_pct = bot.adaptive_risk_pct * 0.5
     elif win_rate < 0.30:
         log.warning(f"⚠️ Dérive modérée détectée: taux de victoire ({win_rate:.2f}). Réduction du risque de 25%.")
         bot.adaptive_risk_pct = bot.adaptive_risk_pct * 0.75

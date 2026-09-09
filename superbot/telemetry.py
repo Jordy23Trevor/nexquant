@@ -161,7 +161,7 @@ class TelemetryClient:
         }
         return self._post_async("ingest", payload)
 
-    def push_position(self, symbol: str, side: str, qty: float, entry_price: float, current_price: float, pnl: float, pnl_pct: float, status: str = "open", broker: str = "binance") -> bool:
+    def push_position(self, symbol: str, side: str, qty: float, entry_price: float, current_price: float, pnl: float, pnl_pct: float, status: str = "open", broker: str = "mt5") -> bool:
         """Envoie les détails d'une position ouverte ou fermée de manière asynchrone."""
         payload = {
             "kind": "position",

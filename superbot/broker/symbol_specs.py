@@ -10,6 +10,7 @@ les instruments traités :
 import math
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
+from superbot.config import MT5_CRYPTO_SYMBOLS
 
 
 # Classification des symboles et alias des courtiers
@@ -214,6 +215,57 @@ DEFAULT_SPECS: Dict[str, Dict[str, Any]] = {
         "default_sl_atr": 1.8,
         "default_tp_atr": 3.5,
     },
+    # Crypto CFDs (Actifs 24/7 pour le trading exclusif du weekend)
+    "BTCUSD": {
+        "asset_class": "crypto",
+        "contract_size": 1.0,
+        "digits": 2,
+        "point": 0.01,
+        "pip_size": 1.0,
+        "max_spread_pips": 50.0,
+        "default_sl_atr": 2.0,
+        "default_tp_atr": 4.0,
+    },
+    "ETHUSD": {
+        "asset_class": "crypto",
+        "contract_size": 1.0,
+        "digits": 2,
+        "point": 0.01,
+        "pip_size": 0.10,
+        "max_spread_pips": 20.0,
+        "default_sl_atr": 2.0,
+        "default_tp_atr": 4.0,
+    },
+    "BNBUSD": {
+        "asset_class": "crypto",
+        "contract_size": 1.0,
+        "digits": 2,
+        "point": 0.01,
+        "pip_size": 0.10,
+        "max_spread_pips": 10.0,
+        "default_sl_atr": 2.0,
+        "default_tp_atr": 4.0,
+    },
+    "XRPUSD": {
+        "asset_class": "crypto",
+        "contract_size": 1.0,
+        "digits": 4,
+        "point": 0.0001,
+        "pip_size": 0.001,
+        "max_spread_pips": 5.0,
+        "default_sl_atr": 2.0,
+        "default_tp_atr": 4.0,
+    },
+    "SOLUSD": {
+        "asset_class": "crypto",
+        "contract_size": 1.0,
+        "digits": 2,
+        "point": 0.01,
+        "pip_size": 0.10,
+        "max_spread_pips": 10.0,
+        "default_sl_atr": 2.0,
+        "default_tp_atr": 4.0,
+    },
 }
 
 
@@ -260,11 +312,38 @@ def get_asset_class(symbol: str) -> str:
     if "JPY" in norm:
         return "forex_jpy"
     
+    # Crypto CFDs
+    if any(c in norm for c in ["BTC", "ETH", "BNB", "XRP", "SOL"]):
+        return "crypto"
+
     # Forex majeur vs cross
     majors = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]
     if norm in majors:
         return "forex_major"
     return "forex_cross"
+
+
+_detect_asset_class_mt5 = get_asset_class
+
+
+def is_weekend_market(dt_utc: Optional[datetime] = None) -> bool:
+    """
+    Vérifie si les marchés traditionnels (Forex & Matières Premières) sont fermés pour le week-end.
+    Fermeture : Vendredi à partir de 22h00 UTC
+    Réouverture : Dimanche à partir de 21h00 UTC
+    Pendant cette période, seules les cryptomonnaies sont scannées et traitées.
+    """
+    if dt_utc is None:
+        dt_utc = datetime.now(timezone.utc)
+    weekday = dt_utc.weekday()
+    hour = dt_utc.hour
+    if weekday == 4 and hour >= 22:
+        return True
+    if weekday == 5:
+        return True
+    if weekday == 6 and hour < 21:
+        return True
+    return False
 
 
 def get_pip_size(symbol: str, digits: Optional[int] = None) -> float:

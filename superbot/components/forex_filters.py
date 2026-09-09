@@ -200,3 +200,8 @@ def check_major_news_window(symbol: str, avoid_minutes: int = 30, news_events: l
             # Non bloquant sur fallback statique (risque de faux positifs trop élevé)
     
     return True  # Aucune news majeure détectée
+
+
+def is_london_session() -> bool:
+    """Compatibilité : alias pour vérifier si le marché Forex est ouvert."""
+    return is_market_open()

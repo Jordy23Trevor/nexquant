@@ -40,6 +40,10 @@ from superbot.config import (
 log = logging.getLogger("mt5_client")
 
 
+# Alias de compatibilité
+_detect_asset_class_mt5 = get_asset_class
+
+
 class MT5Client(Broker):
     """
     Client Broker MetaTrader 5 hautement résilient pour Forex & Commodities.
@@ -165,8 +169,14 @@ class MT5Client(Broker):
         """Retourne la classe d'actifs exacte du symbole."""
         return get_asset_class(symbol)
 
+    def get_crypto_instruments(self) -> List[str]:
+        """Instruments crypto CFD disponibles pour le trading exclusif du weekend."""
+        from superbot.config import MT5_CRYPTO_SYMBOLS
+        return list(MT5_CRYPTO_SYMBOLS)
+
     def get_default_instruments(self) -> List[str]:
         """Instruments par défaut (Matières Premières & Forex)."""
+        """Instruments par défaut en semaine (Matières Premières & 5 Devises Majeures)."""
         return [
             "XAUUSD",   # Or
             "XTIUSD",   # Pétrole WTI
@@ -176,16 +186,29 @@ class MT5Client(Broker):
             "AUDUSD",   # Dollar Australien / Dollar
             "USDCAD",   # Dollar / Dollar Canadien
             "USDCHF",   # Dollar / Franc Suisse
+            "EURUSD",
+            "GBPUSD",
+            "EURGBP",
+            "EURJPY",
+            "USDJPY",
+            "XAUUSD",
+            "XAGUSD",
+            "XTIUSD",
+            "XBRUSD",
+            "XNGUSD",
         ]
 
     def get_default_news_assets(self) -> List[str]:
         """Actives surveillés pour les actualités macroéconomiques."""
         return ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "GOLD", "OIL"]
+        """Actifs surveillés pour les actualités macroéconomiques."""
+        return ["USD", "EUR", "GBP", "JPY", "GOLD", "OIL"]
 
     def get_balance(self) -> float:
         """Retourne le solde du compte (balance)."""
         acc_info = self._call_api(mt5.account_info, None)
         return float(acc_info.balance) if acc_info else 0.0
+
 
     def get_account_summary(self) -> Dict[str, Any]:
         """Retourne le résumé complet du compte de trading."""
@@ -557,6 +580,7 @@ class MT5Client(Broker):
 
         # Vérification et ajustement des Stop Loss et Take Profit selon StopLevel
         digits = info["digits"]
+        min_offset = max(stops_level, 15 * point)
         if side_upper in ["BUY", "LONG"]:
             if tp > 0 and tp <= price:
                 log.warning(f"TP d'achat {tp} <= Prix {price}. Ordre rejeté.")
@@ -565,6 +589,9 @@ class MT5Client(Broker):
                 log.warning(f"SL d'achat {sl} >= Prix {price}. Ordre rejeté.")
                 return False
             if sl > 0 and price - sl < stops_level:
+                sl = round(price - min_offset, digits)
+                log.info(f"SL d'achat ajusté dynamiquement sous le prix actuel: {sl}")
+            elif sl > 0 and price - sl < stops_level:
                 sl = round(price - stops_level, digits)
             if tp > 0 and tp - price < stops_level:
                 tp = round(price + stops_level, digits)
@@ -576,6 +603,9 @@ class MT5Client(Broker):
                 log.warning(f"SL de vente {sl} <= Prix {price}. Ordre rejeté.")
                 return False
             if sl > 0 and sl - price < stops_level:
+                sl = round(price + min_offset, digits)
+                log.info(f"SL de vente ajusté dynamiquement au-dessus du prix actuel: {sl}")
+            elif sl > 0 and sl - price < stops_level:
                 sl = round(price + stops_level, digits)
             if tp > 0 and price - tp < stops_level:
                 tp = round(price - stops_level, digits)

@@ -52,7 +52,12 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
 
         # Intégrer les coûts de transaction dans le risque par unité
         from superbot.config import SIMULATED_COMMISSION_PCT, SIMULATED_SLIPPAGE_POINTS
-        cost_pct = (SIMULATED_COMMISSION_PCT * 2) + (SIMULATED_SLIPPAGE_POINTS * tick_size / max(entry_price, 1e-10) * 100)
+        comm_override = rm.config.get('COMMISSION_PCT', None)
+        slip_override = rm.config.get('SLIPPAGE_PCT', None)
+        if comm_override is not None and slip_override is not None:
+            cost_pct = (float(comm_override) * 2) + float(slip_override)
+        else:
+            cost_pct = (SIMULATED_COMMISSION_PCT * 2) + (SIMULATED_SLIPPAGE_POINTS * tick_size / max(entry_price, 1e-10) * 100)
         cost_abs = entry_price * (cost_pct / 100.0)
 
         price_risk = raw_price_risk + cost_abs
@@ -273,6 +278,10 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
 
         # Si le risque réel dépasse la limite de sécurité
         max_allowed_risk_pct = min(rm.MAX_DAILY_LOSS_PCT, max(3.0, rm.RISK_PCT * 2.0))
+        # Adaptation micro-compte (< 200€) : les contrats min (0.01 lot) peuvent représenter 3 à 8% de risque
+        if account_balance < 200.0 and position_size <= min_size:
+            max_allowed_risk_pct = max(max_allowed_risk_pct, 10.0)
+
         if actual_risk_pct > max_allowed_risk_pct:
             if position_size <= min_size:
                 log.warning(

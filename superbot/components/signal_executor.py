@@ -12,6 +12,14 @@ except ImportError:
 
 log = logging.getLogger("signal_executor")
 
+def _reject_trade(bot, symbol: str, reason: str):
+    log.info(f"🚫 Trade {symbol} rejeté : {reason}")
+    if getattr(bot, 'report_generator', None):
+        try:
+            bot.report_generator.record_rejection_event(symbol, reason)
+        except Exception:
+            pass
+
 def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators):
     """
     Valide les filtres macro, calcule la taille de position de manière sécurisée et exécute l'ordre.
@@ -31,6 +39,12 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         f"RR: {signal_data['rr_ratio']:.2f}"
     )
 
+    # Vérification stricte du Risk:Reward minimum (>= 1.8) pour assurer des trades réfléchis et conséquents
+    rr_val = float(signal_data.get('rr_ratio', 0.0))
+    if rr_val < 1.8:
+        _reject_trade(bot, symbol, f"Rapport Risque/Rendement insuffisant (R:R {rr_val:.2f} < 1.8)")
+        return
+
     # 0. Vérifier le cooldown de l'actif suite à un échec d'exécution
     with bot._state_lock:
         in_cooldown = normalized_symbol in bot.failed_execution_cooldowns or symbol in bot.failed_execution_cooldowns
@@ -40,6 +54,7 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     if in_cooldown:
         if time_since_failure < 900:  # 15 minutes cooldown
             log.info(f"🚫 Trade {symbol} rejeté : Cooldown d'échec actif (reste {int(900 - time_since_failure)}s)")
+            _reject_trade(bot, symbol, f"Cooldown d'échec actif (reste {int(900 - time_since_failure)}s)")
             return
         else:
             with bot._state_lock:
@@ -63,6 +78,7 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
             return
         else:
             log.info(f"🚫 Trade {symbol} rejeté : Position déjà ouverte dans la même direction (pyramidage bloqué).")
+            _reject_trade(bot, symbol, "Position déjà ouverte dans la même direction (pyramidage bloqué)")
             return
 
     # ── Audit post-freeze (fix 24/07/2026) ──────────────────────────────────
@@ -77,12 +93,14 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
             f"({post_freeze_remaining} cycle(s) restant(s)). "
             f"Le bot observe le marché sans ouvrir de nouvelles positions."
         )
+        _reject_trade(bot, symbol, f"Mode audit post-freeze actif ({post_freeze_remaining} cycle(s) restant(s))")
         return
     # ─────────────────────────────────────────────────────────────────────────
 
     # 0b. Vérifier le Trailing Profit Circuit Breaker
     if getattr(bot, '_circuit_breaker_paused', False):
         log.info(f"⏸️ [CircuitBreaker] Trade sur {symbol} rejeté — trading en pause automatique par protection des gains.")
+        _reject_trade(bot, symbol, "Trading en pause automatique par protection des gains (Circuit Breaker)")
         return
 
     # 1. Vérifier les filtres de nouvelles et de sentiment
@@ -92,6 +110,7 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         should_avoid, news_event = False, None
     if should_avoid:
         log.info(f"Trading évité pour {symbol} à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
+        _reject_trade(bot, symbol, f"Trading évité à cause des nouvelles : {news_event.title if news_event else 'Unknown'}")
         return
 
     # 1b. Filtre de score nocturne (fix sur-exposition 23-24/07/2026) ─────────
@@ -105,6 +124,7 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
                 f"🌙 [NightFilter] Trade {symbol} rejeté — score {current_score:.1f} < "
                 f"{SCORE_MIN_NIGHT} requis en session nocturne (20h-06h UTC)"
             )
+            _reject_trade(bot, symbol, f"Score {current_score:.1f} < {SCORE_MIN_NIGHT} requis en session nocturne (20h-06h UTC)")
             return
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -155,12 +175,14 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     if not check_spread(bot.broker, symbol, spread_limit):
         return
 
-    # Filtres spécifiques Forex uniquement (session, corrélation, pivots, news)
-    if symbol_asset_class in ('forex', 'forex_jpy'):
-        # A. Session horaire (H24 Forex : Tokyo + Londres + New York)
+    # A. Garde-fou Marché Ouvert : Tout actif traditionnel (Forex & Commodities) est fermé le weekend
+    if symbol_asset_class != 'crypto':
         if not is_market_open():
+            _reject_trade(bot, symbol, "Marché fermé pour le week-end (trading réservé aux cryptos)")
             return
 
+    # Filtres spécifiques Forex (corrélation, pivots, news)
+    if symbol_asset_class in ('forex', 'forex_jpy', 'forex_major', 'forex_cross'):
         # C. Corrélation de devises
         cand_side = 'LONG' if signal_data.get('should_long') else 'SHORT'
         if not check_currency_correlation(symbol, bot.positions, MAX_FOREX_CURRENCY_EXPOSURE, cand_side):
@@ -262,6 +284,7 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
 
     if max_open_corr >= 0.90:
         log.info(f"🚫 Trade {symbol} rejeté : Corrélation extrême ({max_open_corr:.2f} >= 0.90) avec une position ouverte.")
+        _reject_trade(bot, symbol, f"Corrélation extrême ({max_open_corr:.2f} >= 0.90) avec une position ouverte")
         return
     elif max_open_corr > 0.70:
         corr_data = {'average_correlation': max_open_corr}
@@ -356,6 +379,7 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
 
     if position_size <= 0:
         log.debug(f"Taille de position nulle ou rejetée pour {symbol}, pas d'action")
+        _reject_trade(bot, symbol, "Taille de position nulle ou marge insuffisante")
         return
 
     log.info(f"Taille de position calculée pour {symbol} : {position_size:.6f} | Risque : {size_details.get('actual_risk_pct', 0.0):.2f}% du compte")
@@ -448,6 +472,22 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
                                       market_regime=signal_data.get('market_regime', 'UNKNOWN'),
                                       features=features_dict,
                                       strategy_name=strat_name)
+
+        # Enregistrer l'ordre exécuté dans le ReportGenerator
+        if getattr(bot, 'report_generator', None):
+            try:
+                bot.report_generator.record_trade_event(
+                    symbol=symbol,
+                    side=side.upper(),
+                    size=position_size,
+                    entry_price=entry_price,
+                    sl=sl_price,
+                    tp=tp_price,
+                    strategy=strat_name,
+                    rationale=signal_data.get('decision_rationale', '')
+                )
+            except Exception as _re:
+                log.debug(f"Erreur recording trade ReportGenerator: {_re}")
 
     else:
         log.error(f"Échec de l'exécution du trade pour {symbol}. Activation du cooldown de 15 minutes.")

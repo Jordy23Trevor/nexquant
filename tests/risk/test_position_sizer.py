@@ -11,6 +11,8 @@ def make_rm(**overrides):
         'MAX_DAILY_LOSS_PCT': 5.0,
         'KELLY_FRACTION': 0.5,
         'MIN_TRADES_FOR_KELLY': 50,
+        'COMMISSION_PCT': 0.05,
+        'SLIPPAGE_PCT': 0.15,
     }
     config.update(overrides)
     return RiskManager(config)

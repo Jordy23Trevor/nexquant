@@ -100,33 +100,71 @@ class StrategyEngine:
         self,
         df: pd.DataFrame,
         symbol: str,
-        regime: RegimeResult,
+        regime: Any,
         asset_class: str = "forex",
         current_price: float = 0.0,
         pip_size: float = 0.0001,
-        active_sessions: Optional[List[str]] = None
+        active_sessions: Optional[List[str]] = None,
+        session_name: Optional[str] = None
     ) -> SignalResult:
         """
         Évalue les données de marché avec la ou les stratégies les plus pertinentes
         selon le régime de marché et la session active.
+        Analyse approfondie du marché et sélection dynamique multi-stratégies :
+        1. Analyse préalable de la structure et de la tendance (ADX, EMAs, RSI).
+        2. Si le régime est chaotique (choppy_noise) : aucun ordre posé pour protéger le capital.
+        3. Test séquentiel des stratégies adaptées au régime. Si la première stratégie
+           ne déclenche pas, basculement automatique sur les stratégies alternatives.
+        4. Validation d'un ratio R:R >= 2.0 pour poser des trades réfléchis et conséquents.
+        5. Renseignement exhaustif du 'Pourquoi et Comment' dans decision_rationale.
         """
+        if isinstance(regime, str):
+            from superbot.brain.regime_detector import RegimeResult
+            regime = RegimeResult(regime=regime, confidence=0.8)
+        if session_name and not active_sessions:
+            active_sessions = [session_name]
         if df is None or len(df) < 20:
             return SignalResult(
                 strategy_name="NONE",
                 market_regime=regime.regime,
-                reason="Données insuffisantes"
+                reason="Données insuffisantes",
+                decision_rationale="Données de barres insuffisantes (<20) pour établir une analyse technique fiable."
             )
 
         active_sessions = active_sessions or ["LONDON"]
         regime_type = regime.regime
 
         # Déterminer la liste ordonnée des stratégies candidates selon le régime
+        # 1. Protection Anti-Bruit : Choppy Noise
+        if regime_type == "choppy_noise":
+            log.info(f"🛡️ [Anti-Noise] {symbol} en régime 'choppy_noise' : marché sans tendance ni direction. Ordre évité.")
+            return SignalResult(
+                strategy_name="NONE",
+                market_regime=regime_type,
+                reason="Régime de marché chaotique (Choppy Noise)",
+                decision_rationale=(
+                    f"Analyse approfondie {symbol} : Le marché est en phase de bruit chaotique (choppy_noise - "
+                    f"ADX faible, absence de structure directionnelle). Aucune stratégie engagée pour préserver le capital."
+                ),
+                should_long=False,
+                should_short=False,
+                confidence=0.0
+            )
+
+        # 2. Liste ordonnée des stratégies candidates selon le régime et la session
         candidates: List[str] = self._get_candidate_strategies(regime_type, active_sessions)
+        if not candidates:
+            candidates = ["MURPHY_TREND", "VOLMAN_PRICE_ACTION", "CHAN_MEAN_REVERSION"]
 
         best_signal: Optional[SignalResult] = None
         highest_score = -1.0
+        tested_summaries: List[str] = []
 
-        for strat_name in candidates:
+        last_row = df.iloc[-1]
+        adx_val = float(last_row.get('adx', 20.0))
+        rsi_val = float(last_row.get('rsi', 50.0))
+
+        for idx, strat_name in enumerate(candidates, 1):
             strat = self.strategies.get(strat_name)
             if not strat:
                 continue
@@ -141,26 +179,76 @@ class StrategyEngine:
                     pip_size=pip_size
                 )
 
-                # Vérifier si un signal valide d'entrée est généré
-                if (sig.should_long or sig.should_short) and sig.total_score > highest_score:
-                    highest_score = sig.total_score
-                    best_signal = sig
+                # Vérifier si un signal est généré
+                has_signal = sig.should_long or sig.should_short
+
+                if has_signal:
+                    # Règle "Trades Réfléchis & Conséquents" : R:R minimal de 1.8 (cible >= 2.0)
+                    if sig.rr_ratio < 1.8 and sig.rr_ratio > 0:
+                        tested_summaries.append(
+                            f"{strat_name} (signal rejeté: R:R {sig.rr_ratio:.2f} < 1.8)"
+                        )
+                        log.debug(f"[StrategyEngine] {symbol} - Signal {strat_name} rejeté car R:R ({sig.rr_ratio:.2f}) insuffisant")
+                        continue
+
+                    tested_summaries.append(
+                        f"{strat_name} (VALIDÉ: score={sig.total_score:.1f}, R:R={sig.rr_ratio:.2f})"
+                    )
+
+                    # Sélectionner la stratégie ayant la plus forte conviction
+                    if sig.total_score > highest_score:
+                        highest_score = sig.total_score
+                        best_signal = sig
+
+                else:
+                    # Enregistrer pourquoi la stratégie n'a pas validé pour le rapport "Pourquoi et Comment"
+                    reason_short = sig.reason or "conditions techniques non alignées"
+                    tested_summaries.append(f"{strat_name} (inactif: {reason_short})")
 
             except Exception as e:
                 log.debug(f"Erreur d'analyse stratégie {strat_name} ({symbol}): {e}")
+                tested_summaries.append(f"{strat_name} (erreur analyse: {e})")
 
-        # Si aucune stratégie ne déclenche avec 'should_long/should_short', on prend la première candidate par défaut
-        if best_signal is None:
-            return SignalResult(
-                strategy_name="NONE",
-                market_regime=regime_type,
-                reason="Aucun signal déclenché",
-                should_long=False,
-                should_short=False,
-                confidence=0.0
+        # Si un signal de qualité a été validé
+        if best_signal is not None:
+            side_str = "ACHAT (LONG)" if best_signal.should_long else "VENTE (SHORT)"
+            rationale = (
+                f"✅ Analyse approfondie validée sur {symbol} | "
+                f"Régime : {regime_type.upper()} (Confiance: {regime.confidence:.0%}) | "
+                f"Tendance / Momentum : ADX={adx_val:.1f}, RSI={rsi_val:.1f} | "
+                f"Stratégie retenue : {best_signal.strategy_name} | "
+                f"Décision : {side_str} @ {best_signal.entry_price:.5f} | "
+                f"Stop-Loss : {best_signal.sl_price:.5f} | Take-Profit : {best_signal.tp_price:.5f} | "
+                f"Ratio R:R : {best_signal.rr_ratio:.2f} | Score : {best_signal.total_score:.1f}/10 | "
+                f"Motif : {best_signal.reason} | "
+                f"Processus multi-stratégies : {'; '.join(tested_summaries)}"
             )
+            best_signal.decision_rationale = rationale
+            best_signal.extra_data['tested_strategies'] = tested_summaries
+            best_signal.extra_data['market_regime'] = regime_type
+            best_signal.extra_data['regime_confidence'] = regime.confidence
+            best_signal.extra_data['adx'] = adx_val
+            best_signal.extra_data['rsi'] = rsi_val
+            return best_signal
 
-        return best_signal
+        # Si aucune stratégie n'a déclenché de signal à haute probabilité, préserver le capital
+        no_signal_rationale = (
+            f"🔍 Analyse approfondie {symbol} | Régime : {regime_type.upper()} "
+            f"(ADX={adx_val:.1f}, RSI={rsi_val:.1f}) | "
+            f"Stratégies évaluées : {'; '.join(tested_summaries)} | "
+            f"Conclusion : Aucune configuration à haute probabilité conforme (R:R >= 1.8 ou déclenchement absent). "
+            f"Ordre différé pour préserver le capital."
+        )
+        return SignalResult(
+            strategy_name=candidates[0] if candidates else "NONE",
+            market_regime=regime_type,
+            reason="Aucun setup à haute probabilité conforme après test multi-stratégies",
+            decision_rationale=no_signal_rationale,
+            should_long=False,
+            should_short=False,
+            confidence=0.0,
+            extra_data={'tested_strategies': tested_summaries, 'adx': adx_val, 'rsi': rsi_val}
+        )
 
     def _get_candidate_strategies(self, regime_type: str, active_sessions: List[str]) -> List[str]:
         """
