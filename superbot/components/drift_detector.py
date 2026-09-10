@@ -23,10 +23,19 @@ def detect_model_drift(bot):
     if len(closed_trades) < 10:
         return  # Pas assez de données pour détecter une dérive
 
+    # Ne ré-évaluer la dérive que lorsqu'un nouveau trade a été clôturé
+    closed_count = len(closed_trades)
+    if getattr(bot, '_last_drift_checked_trades', 0) == closed_count:
+        return
+    bot._last_drift_checked_trades = closed_count
+
     # Calculer le taux de victoire sur les 10 derniers trades clôturés
     recent = closed_trades[-10:]
     winning = sum(1 for t in recent if t.get('pnl', 0) > 0)
     win_rate = winning / len(recent) if recent else 0.0
+
+    # Plancher de sécurité strict : le risque ne doit jamais descendre sous 0.5%
+    MIN_ADAPTIVE_RISK = 0.5
 
     if win_rate < 0.20:
         log.error(f"🚨 Dérive sévère détectée: taux de victoire ({win_rate:.2f}). Mise en pause 2h et réduction du risque de 50%.")
@@ -36,11 +45,15 @@ def detect_model_drift(bot):
         if getattr(bot, 'auto_unpause', False):
             log.warning(f"⚠️ Dérive détectée: taux de victoire ({win_rate:.2f}). Réduction du risque de 50% (auto-unpause actif: pause annulée pour maintenir le trading continu).")
             bot.adaptive_risk_pct = bot.adaptive_risk_pct * 0.5
+            bot.adaptive_risk_pct = max(MIN_ADAPTIVE_RISK, round(bot.adaptive_risk_pct * 0.5, 2))
         else:
             log.error(f"🚨 Dérive sévère détectée: taux de victoire ({win_rate:.2f}). Mise en pause 2h et réduction du risque de 50%.")
             bot.is_paused = True
             bot._drift_pause_until = datetime.now(timezone.utc) + timedelta(hours=2)
             bot.adaptive_risk_pct = bot.adaptive_risk_pct * 0.5
+            bot.adaptive_risk_pct = max(MIN_ADAPTIVE_RISK, round(bot.adaptive_risk_pct * 0.5, 2))
     elif win_rate < 0.30:
         log.warning(f"⚠️ Dérive modérée détectée: taux de victoire ({win_rate:.2f}). Réduction du risque de 25%.")
         bot.adaptive_risk_pct = bot.adaptive_risk_pct * 0.75
+        bot.adaptive_risk_pct = max(MIN_ADAPTIVE_RISK, round(bot.adaptive_risk_pct * 0.75, 2))
+

@@ -244,7 +244,6 @@ class ReportGenerator:
 
         lines.append("| Métrique | Valeur |")
         lines.append("|---|---|")
-        lines.append(f"| **Objectif Journalier** | {target:.2f} € |")
         lines.append(f"| **Cible Capital Session (Visée)** | **35.00 € à 40.00 €** |")
         lines.append(f"| **Objectif Gain PnL** | {target:.2f} € |")
         lines.append(f"| **PnL Réalisé Jour** | **{achieved:+.2f} €** ({pct:.1f}%) |")

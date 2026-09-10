@@ -200,21 +200,17 @@ class BugWatchdog:
             if rm is None:
                 return ("risk_manager", "risk_manager est None — composant critique manquant", "Critical", True)
 
-            # Vérifier les paramètres de base
+            # Vérifier les paramètres de base avec auto-guérison
             if rm.RISK_PCT <= 0 or rm.RISK_PCT > 10:
-                return (
-                    "risk_manager",
-                    f"RISK_PCT invalide: {rm.RISK_PCT}% (attendu: 0 < x ≤ 10)",
-                    "High",
-                    True,
-                )
+                healed_risk = 1.0
+                log.warning(f"⚠️ [BugWatchdog] RISK_PCT anormal ({rm.RISK_PCT}%), auto-guérison appliquée à {healed_risk}%")
+                rm.RISK_PCT = healed_risk
+                if hasattr(self.bot, 'runtime_config') and self.bot.runtime_config:
+                    self.bot.runtime_config.set(risk_pct=healed_risk)
+
             if rm.MAX_OPEN_POSITIONS <= 0:
-                return (
-                    "risk_manager",
-                    f"MAX_OPEN_POSITIONS invalide: {rm.MAX_OPEN_POSITIONS}",
-                    "High",
-                    True,
-                )
+                log.warning(f"⚠️ [BugWatchdog] MAX_OPEN_POSITIONS anormal ({rm.MAX_OPEN_POSITIONS}), auto-guérison appliquée à 3")
+                rm.MAX_OPEN_POSITIONS = 3
 
             # Vérifier la cohérence des positions ouvertes
             open_positions = getattr(rm, "open_positions", {})

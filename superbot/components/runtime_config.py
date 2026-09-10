@@ -50,6 +50,11 @@ class RuntimeConfig:
         if risk_pct is not None and float(risk_pct) != self._risk_pct:
             self._risk_pct = float(risk_pct)
             changed = True
+        if risk_pct is not None:
+            clamped_risk = max(0.3, min(float(risk_pct), 10.0))
+            if clamped_risk != self._risk_pct:
+                self._risk_pct = clamped_risk
+                changed = True
         if score_min is not None and float(score_min) != self._score_min:
             self._score_min = float(score_min)
             changed = True

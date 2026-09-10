@@ -104,20 +104,29 @@ class PerformanceLearner:
         avg_rr = float(stats.get('avg_rr') or 2.0)
         total_trades = int(stats.get('total_trades') or 0)
 
+        # 2. Adapter le score_min selon le WinRate
         # 2. Adapter le score_min selon le WinRate (calibré depuis la base 6.0)
         if total_trades >= 10:
             old_score = self._current_params.get('score_min', 6)
             base_score = 6.0
             if win_rate < 35:
+                new_score = min(9, old_score + 1)
+                reason = f"WinRate faible ({win_rate:.0f}%) → plus sélectif"
                 new_score = min(7.0, base_score + 1.0)
                 reason = f"WinRate faible ({win_rate:.0f}%) → sélectivité renforcée (score=7.0)"
             elif win_rate < 45:
+                new_score = min(8, old_score + 0.5)
+                reason = f"WinRate en dessous de 45% ({win_rate:.0f}%) → légèrement plus sélectif"
                 new_score = min(6.5, base_score + 0.5)
                 reason = f"WinRate modéré ({win_rate:.0f}%) → légère sélectivité (score=6.5)"
             elif win_rate > 65:
+                new_score = max(5, old_score - 0.5)
+                reason = f"WinRate élevé ({win_rate:.0f}%) → exploiter la vague"
                 new_score = max(5.5, base_score - 0.5)
                 reason = f"WinRate élevé ({win_rate:.0f}%) → opportunisme actif (score=5.5)"
             else:
+                new_score = old_score
+                reason = "WinRate stable"
                 new_score = base_score
                 reason = "WinRate équilibré (score=6.0)"
 
