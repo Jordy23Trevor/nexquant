@@ -5,5 +5,7 @@ from superbot.brain.session_manager import SessionManager
 from superbot.brain.knowledge_feeder import KnowledgeFeeder
 from superbot.brain.performance_learner import PerformanceLearner
 from superbot.brain.strategy_engine import StrategyEngine
+from superbot.brain.session_target_tracker import SessionTargetTracker
 
 __all__ = ['SessionManager', 'KnowledgeFeeder', 'PerformanceLearner', 'StrategyEngine']
+__all__ = ['SessionManager', 'KnowledgeFeeder', 'PerformanceLearner', 'StrategyEngine', 'SessionTargetTracker']

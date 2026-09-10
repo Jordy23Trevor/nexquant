@@ -172,6 +172,9 @@ MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))  # Max daily 
 MAX_DAILY_LOSS_AMOUNT = float(os.getenv("MAX_DAILY_LOSS_AMOUNT", "100.0"))  # Hard cap absolu 100€ max de perte jour
 MAX_MONTHLY_LOSS_PCT = float(os.getenv("MAX_MONTHLY_LOSS_PCT", "6.0"))  # Max monthly drawdown %
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "6"))  # Max concurrent positions across fleet
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "5"))  # Max concurrent positions across fleet
+SESSION_TARGET_EQUITY_MIN = float(os.getenv("SESSION_TARGET_EQUITY_MIN", "35.0"))  # Cible minimale de session (EUR)
+SESSION_TARGET_EQUITY_MAX = float(os.getenv("SESSION_TARGET_EQUITY_MAX", "40.0"))  # Cible maximale de session (EUR)
 
 # =============================================================================
 # 🗡️ PROTECTION PAR DRAWDOWN
@@ -506,6 +509,7 @@ __all__ = [
 
     # 🎯 V3 — Objectifs journaliers & sessions
     "DAILY_TARGET_EUR", "SESSION_AWARE", "TRADING_MODE",
+    "DAILY_TARGET_EUR", "SESSION_TARGET_EQUITY_MIN", "SESSION_TARGET_EQUITY_MAX", "SESSION_AWARE", "TRADING_MODE",
     "SIMULATED_SLIPPAGE_POINTS", "SIMULATED_COMMISSION_PCT",
 
     # 🧠 V3 — Auto-apprentissage

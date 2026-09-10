@@ -381,6 +381,13 @@ class SuperBot:
             log.warning(f"⚠️ SessionManager non disponible : {e}")
 
         try:
+            from superbot.brain.session_target_tracker import SessionTargetTracker
+            self.session_target_tracker = SessionTargetTracker()
+            log.info("🎯 SessionTargetTracker initialisé (Cible 35€ - 40€)")
+        except Exception as e:
+            log.warning(f"⚠️ SessionTargetTracker non disponible : {e}")
+
+        try:
             from superbot.brain.strategy_engine import StrategyEngine
             self.strategy_engine = StrategyEngine(db=self.db, session_manager=self.session_manager)
             log.info("♟️ StrategyEngine initialisé")

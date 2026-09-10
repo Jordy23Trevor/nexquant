@@ -145,6 +145,9 @@ def sync_positions_with_broker(bot):
                         new_balance = float(bot.broker.get_balance())
                         bot.risk_manager.update_account_balance(new_balance)
                         bot._cached_balance = new_balance
+                        if getattr(bot, 'session_target_tracker', None):
+                            bot.session_target_tracker.update(new_balance)
+                            bot.session_target_tracker.log_progress(force=True)
                         log.debug(f"[BUG-A03] Solde mis à jour post-clôture {symbol}: {new_balance:.2f}")
                     except Exception as _e:
                         log.debug(f"[BUG-A03] Impossible de rafraîchir le solde post-clôture: {_e}")

@@ -283,8 +283,12 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
         else:
             max_allowed_risk_pct = max(5.0, rm.RISK_PCT * 3.0)
         # Adaptation micro-compte (< 200€) : les contrats min (0.01 lot) peuvent représenter 3 à 8% de risque
+        # Adaptation micro-compte (< 200€) : les contrats min (0.01 lot) sur matières premières (pétrole, or, gaz)
+        # représentent 12 à 25% de risque relatif (~2.50€ au SL sur un compte à 15€, pour un gain de +5€ à +7.50€).
         if account_balance < 200.0 and position_size <= min_size:
             max_allowed_risk_pct = max(max_allowed_risk_pct, 10.0)
+            max_micro_risk = 35.0 if not getattr(rm, 'ENABLE_LOSS_LIMIT', False) else 15.0
+            max_allowed_risk_pct = max(max_allowed_risk_pct, max_micro_risk)
 
         if actual_risk_pct > max_allowed_risk_pct:
             if position_size <= min_size:

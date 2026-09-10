@@ -164,9 +164,10 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     except ImportError:
         MAX_SPREAD_PIPS_CRYPTO, MAX_SPREAD_PIPS_COMMODITY = 500.0, 30.0
 
-    if symbol_asset_class == 'crypto':
+    symbol_asset_str = str(symbol_asset_class or "").lower()
+    if symbol_asset_str == 'crypto':
         spread_limit = MAX_SPREAD_PIPS_CRYPTO
-    elif symbol_asset_class == 'commodity':
+    elif symbol_asset_str.startswith('commodity'):
         spread_limit = MAX_SPREAD_PIPS_COMMODITY
     else:
         spread_limit = MAX_SPREAD_PIPS
@@ -329,10 +330,11 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     if getattr(bot, 'online_learner', None):
         try:
             latest_bar = df_with_indicators.iloc[-1]
+            real_spread = bot.broker.get_spread(symbol) if hasattr(bot, 'broker') and bot.broker else 1.0
             ml_ctx = {
                 'regime': signal_data.get('market_regime', 'ranging'),
                 'session': getattr(bot.session_manager.get_current_session(), 'name', 'LONDON') if getattr(bot, 'session_manager', None) else 'LONDON',
-                'spread_pips': max_open_corr,
+                'spread_pips': real_spread,
                 'strategy_name': signal_data.get('strategy_used', 'UNKNOWN'),
             }
             win_prob = bot.online_learner.get_prediction(latest_bar, ml_ctx)
@@ -340,14 +342,17 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
                 signal_data['details'] = {}
             signal_data['details']['win_prob'] = win_prob
 
-            # Si le modèle est entraîné et prédit une faible probabilité de succès (<35%), on rejette
             scorer = getattr(bot.online_learner, 'scorer', None)
-            if scorer and getattr(scorer, 'is_trained', False) and win_prob < 0.35:
+            is_high_conviction_consensus = score_raw_val >= (score_min_val + 0.5) or score_raw_val >= 7.0
+            if scorer and getattr(scorer, 'is_trained', False) and win_prob < 0.20 and not is_high_conviction_consensus:
                 log.warning(f"🤖 [OnlineLearner] Trade {symbol} rejeté : Probabilité ML de gain trop faible ({win_prob:.1%})")
                 return
-            elif win_prob > 0.65:
+            elif win_prob > 0.60:
                 conviction_boost = min(conviction_boost * 1.15, 1.50)
                 log.info(f"🤖 [OnlineLearner] Boost probabilité ML ({win_prob:.1%}) appliqué pour {symbol} -> Boost={conviction_boost:.2f}")
+            elif win_prob < 0.35 and not is_high_conviction_consensus:
+                conviction_boost = max(conviction_boost * 0.85, 0.70)
+                log.info(f"🤖 [OnlineLearner] Probabilité ML prudente ({win_prob:.1%}) -> Sizing ajusté (Boost={conviction_boost:.2f})")
         except Exception as _ml_e:
             log.debug(f"Erreur prédiction OnlineLearner ({symbol}): {_ml_e}")
 

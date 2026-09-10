@@ -55,6 +55,13 @@ SESSION_DEFINITIONS = {
         "risk_multiplier": 0.7,       # -30% de risque
         "priority_assets": ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"],
         "pnl_target_pct": 0.10,       # 10% de l'objectif journalier
+        "description": "Pré-London (préparation, momentum pré-ouverture)",
+        "liquidity": "medium",
+        "score_multiplier": 1.05,     # Légère sélectivité
+        "max_positions_ratio": 0.8,   # 80% des positions max
+        "risk_multiplier": 0.85,
+        "priority_assets": ["EURUSD", "GBPUSD", "EURGBP", "EURJPY", "USDJPY", "XAUUSD", "XTIUSD", "XBRUSD"],
+        "pnl_target_pct": 0.15,
         "allow_new_trades": True,
     },
     "LONDON": {
@@ -481,8 +488,8 @@ class SessionManager:
                 # Adapter MAX_OPEN_POSITIONS selon la session
                 base_max = getattr(rm, '_base_max_positions', rm.MAX_OPEN_POSITIONS)
                 if not hasattr(rm, '_base_max_positions'):
-                    rm._base_max_positions = rm.MAX_OPEN_POSITIONS
-                rm.MAX_OPEN_POSITIONS = max(1, int(round(rm._base_max_positions * pos_ratio)))
+                    rm._base_max_positions = base_max
+                rm.MAX_OPEN_POSITIONS = max(3, int(round(base_max * pos_ratio)))
 
             # Adapter le score_min de la stratégie
             adapted_score = None

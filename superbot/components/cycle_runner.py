@@ -266,6 +266,9 @@ def run_main_loop(bot):
                         bot.risk_manager.update_account_balance(balance)
                         if equity > 0.0 and hasattr(bot.risk_manager, 'update_equity'):
                             bot.risk_manager.update_equity(equity)
+                        if hasattr(bot, 'session_target_tracker') and bot.session_target_tracker:
+                            bot.session_target_tracker.update(balance, equity)
+                            bot.session_target_tracker.log_progress()
                         if bot.risk_manager.check_kill_switch(balance):
                             log.critical("🛑 KILL-SWITCH ACTIVÉ : Auto-pause d'urgence déclenchée pour protéger le capital.")
                             bot.is_paused = True

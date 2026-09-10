@@ -178,9 +178,6 @@ class ReportGenerator:
                 'closed_at': now_utc.strftime('%H:%M UTC'),
                 'pnl': session_pnl,
                 'trades_count': trades_count,
-                'trades': list(self._current_session_events['trades']),
-                'rejected': list(self._current_session_events['rejected']),
-                'analyses': list(self._current_session_events['analyses']),
                 'trades': list(self._current_session_events.get('trades', [])),
                 'rejected': list(self._current_session_events.get('rejected', [])),
                 'analyses': list(self._current_session_events.get('analyses', [])),
@@ -248,9 +245,19 @@ class ReportGenerator:
         lines.append("| Métrique | Valeur |")
         lines.append("|---|---|")
         lines.append(f"| **Objectif Journalier** | {target:.2f} € |")
+        lines.append(f"| **Cible Capital Session (Visée)** | **35.00 € à 40.00 €** |")
+        lines.append(f"| **Objectif Gain PnL** | {target:.2f} € |")
         lines.append(f"| **PnL Réalisé Jour** | **{achieved:+.2f} €** ({pct:.1f}%) |")
         lines.append(f"| **Solde Début Jour** | {balance_start:.2f} € |")
         lines.append(f"| **Solde Actuel / Fin** | {balance_end:.2f} € |")
+        target_tracker = getattr(self, 'session_target_tracker', None)
+        if not target_tracker and hasattr(self, 'session_manager') and hasattr(self.session_manager, 'bot_instance'):
+            target_tracker = getattr(self.session_manager.bot_instance, 'session_target_tracker', None)
+        if target_tracker:
+            t_status = target_tracker.get_status()
+            lines.append(f"| **Progression vers la Cible** | **{t_status['progress_pct']:.1f} %** (Reste : {t_status['remaining_amount']:.2f} €) |")
+            if t_status['current_equity'] > 0:
+                lines.append(f"| **Équité en Direct** | {t_status['current_equity']:.2f} € (Pic : {t_status['peak_equity']:.2f} €) |")
         lines.append(f"| **Statut de Performance** | {status} |")
         lines.append("")
 
@@ -290,9 +297,6 @@ class ReportGenerator:
                 'closed_at': f"Depuis {time_str}",
                 'pnl': curr_sess_pnl,
                 'trades_count': curr_sess_trades,
-                'trades': list(self._current_session_events['trades']),
-                'rejected': list(self._current_session_events['rejected']),
-                'analyses': list(self._current_session_events['analyses']),
                 'trades': list(self._current_session_events.get('trades', [])),
                 'rejected': list(self._current_session_events.get('rejected', [])),
                 'analyses': list(self._current_session_events.get('analyses', [])),
@@ -339,7 +343,6 @@ class ReportGenerator:
                         lines.append(f"| {t.get('time', '—')} | **{sym}** | `{side}` | {lots} | {entry:.5f} | {sl:.5f} | {tp:.5f} | {rr:.2f} | *{strat}* : {rat[:60]}... |")
                     lines.append("")
 
-                # C. Opportunités Filtrées / Rejetées
                 # C. Diagnostics Post-Mortem & Analyses de Pertes (Pauses 10 min)
                 post_mortems = sess.get('post_mortems', [])
                 if post_mortems:
@@ -397,7 +400,6 @@ class ReportGenerator:
 
                 blocked = list(getattr(self.performance_learner, '_blocked_symbols', set()))
                 if blocked:
-                    lines.append(f"- **Symboles Temporairement Bloqués** : `{', '.join(blocked)}` (Série de 3+ pertes consécutives).")
                     lines.append(f"- **Symboles Bloqués Session** : `{', '.join(blocked)}`.")
 
                 decisions = getattr(self.performance_learner, '_decisions_log', [])
