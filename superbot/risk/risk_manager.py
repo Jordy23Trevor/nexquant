@@ -30,6 +30,7 @@ class RiskManager:
                     MAX_OPEN_POSITIONS, KELLY_FRACTION, etc.)
         """
         self.config = config
+        self.ENABLE_LOSS_LIMIT = config.get('ENABLE_LOSS_LIMIT', False)
         self.RISK_PCT = config.get('RISK_PCT', 1.0)  # % du compte à risquer par trade
         self.MAX_DAILY_LOSS_PCT = config.get('MAX_DAILY_LOSS_PCT', 3.0)  # % max perte journalier
         self.MAX_MONTHLY_LOSS_PCT = config.get('MAX_MONTHLY_LOSS_PCT', 6.0)  # % max perte mensuel
@@ -154,7 +155,11 @@ class RiskManager:
         """
         Vérifie le Kill-Switch de Drawdown journalier et mensuel.
         Retourne True si le bot doit se mettre en auto-pause pour la journée.
+        Si ENABLE_LOSS_LIMIT est False, la limite de perte est désactivée.
         """
+        if not getattr(self, 'ENABLE_LOSS_LIMIT', False):
+            return False
+
         if self.day_start_balance > 0:
             daily_loss_pct = abs(min(0, self.daily_pnl)) / self.day_start_balance * 100
             if daily_loss_pct >= self.MAX_DAILY_LOSS_PCT:

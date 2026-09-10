@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from superbot.strategy.base_strategy import BaseStrategy, SignalResult
+from superbot.strategy.unified_alpha import UnifiedAlphaStrategy
 from superbot.strategy.elder_triple_screen import ElderTripleScreenStrategy
 from superbot.strategy.chan_mean_reversion import ChanMeanReversionStrategy
 from superbot.strategy.murphy_trend import MurphyTrendStrategy
@@ -30,6 +31,7 @@ log = logging.getLogger("nexquant.strategy_engine")
 class StrategyEngine:
     """
     Moteur de sélection dynamique et exécution des stratégies.
+    Intègre UnifiedAlphaStrategy comme stratégie maîtresse combinée.
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, db=None, session_manager=None, online_learner=None, knowledge_feeder=None, **kwargs):
@@ -40,7 +42,9 @@ class StrategyEngine:
         self.knowledge_feeder = knowledge_feeder
 
         # Instanciation de la suite des 6 stratégies
+        # Instanciation de la suite des stratégies avec UnifiedAlphaStrategy en maître
         self.strategies: Dict[str, BaseStrategy] = {
+            "UNIFIED_ALPHA": UnifiedAlphaStrategy(self.config),
             "ELDER_TRIPLE_SCREEN": ElderTripleScreenStrategy(self.config),
             "CHAN_MEAN_REVERSION": ChanMeanReversionStrategy(self.config),
             "MURPHY_TREND": MurphyTrendStrategy(self.config),
@@ -53,6 +57,7 @@ class StrategyEngine:
             for name in self.strategies
         }
         log.info("StrategyEngine MT5 initialisé avec 6 stratégies d'élite")
+        log.info("StrategyEngine MT5 initialisé avec UnifiedAlphaStrategy et 6 stratégies d'élite")
 
     def select_best_strategy(self, regime: str, session_name: Optional[str] = None, **kwargs) -> Tuple[str, float]:
         """Sélectionne le nom de la meilleure stratégie pour un régime et une session donnés."""
@@ -164,6 +169,14 @@ class StrategyEngine:
         adx_val = float(last_row.get('adx', 20.0))
         rsi_val = float(last_row.get('rsi', 50.0))
 
+        # Adaptations issues du post-mortem (si enchaînement de pertes antérieur)
+        adapted_params = None
+        if getattr(self, 'performance_learner', None):
+            try:
+                adapted_params = self.performance_learner.get_symbol_adapted_params(symbol)
+            except Exception:
+                adapted_params = None
+
         for idx, strat_name in enumerate(candidates, 1):
             strat = self.strategies.get(strat_name)
             if not strat:
@@ -178,6 +191,25 @@ class StrategyEngine:
                     current_price=current_price,
                     pip_size=pip_size
                 )
+                if strat_name == "UNIFIED_ALPHA":
+                    sig = strat.analyze(
+                        df=df,
+                        symbol=symbol,
+                        regime=regime,
+                        asset_class=asset_class,
+                        current_price=current_price,
+                        pip_size=pip_size,
+                        adapted_params=adapted_params
+                    )
+                else:
+                    sig = strat.analyze(
+                        df=df,
+                        symbol=symbol,
+                        regime=regime,
+                        asset_class=asset_class,
+                        current_price=current_price,
+                        pip_size=pip_size
+                    )
 
                 # Vérifier si un signal est généré
                 has_signal = sig.should_long or sig.should_short
@@ -253,12 +285,14 @@ class StrategyEngine:
     def _get_candidate_strategies(self, regime_type: str, active_sessions: List[str]) -> List[str]:
         """
         Sélectionne les stratégies prioritaires selon le régime et la session.
+        UNIFIED_ALPHA est systématiquement la stratégie maîtresse prioritaire.
         """
         candidates: List[str] = []
 
         # 1. Régimes de Tendance forte (Bullish / Bearish)
         if regime_type in ["trending_bull", "trending_bear"]:
             candidates = [
+                "UNIFIED_ALPHA",
                 "ELDER_TRIPLE_SCREEN",
                 "MURPHY_TREND",
                 "INTERMARKET_MOMENTUM",
@@ -268,6 +302,7 @@ class StrategyEngine:
         # 2. Régimes de Range / Oscillations
         elif regime_type == "ranging":
             candidates = [
+                "UNIFIED_ALPHA",
                 "CHAN_MEAN_REVERSION",
                 "VOLMAN_PRICE_ACTION"
             ]
@@ -280,12 +315,14 @@ class StrategyEngine:
         elif regime_type in ["pre_breakout", "breakout"]:
             if "LONDON" in active_sessions or "OVERLAP" in active_sessions:
                 candidates = [
+                    "UNIFIED_ALPHA",
                     "LONDON_BREAKOUT",
                     "VOLMAN_PRICE_ACTION",
                     "MURPHY_TREND"
                 ]
             else:
                 candidates = [
+                    "UNIFIED_ALPHA",
                     "VOLMAN_PRICE_ACTION",
                     "MURPHY_TREND",
                     "CHAN_MEAN_REVERSION"
@@ -294,6 +331,7 @@ class StrategyEngine:
         # 4. Haute volatilité
         elif regime_type == "high_volatility":
             candidates = [
+                "UNIFIED_ALPHA",
                 "CHAN_MEAN_REVERSION",
                 "INTERMARKET_MOMENTUM",
                 "ELDER_TRIPLE_SCREEN"
@@ -301,6 +339,7 @@ class StrategyEngine:
 
         else:
             candidates = [
+                "UNIFIED_ALPHA",
                 "MURPHY_TREND",
                 "ELDER_TRIPLE_SCREEN",
                 "CHAN_MEAN_REVERSION"

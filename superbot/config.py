@@ -167,6 +167,7 @@ TSMOM_BROKER_SYMBOLS = {
 }
 
 # Drawdown limits (Elder's rules & Hard Daily Cap)
+ENABLE_LOSS_LIMIT = os.getenv("ENABLE_LOSS_LIMIT", "false").lower() == "true"  # Désactivation de la limite de perte globale
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))  # Max daily drawdown %
 MAX_DAILY_LOSS_AMOUNT = float(os.getenv("MAX_DAILY_LOSS_AMOUNT", "100.0"))  # Hard cap absolu 100€ max de perte jour
 MAX_MONTHLY_LOSS_PCT = float(os.getenv("MAX_MONTHLY_LOSS_PCT", "6.0"))  # Max monthly drawdown %
@@ -408,9 +409,14 @@ def validate_config():
 
     if not (0.5 <= MAX_DAILY_LOSS_PCT <= 15.0):  # V3: élargi à 15% pour stratégies x10
         errors.append(f"MAX_DAILY_LOSS_PCT ({MAX_DAILY_LOSS_PCT}%) est hors limites. Il doit être compris entre 0.5% et 15.0% pour protéger le capital.")
+    if ENABLE_LOSS_LIMIT:
+        if not (0.5 <= MAX_DAILY_LOSS_PCT <= 15.0):  # V3: élargi à 15% pour stratégies x10
+            errors.append(f"MAX_DAILY_LOSS_PCT ({MAX_DAILY_LOSS_PCT}%) est hors limites. Il doit être compris entre 0.5% et 15.0% pour protéger le capital.")
 
     if not (1.0 <= MAX_MONTHLY_LOSS_PCT <= 20.0):
         errors.append(f"MAX_MONTHLY_LOSS_PCT ({MAX_MONTHLY_LOSS_PCT}%) doit être compris entre 1.0% et 20.0%.")
+        if not (1.0 <= MAX_MONTHLY_LOSS_PCT <= 20.0):
+            errors.append(f"MAX_MONTHLY_LOSS_PCT ({MAX_MONTHLY_LOSS_PCT}%) doit être compris entre 1.0% et 20.0%.")
 
     if not (1 <= MAX_OPEN_POSITIONS <= 10):
         errors.append(f"MAX_OPEN_POSITIONS ({MAX_OPEN_POSITIONS}) doit être compris entre 1 et 10.")
@@ -475,6 +481,7 @@ __all__ = [
     "SL_ATR_MULT_FOREX", "TP_ATR_MULT_FOREX", "FOREX_NEWS_AVOID_MINUTES",
     # Risk Management
     "RISK_PCT", "SL_ATR_MULT", "TP_ATR_MULT", "TRAIL_ATR_MULT", "TRAIL_ACTIVATE_ATR_MULT", "BE_ATR_MULT",
+    "ENABLE_LOSS_LIMIT", "RISK_PCT", "SL_ATR_MULT", "TP_ATR_MULT", "TRAIL_ATR_MULT", "TRAIL_ACTIVATE_ATR_MULT", "BE_ATR_MULT",
     "SCORE_MIN", "SCORE_MODE", "MAX_DAILY_LOSS_PCT", "MAX_MONTHLY_LOSS_PCT", "MAX_OPEN_POSITIONS",
     "TSMOM_ENABLED", "TSMOM_LOOKBACK", "TSMOM_SKIP", "TSMOM_TARGET_VOL",
     "TSMOM_MAX_LEVERAGE", "TSMOM_VOL_WINDOW", "TSMOM_UNIVERSE",

@@ -44,6 +44,7 @@ class ReportGenerator:
             'trades': [],
             'rejected': [],
             'analyses': [],
+            'post_mortems': [],
         }
 
         os.makedirs(self.REPORTS_DIR, exist_ok=True)
@@ -133,6 +134,33 @@ class ReportGenerator:
             if len(self._current_session_events['rejected']) > 100:
                 self._current_session_events['rejected'] = self._current_session_events['rejected'][-100:]
 
+    def record_post_mortem_event(
+        self,
+        symbol: str,
+        consecutive_losses: int,
+        cause: str,
+        adapted_parameters: Optional[Dict[str, Any]] = None,
+        details: Optional[Dict[str, Any]] = None
+    ):
+        """Enregistre un diagnostic post-mortem suite à un enchaînement de pertes et la pause de 10 min."""
+        with self._lock:
+            now_str = datetime.now(timezone.utc).strftime('%H:%M:%S UTC')
+            self._current_session_events.setdefault('post_mortems', []).append({
+                'time': now_str,
+                'symbol': symbol,
+                'consecutive_losses': consecutive_losses,
+                'cause': cause,
+                'adapted_parameters': adapted_parameters or {},
+                'details': details or {}
+            })
+            if len(self._current_session_events['post_mortems']) > 50:
+                self._current_session_events['post_mortems'] = self._current_session_events['post_mortems'][-50:]
+
+        try:
+            self.generate_daily_report()
+        except Exception as e:
+            log.debug(f"Erreur mise à jour rapport post-mortem: {e}")
+
     def record_session_transition(self, old_session: str, new_session: str, session_pnl: float = 0.0, trades_count: int = 0):
         """
         Appelé à la clôture d'une session : archive le bilan de la session écoulée
@@ -153,6 +181,10 @@ class ReportGenerator:
                 'trades': list(self._current_session_events['trades']),
                 'rejected': list(self._current_session_events['rejected']),
                 'analyses': list(self._current_session_events['analyses']),
+                'trades': list(self._current_session_events.get('trades', [])),
+                'rejected': list(self._current_session_events.get('rejected', [])),
+                'analyses': list(self._current_session_events.get('analyses', [])),
+                'post_mortems': list(self._current_session_events.get('post_mortems', [])),
             }
             self._sessions_log[date_str].append(completed_session)
 
@@ -160,6 +192,7 @@ class ReportGenerator:
                 'trades': [],
                 'rejected': [],
                 'analyses': [],
+                'post_mortems': [],
             }
 
         log.info(f"📝 Bilan archivé pour la session {old_session} ({trades_count} trades, PnL={session_pnl:+.2f}€).")
@@ -260,6 +293,10 @@ class ReportGenerator:
                 'trades': list(self._current_session_events['trades']),
                 'rejected': list(self._current_session_events['rejected']),
                 'analyses': list(self._current_session_events['analyses']),
+                'trades': list(self._current_session_events.get('trades', [])),
+                'rejected': list(self._current_session_events.get('rejected', [])),
+                'analyses': list(self._current_session_events.get('analyses', [])),
+                'post_mortems': list(self._current_session_events.get('post_mortems', [])),
             }
             all_sessions_to_display = recorded_sessions + [active_session_view]
 
@@ -303,6 +340,25 @@ class ReportGenerator:
                     lines.append("")
 
                 # C. Opportunités Filtrées / Rejetées
+                # C. Diagnostics Post-Mortem & Analyses de Pertes (Pauses 10 min)
+                post_mortems = sess.get('post_mortems', [])
+                if post_mortems:
+                    lines.append("#### 🔬 Diagnostics Post-Mortem & Analyses de Pertes (Pauses 10 min)")
+                    for pm in post_mortems:
+                        sym = pm.get('symbol', '')
+                        losses = pm.get('consecutive_losses', 2)
+                        cause = pm.get('cause', '')
+                        adapt = pm.get('adapted_parameters', {})
+                        t = pm.get('time', '')
+                        lines.append(f"- `[{t}]` **{sym}** : ⚠️ **{losses} pertes consécutives** détectées.")
+                        lines.append(f"  - **Diagnostic de cause** : {cause}")
+                        lines.append(f"  - **Action conservatoire** : Suspension immédiate de 10 min sur {sym} pour ré-analyse.")
+                        if adapt:
+                            adapt_str = ", ".join(f"`{k}`: {v}" for k, v in adapt.items())
+                            lines.append(f"  - **Adaptations stratégiques post-pause** : {adapt_str}")
+                    lines.append("")
+
+                # D. Opportunités Filtrées / Rejetées
                 rejected = sess.get('rejected', [])
                 if rejected:
                     lines.append("#### 🛡️ Opportunités Filtrées / Rejetées (Préservation du Capital)")
@@ -321,9 +377,28 @@ class ReportGenerator:
                 lines.append(f"- **Multiplicateur Stop-Loss ATR** : `{params.get('sl_atr_mult', 1.5)}×`")
                 lines.append(f"- **Multiplicateur Take-Profit ATR** : `{params.get('tp_atr_mult', 3.0)}×`")
 
+                # Pauses actives 10 min
+                if hasattr(self.performance_learner, 'get_active_pauses'):
+                    active_pauses = self.performance_learner.get_active_pauses()
+                    if active_pauses:
+                        lines.append("")
+                        lines.append("### ⏳ Pauses 10 min Actuellement en Cours")
+                        for sym, p_info in active_pauses.items():
+                            lines.append(f"- **{sym}** : pause de 10 min en cours suite à {p_info.get('consecutive_losses')} pertes consécutives (reste {p_info.get('remaining_minutes')} min, fin programmée à {p_info.get('blocked_at')}).")
+
+                # Paramètres adaptés par actif
+                adapted_syms = getattr(self.performance_learner, '_symbol_adapted_params', {})
+                if adapted_syms:
+                    lines.append("")
+                    lines.append("### 🎯 Paramètres Stratégiques Adaptés par Actif")
+                    for sym, ad_vals in adapted_syms.items():
+                        ad_str = ", ".join(f"`{k}`: {v}" for k, v in ad_vals.items() if k != 'adapted_at')
+                        lines.append(f"- **{sym}** : {ad_str}")
+
                 blocked = list(getattr(self.performance_learner, '_blocked_symbols', set()))
                 if blocked:
                     lines.append(f"- **Symboles Temporairement Bloqués** : `{', '.join(blocked)}` (Série de 3+ pertes consécutives).")
+                    lines.append(f"- **Symboles Bloqués Session** : `{', '.join(blocked)}`.")
 
                 decisions = getattr(self.performance_learner, '_decisions_log', [])
                 if decisions:

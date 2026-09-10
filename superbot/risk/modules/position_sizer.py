@@ -278,6 +278,10 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
 
         # Si le risque réel dépasse la limite de sécurité
         max_allowed_risk_pct = min(rm.MAX_DAILY_LOSS_PCT, max(3.0, rm.RISK_PCT * 2.0))
+        if getattr(rm, 'ENABLE_LOSS_LIMIT', False):
+            max_allowed_risk_pct = min(rm.MAX_DAILY_LOSS_PCT, max(3.0, rm.RISK_PCT * 2.0))
+        else:
+            max_allowed_risk_pct = max(5.0, rm.RISK_PCT * 3.0)
         # Adaptation micro-compte (< 200€) : les contrats min (0.01 lot) peuvent représenter 3 à 8% de risque
         if account_balance < 200.0 and position_size <= min_size:
             max_allowed_risk_pct = max(max_allowed_risk_pct, 10.0)

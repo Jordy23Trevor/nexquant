@@ -52,11 +52,15 @@ class PerformanceLearner:
     - Manuellement pour les analyses approfondies
     """
 
-    def __init__(self, db=None, session_manager=None, strategy_engine=None):
+    def __init__(self, db=None, session_manager=None, strategy_engine=None, report_generator=None):
         self._db = db
         self._session_manager = session_manager
         self._strategy_engine = strategy_engine
+        self._report_generator = report_generator
         self._lock = threading.RLock()
+
+        # Adaptations spécifiques par symbole (post-mortem 10 min)
+        self._symbol_adapted_params: Dict[str, Dict[str, Any]] = {}
 
         # État courant des paramètres adaptatifs
         self._current_params: Dict[str, Any] = {
@@ -306,17 +310,24 @@ class PerformanceLearner:
         rr = trade.get('rr_ratio', 0)
 
         # Mise à jour des pertes consécutives
+        # Mise à jour des pertes consécutives (Seuil: 2 pertes consécutives -> pause 10 min)
         if symbol not in self._symbol_consecutive_losses:
             self._symbol_consecutive_losses[symbol] = {'count': 0, 'blocked_at': None}
             
         if pnl < 0:
             self._symbol_consecutive_losses[symbol]['count'] += 1
             count = self._symbol_consecutive_losses[symbol]['count']
-            if count >= 3:
+            if count >= 2:
                 self._symbol_consecutive_losses[symbol]['blocked_at'] = datetime.now(timezone.utc)
-                log.warning(f"🚫 {symbol} : {count} pertes consécutives → blocage automatique 24h")
+                diag = self.diagnose_consecutive_losses(symbol, trade)
+                log.warning(
+                    f"⏸️ [Pause 10 min] {symbol} : {count} pertes consécutives -> pause ciblée de 10 minutes. "
+                    f"Diagnostic : {diag['cause']} | Adaptation : {diag['action']}"
+                )
         else:
             self._symbol_consecutive_losses[symbol] = {'count': 0, 'blocked_at': None}  # Reset en cas de gain
+            if symbol in self._symbol_adapted_params:
+                del self._symbol_adapted_params[symbol]
 
         # Mise à jour de la stratégie
         if self._strategy_engine:
@@ -483,20 +494,95 @@ class PerformanceLearner:
         return False
 
     def is_symbol_blocked(self, symbol: str) -> bool:
-        """Vérifie si un symbole est bloqué (pertes consécutives)."""
+        """Vérifie si un symbole est en pause (pause de 10 min pour pertes consécutives)."""
         info = self._symbol_consecutive_losses.get(symbol)
         if not info:
             return False
-            
+
         blocked_at = info.get('blocked_at')
-        if info.get('count', 0) >= 3 and blocked_at:
-            if datetime.now(timezone.utc) < blocked_at + timedelta(hours=24):
+        if info.get('count', 0) >= 2 and blocked_at:
+            if datetime.now(timezone.utc) < blocked_at + timedelta(minutes=10):
                 return True
             else:
-                # Blocage expiré, on reset
+                # Pause de 10 min expirée, réactivation automatique du trading
                 self._symbol_consecutive_losses[symbol] = {'count': 0, 'blocked_at': None}
-                
+                log.info(f"▶️ [Fin de pause 10 min] {symbol} réactivé pour le trading avec stratégie adaptée.")
+
         return False
+
+    def diagnose_consecutive_losses(self, symbol: str, trade: Dict[str, Any], market_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Analyse approfondie des causes de perte sur un actif spécifique lors d'un enchaînement
+        de pertes (>= 2 pertes consécutives).
+        Diagnostique la cause de perte et adapte immédiatement la stratégie pour cet actif.
+        """
+        pnl = trade.get('pnl', 0.0)
+        entry_price = float(trade.get('entry_price', 0.0) or 0.0)
+        exit_price = float(trade.get('exit_price', 0.0) or 0.0)
+        atr = float(trade.get('atr', 0.0) or 0.0)
+
+        causes = []
+        if pnl < 0:
+            causes.append("Stop-Loss atteint")
+
+        # Analyse de la volatilité et du décalage de prix
+        if atr > 0 and abs(entry_price - exit_price) > 1.4 * atr:
+            causes.append("Mèche de volatilité anormale ou accélération adverse")
+        else:
+            causes.append("Fausse cassure ou retournement de tendance intraday")
+
+        diagnosis_cause = " | ".join(causes)
+
+        # Adaptation stratégique ciblée sur cet actif pour les prochains trades
+        adapted = {
+            'score_min_boost': 1.0,     # Exige une conviction supérieure (+1.0 point)
+            'sl_atr_mult_boost': 0.2,   # Élargit le Stop-Loss de +20% pour absorber le bruit
+            'tp_atr_mult_boost': 0.4,   # Augmente le Take-Profit pour préserver R:R >= 2.2
+            'cooldown_minutes': 10,
+            'adapted_at': datetime.now(timezone.utc).isoformat()
+        }
+        self._symbol_adapted_params[symbol] = adapted
+
+        if self._report_generator and hasattr(self._report_generator, 'record_post_mortem_event'):
+            try:
+                self._report_generator.record_post_mortem_event(
+                    symbol=symbol,
+                    consecutive_losses=self._symbol_consecutive_losses.get(symbol, {}).get('count', 2),
+                    cause=diagnosis_cause,
+                    adapted_parameters=adapted,
+                    details={'trade': trade}
+                )
+            except Exception as e:
+                log.debug(f"Erreur enregistrement post-mortem dans report_generator: {e}")
+
+        return {
+            'symbol': symbol,
+            'cause': diagnosis_cause,
+            'action': f"Pause 10 min activée. Paramètres adaptés : score requis +{adapted['score_min_boost']}, SL +{adapted['sl_atr_mult_boost']*100:.0f}% ATR.",
+            'adapted': adapted
+        }
+
+    def get_symbol_adapted_params(self, symbol: str) -> Dict[str, Any]:
+        """Retourne les adaptations de paramètres actives pour un symbole."""
+        return dict(self._symbol_adapted_params.get(symbol, {}))
+
+    def get_active_pauses(self) -> Dict[str, Dict[str, Any]]:
+        """Retourne les symboles actuellement en pause de 10 min suite à des pertes."""
+        active = {}
+        now = datetime.now(timezone.utc)
+        for sym, info in self._symbol_consecutive_losses.items():
+            blocked_at = info.get('blocked_at')
+            count = info.get('count', 0)
+            if count >= 2 and blocked_at:
+                remaining = (blocked_at + timedelta(minutes=10) - now).total_seconds()
+                if remaining > 0:
+                    active[sym] = {
+                        'consecutive_losses': count,
+                        'blocked_at': blocked_at.strftime('%H:%M UTC'),
+                        'remaining_seconds': int(remaining),
+                        'remaining_minutes': round(remaining / 60.0, 1)
+                    }
+        return active
 
     def get_learning_report(self) -> Dict[str, Any]:
         """Retourne un rapport d'apprentissage complet."""

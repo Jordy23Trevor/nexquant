@@ -22,6 +22,7 @@ class SignalResult:
     trigger_long: bool = False
     trigger_short: bool = False
     total_score: float = 0.0          # Score de 0 à 10
+    score_min: float = 6.0            # Score minimum requis pour déclencher
     strategy_name: str = ""
     market_regime: str = ""
     confidence: float = 0.0          # 0.0 à 1.0
@@ -40,6 +41,7 @@ class SignalResult:
             "trigger_long": self.trigger_long,
             "trigger_short": self.trigger_short,
             "total_score": round(self.total_score, 2),
+            "score_min": round(self.score_min, 2),
             "strategy_name": self.strategy_name,
             "market_regime": self.market_regime,
             "confidence": round(self.confidence, 3),

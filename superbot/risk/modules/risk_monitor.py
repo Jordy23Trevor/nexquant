@@ -88,36 +88,33 @@ def _can_take_new_trade(rm, account_balance: float, symbol: str = "") -> bool:
         log.info(f"Nombre maximum de positions atteint: {len(rm.open_positions)}/{rm.MAX_OPEN_POSITIONS}")
         return False
 
-    # Vérifier la limite de perte quotidienne (en % et en valeur absolue 100€ max)
-    daily_loss_amount = abs(min(0, rm.daily_pnl))
-    daily_loss_pct = daily_loss_amount / account_balance * 100 if account_balance > 0 else 0
-    max_daily_amount = getattr(rm, 'MAX_DAILY_LOSS_AMOUNT', 100.0)
+    # Vérifier la limite de perte quotidienne et mensuelle (si activée)
+    if getattr(rm, 'ENABLE_LOSS_LIMIT', False):
+        daily_loss_amount = abs(min(0, rm.daily_pnl))
+        daily_loss_pct = daily_loss_amount / account_balance * 100 if account_balance > 0 else 0
+        max_daily_amount = getattr(rm, 'MAX_DAILY_LOSS_AMOUNT', 100.0)
 
-    if daily_loss_amount >= max_daily_amount:
-        log.info(f"🚫 Limite de perte quotidienne absolue atteinte: {daily_loss_amount:.2f}€ >= {max_daily_amount:.2f}€ max")
-        return False
+        if daily_loss_amount >= max_daily_amount:
+            log.info(f"🚫 Limite de perte quotidienne absolue atteinte: {daily_loss_amount:.2f}€ >= {max_daily_amount:.2f}€ max")
+            return False
 
-    if daily_loss_pct >= rm.MAX_DAILY_LOSS_PCT:
-        log.info(f"Limite de perte quotidienne atteinte: {daily_loss_pct:.2f}% >= {rm.MAX_DAILY_LOSS_PCT}%")
-    effective_max_daily_loss = rm.MAX_DAILY_LOSS_PCT
-    if account_balance > 0 and account_balance < 200.0:
-        effective_max_daily_loss = max(rm.MAX_DAILY_LOSS_PCT, 15.0)
+        effective_max_daily_loss = rm.MAX_DAILY_LOSS_PCT
+        if account_balance > 0 and account_balance < 200.0:
+            effective_max_daily_loss = max(rm.MAX_DAILY_LOSS_PCT, 15.0)
 
-    if daily_loss_pct >= effective_max_daily_loss:
-        log.info(f"Limite de perte quotidienne atteinte: {daily_loss_pct:.2f}% >= {effective_max_daily_loss}%")
-        return False
+        if daily_loss_pct >= effective_max_daily_loss:
+            log.info(f"Limite de perte quotidienne atteinte: {daily_loss_pct:.2f}% >= {effective_max_daily_loss}%")
+            return False
 
-    # Vérifier la limite de perte mensuelle
-    monthly_loss_pct = abs(min(0, rm.monthly_pnl)) / account_balance * 100 if account_balance > 0 else 0
-    if monthly_loss_pct >= rm.MAX_MONTHLY_LOSS_PCT:
-        log.info(f"Limite de perte mensuelle atteinte: {monthly_loss_pct:.2f}% >= {rm.MAX_MONTHLY_LOSS_PCT}%")
-    effective_max_monthly_loss = rm.MAX_MONTHLY_LOSS_PCT
-    if account_balance > 0 and account_balance < 200.0:
-        effective_max_monthly_loss = max(rm.MAX_MONTHLY_LOSS_PCT, 25.0)
+        # Vérifier la limite de perte mensuelle
+        monthly_loss_pct = abs(min(0, rm.monthly_pnl)) / account_balance * 100 if account_balance > 0 else 0
+        effective_max_monthly_loss = rm.MAX_MONTHLY_LOSS_PCT
+        if account_balance > 0 and account_balance < 200.0:
+            effective_max_monthly_loss = max(rm.MAX_MONTHLY_LOSS_PCT, 25.0)
 
-    if monthly_loss_pct >= effective_max_monthly_loss:
-        log.info(f"Limite de perte mensuelle atteinte: {monthly_loss_pct:.2f}% >= {effective_max_monthly_loss}%")
-        return False
+        if monthly_loss_pct >= effective_max_monthly_loss:
+            log.info(f"Limite de perte mensuelle atteinte: {monthly_loss_pct:.2f}% >= {effective_max_monthly_loss}%")
+            return False
 
     return True
 

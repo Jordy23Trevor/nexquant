@@ -391,6 +391,8 @@ class SuperBot:
                 session_manager=self.session_manager,
                 strategy_engine=self.strategy_engine
             )
+            if self.strategy_engine:
+                self.strategy_engine.performance_learner = self.performance_learner
             log.info("📊 PerformanceLearner initialisé")
         except Exception as e:
             log.warning(f"⚠️ PerformanceLearner non disponible : {e}")
@@ -429,6 +431,8 @@ class SuperBot:
                 knowledge_feeder=self.knowledge_feeder,
                 bot=self,
             )
+            if self.performance_learner:
+                self.performance_learner._report_generator = self.report_generator
             self.report_generator.start_daily_scheduler()
             log.info("📝 ReportGenerator initialisé + scheduler 22h30 UTC")
         except Exception as e:
@@ -1251,10 +1255,16 @@ class SuperBot:
                     log.debug(f"SessionManager tick error: {_se}")
 
             # ⚫ V3 : Vérification PerformanceLearner (blocage pertes consécutives)
+            # ⚫ V3 : Vérification PerformanceLearner (pause 10 min après pertes consécutives)
             if self.performance_learner:
                 try:
                     if self.performance_learner.is_symbol_blocked(symbol):
                         log.info(f"🚫 {symbol} bloqué par PerformanceLearner (3+ pertes consécutives)")
+                        log.info(f"⏸️ [Pause 10 min] {symbol} temporairement suspendu suite à pertes consécutives (analyse post-mortem active)")
+                        if getattr(self, 'report_generator', None):
+                            self.report_generator.record_rejection_event(
+                                symbol, "Pause 10 min active (analyse post-mortem suite à pertes)"
+                            )
                         return
                 except Exception as _pe:
                     log.debug(f"PerformanceLearner check error: {_pe}")
@@ -1369,6 +1379,15 @@ class SuperBot:
                         if self.session_manager:
                             base_score_min = signal_data.get('score_min', self.strategy.score_min)
                             signal_data['score_min'] = self.session_manager.get_adapted_score_min(base_score_min)
+
+                        # Ajuster selon l'apprentissage post-perte (PerformanceLearner)
+                        if self.performance_learner:
+                            adapted = self.performance_learner.get_symbol_adapted_params(symbol)
+                            if adapted:
+                                boost = float(adapted.get('score_min_boost', 0.0))
+                                if boost > 0:
+                                    signal_data['score_min'] = signal_data.get('score_min', self.strategy.score_min) + boost
+                                    log.debug(f"🎯 [Post-Mortem Boost] {symbol} : score_min relevé à {signal_data['score_min']}")
 
                 except Exception as _brain_e:
                     log.debug(f"Brain enrichment error ({symbol}): {_brain_e}")

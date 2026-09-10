@@ -136,6 +136,7 @@ class TradingStrategy:
         result_dict = sig.to_dict()
         result_dict["symbol"] = symbol
         result_dict["score_min"] = self.score_min
+        result_dict["score_min"] = getattr(sig, 'score_min', None) or self.score_min
         result_dict["strategy_used"] = sig.strategy_name
         result_dict["market_regime"] = regime.regime
         result_dict["brain_regime"] = regime.regime
