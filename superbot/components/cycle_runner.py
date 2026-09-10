@@ -518,6 +518,8 @@ def run_main_loop(bot):
                     log.debug(traceback.format_exc())
                     with bot._state_lock:
                         bot.stats['errors_count'] += 1
+                finally:
+                    bot._last_cycle_heartbeat = time.time()
 
             if max_parallel > 1 and len(scanned_instruments) > 1:
                 with ThreadPoolExecutor(
@@ -544,6 +546,23 @@ def run_main_loop(bot):
                             log.error(f"Erreur traitement {sym}: {e}")
                             with bot._state_lock:
                                 bot.stats['errors_count'] += 1
+                    try:
+                        for future in as_completed(
+                            future_to_sym,
+                            timeout=symbol_timeout * len(scanned_instruments) + 10
+                        ):
+                            sym = future_to_sym[future]
+                            bot._last_cycle_heartbeat = time.time()
+                            try:
+                                future.result(timeout=symbol_timeout)
+                            except (FuturesTimeoutError, TimeoutError):
+                                log.warning(f"⏱️ Timeout ({symbol_timeout}s) pour {sym}")
+                            except Exception as e:
+                                log.error(f"Erreur traitement {sym}: {e}")
+                                with bot._state_lock:
+                                    bot.stats['errors_count'] += 1
+                    except (FuturesTimeoutError, TimeoutError) as te:
+                        log.warning(f"⏱️ Timeout global du cycle ({te}) — continuation fluide")
             else:
                 for sym in scanned_instruments:
                     if not bot.running or bot.shutdown_event.is_set():

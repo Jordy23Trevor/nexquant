@@ -250,14 +250,14 @@ class BugWatchdog:
             if last_hb is None:
                 return None  # Watchdog cycle pas encore démarré
             elapsed = time.time() - last_hb
-            if elapsed > self.max_latency * 20:  # > 100s → High
+            if elapsed > 300:  # > 300s (seuil de watchdog timeout de 5 min)
                 return (
                     "cycle_runner",
-                    f"Cycle gelé : dernier heartbeat il y a {elapsed:.0f}s (seuil critique: {self.max_latency * 20:.0f}s)",
+                    f"Cycle gelé : dernier heartbeat il y a {elapsed:.0f}s (seuil critique: 300s)",
                     "High",
                     True,
                 )
-            if elapsed > self.max_latency * 10:  # > 50s → Medium
+            if elapsed > 120:  # > 120s
                 return (
                     "cycle_runner",
                     f"Cycle lent : dernier heartbeat il y a {elapsed:.0f}s",
