@@ -227,6 +227,9 @@ class SuperBot:
 
         self.failed_execution_cooldowns = self.state_manager.failed_execution_cooldowns
         self.blocked_symbols = self.state_manager.blocked_symbols
+        if not getattr(self.risk_manager, 'ENABLE_LOSS_LIMIT', False):
+            self.blocked_symbols.clear()
+            self.state_manager.blocked_symbols.clear()
         self.session_pnl_by_symbol = self.state_manager.session_pnl_by_symbol
         self.consecutive_losses = self.state_manager.consecutive_losses
         self._adaptation_counter = self.state_manager.adaptation_counter
@@ -1269,8 +1272,8 @@ class SuperBot:
                 except Exception as _pe:
                     log.debug(f"PerformanceLearner check error: {_pe}")
 
-            # 🚫 BLOCAGE DYNAMIQUE : Skip si actif bloqué pour cette session
-            if symbol in self.blocked_symbols:
+            # 🚫 BLOCAGE DYNAMIQUE : Skip si actif bloqué pour cette session (actif uniquement si limite de pertes activée)
+            if getattr(self.risk_manager, 'ENABLE_LOSS_LIMIT', False) and symbol in self.blocked_symbols:
                 log.info(f"⛔ {symbol} bloqué pour cette session (perte cumulée > seuil)")
                 return
 

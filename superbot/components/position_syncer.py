@@ -198,14 +198,17 @@ def sync_positions_with_broker(bot):
 
                     # Calculer le seuil de perte de session de manière hybride/safe
                     val = bot.ASSET_BLOCK_LOSS_THRESHOLD
-                    if val >= 1.0:
+                    enable_loss_limit = getattr(getattr(bot, 'risk_manager', None), 'ENABLE_LOSS_LIMIT', False)
+                    if not enable_loss_limit:
+                        threshold_usd = float('inf')  # Limite de pertes désactivée par configuration
+                    elif val >= 1.0:
                         threshold_usd = val
                     elif 0.0 < val < 1.0:
                         threshold_usd = bot.initial_balance * val
                     else:
                         threshold_usd = float('inf')  # Désactivé si <= 0
 
-                    if bot.session_pnl_by_symbol[symbol] < -threshold_usd:
+                    if enable_loss_limit and bot.session_pnl_by_symbol[symbol] < -threshold_usd:
                         bot.blocked_symbols.add(symbol)
                         log.warning(f"🚫 {symbol} BLOQUÉ - Perte session: {bot.session_pnl_by_symbol[symbol]:.2f} USD (seuil: -{threshold_usd:.2f} USD)")
                     elif pnl < 0:

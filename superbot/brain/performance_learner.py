@@ -309,7 +309,6 @@ class PerformanceLearner:
         strategy = trade.get('strategy_name', 'unknown')
         rr = trade.get('rr_ratio', 0)
 
-        # Mise à jour des pertes consécutives
         # Mise à jour des pertes consécutives (Seuil: 2 pertes consécutives -> pause 10 min)
         if symbol not in self._symbol_consecutive_losses:
             self._symbol_consecutive_losses[symbol] = {'count': 0, 'blocked_at': None}
@@ -319,6 +318,7 @@ class PerformanceLearner:
             count = self._symbol_consecutive_losses[symbol]['count']
             if count >= 2:
                 self._symbol_consecutive_losses[symbol]['blocked_at'] = datetime.now(timezone.utc)
+                log.warning(f"🚫 {symbol} : {count} pertes consécutives → blocage automatique 24h")
                 diag = self.diagnose_consecutive_losses(symbol, trade)
                 log.warning(
                     f"⏸️ [Pause 10 min] {symbol} : {count} pertes consécutives -> pause ciblée de 10 minutes. "

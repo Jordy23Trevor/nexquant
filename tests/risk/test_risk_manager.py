@@ -33,6 +33,12 @@ class TestRiskManager:
 
         # Perte journalière de 400€ (-4.0% > 3.0%)
         risk_manager.daily_pnl = -400.0
+        # Quand ENABLE_LOSS_LIMIT est False (comportement demandé), le kill switch reste inactif
+        risk_manager.ENABLE_LOSS_LIMIT = False
+        assert risk_manager.check_kill_switch(9600.0) is False
+
+        # Quand ENABLE_LOSS_LIMIT est activé, le kill switch se déclenche
+        risk_manager.ENABLE_LOSS_LIMIT = True
         assert risk_manager.check_kill_switch(9600.0) is True
 
     def test_drawdown_protection_risk_reduction(self, risk_manager):
