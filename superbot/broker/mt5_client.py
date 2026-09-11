@@ -91,13 +91,25 @@ class MT5Client(Broker):
             return False
 
         log.info(f"Initialisation MT5 (Serveur: {self._server})...")
-        if not mt5.initialize(**self._init_kwargs):
+        init_ok = mt5.initialize(**self._init_kwargs)
+        if not init_ok:
+            # Fallback : tentative d'initialisation avec le terminal actif (chemin uniquement)
+            fallback_kwargs = {}
+            if "path" in self._init_kwargs:
+                fallback_kwargs["path"] = self._init_kwargs["path"]
+            init_ok = mt5.initialize(**fallback_kwargs)
+
+        if not init_ok:
             error_code = mt5.last_error()
             log.error(f"Échec de l'initialisation MT5 : {error_code}")
             self._connected = False
             return False
 
-        if self._login > 0:
+        # Si le terminal est déjà connecté sur le compte cible, pas besoin de ré-authentifier
+        acc_info = mt5.account_info()
+        if acc_info and self._login > 0 and acc_info.login == self._login:
+            log.info(f"Terminal déjà connecté au compte {self._login}.")
+        elif self._login > 0 and self._password:
             login_kwargs = {"login": self._login, "password": self._password}
             if bool(self._server):
                 login_kwargs["server"] = self._server

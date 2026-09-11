@@ -35,6 +35,20 @@ class SessionTargetTracker:
         self.goal_reached_at: Optional[datetime] = None
         self._last_logged_pct: float = -1.0
 
+    @property
+    def effective_target_min(self) -> float:
+        """Cible minimale en équité : absolue si micro-compte, ou relative si compte déjà > target_min."""
+        if self.start_balance > self.target_min:
+            return self.start_balance + self.target_min
+        return self.target_min
+
+    @property
+    def effective_target_max(self) -> float:
+        """Cible maximale en équité."""
+        if self.start_balance > self.target_max:
+            return self.start_balance + self.target_max
+        return self.target_max
+
     def update(self, balance: float, equity: Optional[float] = None) -> Dict[str, Any]:
         """
         Met à jour l'état du traqueur avec les valeurs du compte en temps réel.
@@ -50,24 +64,21 @@ class SessionTargetTracker:
         if self.current_equity > self.peak_equity:
             self.peak_equity = self.current_equity
 
-        # Vérifier si l'objectif minimal (35€) est franchi
-        if self.current_equity >= self.target_min and not self.goal_reached:
+        # Vérifier si l'objectif minimal effectif est franchi
+        if self.current_equity >= self.effective_target_min and not self.goal_reached:
             self.goal_reached = True
             self.goal_reached_at = datetime.now(timezone.utc)
             log.info(
                 f"🎉🎉 [OBJECTIF SESSION ATTEINT] L'équité du compte ({self.current_equity:.2f}€) "
-                f"a atteint la cible journalière de {self.target_min:.2f}€ - {self.target_max:.2f}€ ! "
+                f"a atteint la cible journalière de {self.effective_target_min:.2f}€ - {self.effective_target_max:.2f}€ ! "
                 f"Sécurisation des profits en cours."
             )
 
         return self.get_status()
 
     def get_progress_pct(self) -> float:
-        """Calcule le pourcentage de progression vers la cible minimale (35€)."""
-        if self.start_balance >= self.target_min:
-            return 100.0 if self.current_equity >= self.target_min else 0.0
-
-        needed = self.target_min - self.start_balance
+        """Calcule le pourcentage de progression vers la cible minimale."""
+        needed = self.effective_target_min - self.start_balance
         if needed <= 0:
             return 100.0
 
@@ -77,7 +88,7 @@ class SessionTargetTracker:
 
     def get_remaining_amount(self) -> float:
         """Montant restant à gagner pour atteindre la cible minimale."""
-        rem = self.target_min - self.current_equity
+        rem = self.effective_target_min - self.current_equity
         return max(0.0, round(rem, 2))
 
     def log_progress(self, force: bool = False):
@@ -88,7 +99,7 @@ class SessionTargetTracker:
             status_symbol = "🏆" if self.goal_reached else "🎯"
             rem = self.get_remaining_amount()
             log.info(
-                f"{status_symbol} [Cible {self.target_min:.1f}€-{self.target_max:.1f}€] "
+                f"{status_symbol} [Cible {self.effective_target_min:.1f}€-{self.effective_target_max:.1f}€] "
                 f"Solde: {self.current_balance:.2f}€ | Équité: {self.current_equity:.2f}€ | "
                 f"Progression: {prog:.1f}% | Reste: {rem:+.2f}€"
             )

@@ -28,6 +28,26 @@ def test_session_target_tracker_progress():
     assert tracker.goal_reached_at is not None
 
 
+def test_session_target_tracker_standard_account():
+    # Sur un compte standard de 1000€, l'objectif est d'atteindre +35€ (1035€)
+    tracker = SessionTargetTracker(start_balance=1000.0, target_min=35.0, target_max=40.0)
+    assert tracker.effective_target_min == 1035.0
+    assert tracker.effective_target_max == 1040.0
+    assert tracker.get_progress_pct() == 0.0
+    assert tracker.get_remaining_amount() == 35.0
+
+    # Progression avec gain de 17.5€ (50% de l'objectif de gain)
+    tracker.update(balance=1000.0, equity=1017.5)
+    assert tracker.get_progress_pct() == 50.0
+    assert tracker.get_remaining_amount() == 17.5
+    assert tracker.goal_reached is False
+
+    # Objectif atteint à 1035€
+    tracker.update(balance=1035.0, equity=1035.0)
+    assert tracker.get_progress_pct() == 100.0
+    assert tracker.goal_reached is True
+
+
 def test_micro_account_position_sizing_allows_oil_and_gold():
     config = {
         'RISK_PCT': 1.0,
