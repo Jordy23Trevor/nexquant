@@ -590,6 +590,31 @@ class MT5Client(Broker):
         amount_lots = math.floor(round(amount_lots / volume_step, 6)) * volume_step
         amount_lots = round(amount_lots, 4)
 
+        # Vérification préventive de la marge requise pour éviter le rejet 10019 (No money)
+        try:
+            acc_info = mt5.account_info()
+            if acc_info and getattr(acc_info, 'margin_free', 0) > 0:
+                needed_margin = mt5.order_calc_margin(order_type, symbol, amount_lots, price)
+                if needed_margin and needed_margin > acc_info.margin_free * 0.90:
+                    max_affordable_margin = acc_info.margin_free * 0.90
+                    scaling = max_affordable_margin / needed_margin
+                    new_lots = math.floor(round((amount_lots * scaling) / volume_step, 6)) * volume_step
+                    new_lots = round(new_lots, 4)
+                    if new_lots >= volume_min:
+                        log.warning(
+                            f"⚠️ Marge requise ({needed_margin:.2f}€) > marge disponible ({acc_info.margin_free:.2f}€) pour {amount_lots} lots sur {symbol}. "
+                            f"Réduction automatique du volume à {new_lots:.4f} lots."
+                        )
+                        amount_lots = new_lots
+                    else:
+                        log.warning(
+                            f"❌ Marge insuffisante même pour la taille minimale sur {symbol} "
+                            f"(requise: {needed_margin:.2f}€, libre: {acc_info.margin_free:.2f}€). Ordre annulé."
+                        )
+                        return False
+        except Exception as _me:
+            log.debug(f"Vérification préventive de marge ignorée: {_me}")
+
         # Vérification et ajustement des Stop Loss et Take Profit selon StopLevel
         digits = info["digits"]
         min_offset = max(stops_level, 15 * point)

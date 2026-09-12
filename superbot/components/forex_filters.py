@@ -4,7 +4,7 @@ import logging
 log = logging.getLogger("forex_filters")
 
 
-def is_market_open() -> bool:
+def is_market_open(symbol: str = "") -> bool:
     """
     Vérifie si au moins une session Forex majeure est actuellement ouverte.
 
@@ -19,6 +19,11 @@ def is_market_open() -> bool:
     Returns:
         True si au moins une session est ouverte et ce n'est pas le week-end.
     """
+    if symbol:
+        from superbot.broker.symbol_specs import get_asset_class
+        if get_asset_class(symbol) == "crypto":
+            return True
+
     now_utc = datetime.now(timezone.utc)
     hour = now_utc.hour
     weekday = now_utc.weekday()  # 0=Lundi, 5=Samedi, 6=Dimanche

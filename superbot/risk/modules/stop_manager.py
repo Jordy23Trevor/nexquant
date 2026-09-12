@@ -27,13 +27,19 @@ def calculate_sl_tp_levels(rm, entry_price: float, atr_value: float,
       - TRENDING        : multiplicateurs standards
       - LOW_VOL_TREND   : -10% SL (tendance propre, moins de bruit)
     """
-    # Détecter si la paire est une paire JPY — appliquer des multiplicateurs adaptés
+    # Détecter la classe d'actif exacte selon le symbole
     effective_asset_type = asset_type
     if symbol:
-        normalized = symbol.strip().upper().replace("/", "")
-        if normalized.endswith("JPY") and asset_type == "forex":
+        from superbot.broker.symbol_specs import get_asset_class
+        symbol_class = get_asset_class(symbol)
+        if symbol_class == "crypto":
+            effective_asset_type = "crypto"
+            log.debug(f"Multiplicateurs crypto appliqués pour {symbol}: SL=2.5×ATR, TP=5.0×ATR")
+        elif symbol_class == "forex_jpy" or (symbol.strip().upper().replace("/", "").endswith("JPY") and asset_type == "forex"):
             effective_asset_type = "forex_jpy"
             log.debug(f"Multiplicateurs ATR élargis appliqués pour paire JPY {symbol}: SL=2.0×ATR, TP=4.0×ATR")
+        elif symbol_class.startswith("commodity"):
+            effective_asset_type = "commodity"
 
     if atr_value <= 0:
         risk_pct = 0.02
@@ -72,12 +78,20 @@ def calculate_sl_tp_levels(rm, entry_price: float, atr_value: float,
             log.debug(f"[Régime HMM] LOW_VOL_TREND → SL×0.90={sl_mult:.2f} pour {symbol}")
         # TRENDING et cas inconnus : multiplicateurs standards (pas de modification)
 
+    sl_dist = sl_mult * atr_value
+    tp_dist = tp_mult * atr_value
+    if effective_asset_type == "crypto" and entry_price > 0:
+        min_crypto_sl = entry_price * 0.0035  # ~270$ sur BTC à 77000$ pour absorber le bruit
+        if sl_dist < min_crypto_sl:
+            sl_dist = min_crypto_sl
+            tp_dist = max(tp_dist, sl_dist * 2.0)
+
     if position_side == "LONG":
-        sl_price = entry_price - (sl_mult * atr_value)
-        tp_price = entry_price + (tp_mult * atr_value)
+        sl_price = entry_price - sl_dist
+        tp_price = entry_price + tp_dist
     else:
-        sl_price = entry_price + (sl_mult * atr_value)
-        tp_price = entry_price - (tp_mult * atr_value)
+        sl_price = entry_price + sl_dist
+        tp_price = entry_price - tp_dist
 
     return max(0.0001, sl_price), max(0.0001, tp_price)
 

@@ -146,10 +146,11 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     entry_price = float(signal_data['entry_price'])
 
     # Déterminer la classe d'actif par symbole pour appliquer les bons filtres.
+    from superbot.broker.symbol_specs import get_asset_class
     if hasattr(bot.broker, 'get_asset_class_for_symbol'):
         symbol_asset_class = bot.broker.get_asset_class_for_symbol(symbol)
     else:
-        symbol_asset_class = bot.broker.get_asset_type()
+        symbol_asset_class = get_asset_class(symbol) or bot.broker.get_asset_type()
 
     # 2d. Filtres avancés — appliqués selon la classe d'actif du symbole
     from superbot.components.forex_filters import (
@@ -177,8 +178,8 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         return
 
     # A. Garde-fou Marché Ouvert : Tout actif traditionnel (Forex & Commodities) est fermé le weekend
-    if symbol_asset_class != 'crypto':
-        if not is_market_open():
+    if symbol_asset_class != 'crypto' and get_asset_class(symbol) != 'crypto':
+        if not is_market_open(symbol):
             _reject_trade(bot, symbol, "Marché fermé pour le week-end (trading réservé aux cryptos)")
             return
 
@@ -373,10 +374,15 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         size_before_boost = position_size
         boosted_size = position_size * conviction_boost
         # Le boost est re-cappé par MAX_POSITION_SIZE (et par la marge dans position_sizer).
+        # Le boost est re-cappé par MAX_POSITION_SIZE et par la marge max disponible.
         boosted_size = min(boosted_size, bot.risk_manager.MAX_POSITION_SIZE)
+        max_margin_size = size_details.get('max_size_by_margin') if isinstance(size_details, dict) else None
+        if max_margin_size and max_margin_size > 0:
+            boosted_size = min(boosted_size, max_margin_size)
         log.info(
             f"[ConvictionBoost] Taille {symbol} demandée : {size_before_boost:.6f} × {conviction_boost:.2f} = "
             f"{boosted_size:.6f} (cappé à MAX_POSITION_SIZE={bot.risk_manager.MAX_POSITION_SIZE})"
+            f"{boosted_size:.6f} (cappé par MAX_POSITION_SIZE et marge disponible)"
         )
         position_size = boosted_size
 
