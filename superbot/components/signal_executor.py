@@ -150,7 +150,6 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
     if hasattr(bot.broker, 'get_asset_class_for_symbol'):
         symbol_asset_class = bot.broker.get_asset_class_for_symbol(symbol)
     else:
-        symbol_asset_class = bot.broker.get_asset_type()
         symbol_asset_class = get_asset_class(symbol) or bot.broker.get_asset_type()
 
     # 2d. Filtres avancés — appliqués selon la classe d'actif du symbole
@@ -179,8 +178,6 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         return
 
     # A. Garde-fou Marché Ouvert : Tout actif traditionnel (Forex & Commodities) est fermé le weekend
-    if symbol_asset_class != 'crypto':
-        if not is_market_open():
     if symbol_asset_class != 'crypto' and get_asset_class(symbol) != 'crypto':
         if not is_market_open(symbol):
             _reject_trade(bot, symbol, "Marché fermé pour le week-end (trading réservé aux cryptos)")
