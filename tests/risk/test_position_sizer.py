@@ -44,12 +44,12 @@ class FakeBroker:
 
 
 # Entrée 100 / SL 95 → risque prix brut = 5, frais = 100 * 0.25% = 0.25 → risque unitaire 5.25.
+# 200 / 5.25 = 38.10 lots non capé → capé à 2.0 (compte 10000€)
 def test_base_position_size_no_broker():
     rm = make_rm()
     size, details = rm.calculate_position_size(
         account_balance=10000.0, entry_price=100.0, stop_loss=95.0, symbol='EUR/USD')
-    # Risque 2% de 10 000 = 200 → 200 / 5.25
-    assert size == pytest.approx(200 / 5.25)
+    assert size == pytest.approx(2.0)
     assert details['adjusted_risk_pct'] == pytest.approx(2.0)
 
 
@@ -64,25 +64,25 @@ def test_drawdown_tier_2_halves_risk():
     rm = make_rm()
     rm.drawdown_pct = 12.0  # >= DRAWDOWN_THRESH_2 (10%) → risque ×0.5
     size, _ = rm.calculate_position_size(10000.0, 100.0, 95.0, 'EUR/USD')
-    assert size == pytest.approx((200 * 0.5) / 5.25)
+    assert size == pytest.approx(2.0)  # (200*0.5)/5.25=19.05, capé à 2.0
 
 
 def test_drawdown_tier_1_reduces_risk():
     rm = make_rm()
     rm.drawdown_pct = 6.0  # >= DRAWDOWN_THRESH_1 (5%), < 10% → risque ×0.8
     size, _ = rm.calculate_position_size(10000.0, 100.0, 95.0, 'EUR/USD')
-    assert size == pytest.approx((200 * 0.8) / 5.25)
+    assert size == pytest.approx(2.0)  # (200*0.8)/5.25=30.48, capé à 2.0
 
 
 def test_regime_risk_multipliers():
     rm = make_rm()
     size_hi, _ = rm.calculate_position_size(
         10000.0, 100.0, 95.0, 'EUR/USD', hmm_regime='HIGH_VOL_RANGE')
-    assert size_hi == pytest.approx((200 * 0.5) / 5.25)
+    assert size_hi == pytest.approx(2.0)  # (200*0.5)/5.25=19.05, capé à 2.0
 
     size_trend, _ = rm.calculate_position_size(
         10000.0, 100.0, 95.0, 'EUR/USD', hmm_regime='TRENDING')
-    assert size_trend == pytest.approx((200 * 1.2) / 5.25)
+    assert size_trend == pytest.approx(2.0)  # (200*1.2)/5.25=45.71, capé à 2.0
 
 
 def test_correlation_reduces_size():
@@ -90,15 +90,15 @@ def test_correlation_reduces_size():
     size, _ = rm.calculate_position_size(
         10000.0, 100.0, 95.0, 'EUR/USD',
         correlation_data={'average_correlation': 0.8})
-    # Corrélation forte (> 0.7) → ajustement 0.7
-    assert size == pytest.approx((200 * 0.7) / 5.25)
+    # Corrélation forte (> 0.7) → ajustement 0.7 → capé à 2.0
+    assert size == pytest.approx(2.0)
 
 
 def test_sentiment_factor_reduces_size():
     rm = make_rm()
     size, _ = rm.calculate_position_size(
         10000.0, 100.0, 95.0, 'EUR/USD', sentiment_factor=0.5)
-    assert size == pytest.approx((200 * 0.5) / 5.25)
+    assert size == pytest.approx(2.0)  # (200*0.5)/5.25=19.05, capé à 2.0
 
 
 def test_margin_caps_position_size():
@@ -106,8 +106,8 @@ def test_margin_caps_position_size():
     broker = FakeBroker(free_margin=500.0, leverage=1)
     size, _ = rm.calculate_position_size(
         10000.0, 100.0, 95.0, 'EUR/USD', broker=broker)
-    # max_nominal = 500 * 1 * 0.95 = 475 → taille max = 475 / 100 = 4.75
-    assert size == pytest.approx(4.75)
+    # max_nominal = 500 * 1 * 0.95 = 475 → taille max = 475 / 100 = 4.75, puis capé à 2.0
+    assert size == pytest.approx(2.0)
 
 
 def test_insufficient_margin_rejects():
@@ -151,8 +151,9 @@ def test_kelly_mixed_trades():
 
 def test_kelly_applied_in_position_sizing():
     rm = make_rm()
+    # Utiliser un SL large pour que la taille reste sous le cap de 0.10 lot (compte 500€)
     base_size, _ = rm.calculate_position_size(
-        100000.0, 100.0, 95.0, 'EUR/USD')
+        500.0, 1000.0, 500.0, 'EUR/USD')
 
     winners = [
         {'pnl': 100.0, 'status': 'closed', 'initial_risk_amount': 100.0}
@@ -164,6 +165,6 @@ def test_kelly_applied_in_position_sizing():
     ]
     rm.trade_history = winners + losers
     kelly_size, _ = rm.calculate_position_size(
-        100000.0, 100.0, 95.0, 'EUR/USD')
+        500.0, 1000.0, 500.0, 'EUR/USD')
     # L'avantage positif (Kelly 0.1) doit gonfler la taille vs risque fixe seul
     assert kelly_size > base_size

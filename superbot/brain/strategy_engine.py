@@ -286,10 +286,19 @@ class StrategyEngine:
         """
         Sélectionne les stratégies prioritaires selon le régime et la session.
         UNIFIED_ALPHA est systématiquement la stratégie maîtresse prioritaire.
+        Sélectionne UNE stratégie dominante par régime de marché.
+        Principe : ne jamais mélanger trend-following et mean-reversion
+        sur le même signal pour éviter les conflits directionnels.
+
+        Régime trending   → suivi de tendance uniquement (Elder/Murphy)
+        Régime ranging    → retour à la moyenne uniquement (Chan)
+        Régime breakout   → cassure uniquement (London Breakout en session)
+        Régime choppy/HV  → AUCUN trade (préservation du capital)
         """
         candidates: List[str] = []
 
         # 1. Régimes de Tendance forte (Bullish / Bearish)
+        # 1. Tendance forte — uniquement du trend-following
         if regime_type in ["trending_bull", "trending_bear"]:
             candidates = [
                 "UNIFIED_ALPHA",
@@ -300,6 +309,7 @@ class StrategyEngine:
             ]
 
         # 2. Régimes de Range / Oscillations
+        # 2. Range — uniquement du mean-reversion
         elif regime_type == "ranging":
             candidates = [
                 "UNIFIED_ALPHA",
@@ -308,10 +318,16 @@ class StrategyEngine:
             ]
 
         # 2b. Bruit / Choppy
+        # 3. Bruit / Choppy — aucun trade
         elif regime_type == "choppy_noise":
             candidates = []
 
         # 3. Régimes de Compression / Breakout
+        # 4. Haute volatilité — trop dangereux, pas de trade
+        elif regime_type == "high_volatility":
+            candidates = []
+
+        # 5. Breakout — London Breakout en session Londres uniquement
         elif regime_type in ["pre_breakout", "breakout"]:
             if "LONDON" in active_sessions or "OVERLAP" in active_sessions:
                 candidates = [
@@ -327,6 +343,8 @@ class StrategyEngine:
                     "MURPHY_TREND",
                     "CHAN_MEAN_REVERSION"
                 ]
+                # Hors session Londres, pas de breakout fiable
+                candidates = []
 
         # 4. Haute volatilité
         elif regime_type == "high_volatility":
@@ -337,6 +355,7 @@ class StrategyEngine:
                 "ELDER_TRIPLE_SCREEN"
             ]
 
+        # 6. Défaut (régime inconnu) — stratégie la plus conservatrice
         else:
             candidates = [
                 "UNIFIED_ALPHA",

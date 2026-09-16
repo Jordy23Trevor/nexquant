@@ -328,6 +328,23 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
+        # Hard cap based on account balance
+        balance = account_balance or 10000  # fallback
+        if balance < 500:
+            max_lot = 0.03
+        elif balance < 2000:
+            max_lot = 0.10
+        elif balance < 10000:
+            max_lot = 0.50
+        else:
+            max_lot = 2.0
+
+        if position_size > max_lot:
+            log.warning(f"⚡ Lot cap: {position_size:.2f} -> {max_lot:.2f} (account {balance:.0f}€)")
+            position_size = max_lot
+            details['position_size'] = position_size
+            details['capped_by_hard_limit'] = True
+
         position_size = float(position_size)
         actual_risk_pct = float(actual_risk_pct)
         log.info(f"Taille de position calculée pour {symbol}: {position_size:.6f} | Risque: {actual_risk_pct:.2f}% du compte")

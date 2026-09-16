@@ -103,6 +103,57 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
         _reject_trade(bot, symbol, "Trading en pause automatique par protection des gains (Circuit Breaker)")
         return
 
+    # 0c. Anti-Whipsaw Directional Cooldown
+    if hasattr(bot, 'risk_manager') and bot.risk_manager:
+        rm = bot.risk_manager
+        
+        # 1. Check 2+ consecutive losses in last 2 hours
+        consecutive_losses = rm.consecutive_losses.get(symbol, 0) if hasattr(rm, 'consecutive_losses') else 0
+        if consecutive_losses >= 2:
+            last_close_time = rm.last_trade_close_time.get(symbol) if hasattr(rm, 'last_trade_close_time') else None
+            if last_close_time:
+                now_utc = datetime.now(timezone.utc)
+                if isinstance(last_close_time, str):
+                    try:
+                        last_close_time = datetime.fromisoformat(last_close_time.replace('Z', '+00:00'))
+                    except Exception:
+                        last_close_time = None
+                
+                # Ensure timezone-aware comparison
+                if last_close_time:
+                    if last_close_time.tzinfo is None:
+                        last_close_time = last_close_time.replace(tzinfo=timezone.utc)
+                    if (now_utc - last_close_time).total_seconds() < 7200:
+                        log.info(f"🚫 [Anti-Whipsaw] Trade {symbol} rejeté : 2+ pertes consécutives dans les 2 dernières heures.")
+                        _reject_trade(bot, symbol, "2+ pertes consécutives récentes (Anti-Whipsaw)")
+                        return
+
+        # 2. Check if last trade was a loss < 45 mins ago and opposite direction
+        last_trade = None
+        if hasattr(rm, 'trade_history') and rm.trade_history:
+            for t in reversed(rm.trade_history):
+                if t.get('symbol') == symbol and str(t.get('status', 'closed')) == 'closed' and t.get('pnl') is not None:
+                    last_trade = t
+                    break
+                    
+        if last_trade and last_trade.get('pnl', 0) < 0:
+            last_ts_str = last_trade.get('timestamp')
+            if last_ts_str:
+                try:
+                    last_ts = datetime.fromisoformat(str(last_ts_str).replace('Z', '+00:00'))
+                    if last_ts.tzinfo is None:
+                        last_ts = last_ts.replace(tzinfo=timezone.utc)
+                    now_utc = datetime.now(timezone.utc)
+                    if (now_utc - last_ts).total_seconds() < 2700: # 45 minutes
+                        last_side = str(last_trade.get('side', '')).upper()
+                        cand_side = "LONG" if signal_data.get('should_long') else ("SHORT" if signal_data.get('should_short') else "")
+                        if last_side and cand_side and last_side != cand_side:
+                            log.info(f"🚫 [Anti-Whipsaw] Trade {symbol} rejeté : Perte récente (<45m) et signal opposé ({cand_side} vs {last_side}).")
+                            _reject_trade(bot, symbol, f"Perte récente et signal opposé {cand_side} (Anti-Whipsaw)")
+                            return
+                except Exception as e:
+                    log.debug(f"Erreur parsing timestamp Anti-Whipsaw: {e}")
+
     # 1. Vérifier les filtres de nouvelles et de sentiment
     if getattr(bot, 'news_manager', None):
         should_avoid, news_event = bot.news_manager.should_avoid_trading_due_to_news(symbol)
@@ -344,10 +395,14 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
             signal_data['details']['win_prob'] = win_prob
 
             scorer = getattr(bot.online_learner, 'scorer', None)
-            is_high_conviction_consensus = score_raw_val >= (score_min_val + 0.5) or score_raw_val >= 7.0
-            if scorer and getattr(scorer, 'is_trained', False) and win_prob < 0.20 and not is_high_conviction_consensus:
-                log.warning(f"🤖 [OnlineLearner] Trade {symbol} rejeté : Probabilité ML de gain trop faible ({win_prob:.1%})")
-                return
+            is_high_conviction_consensus = score_raw_val >= (score_min_val + 1.5)
+            if scorer and getattr(scorer, 'is_trained', False):
+                if win_prob < 0.15:
+                    log.warning(f"🤖 [OnlineLearner] Trade {symbol} VETO ABSOLU : prob ML trop faible ({win_prob:.1%})")
+                    return
+                if win_prob < 0.25 and not is_high_conviction_consensus:
+                    log.warning(f"🤖 [OnlineLearner] Trade {symbol} rejeté : prob ML faible ({win_prob:.1%}), score={score_raw_val}")
+                    return
             elif win_prob > 0.60:
                 conviction_boost = min(conviction_boost * 1.15, 1.50)
                 log.info(f"🤖 [OnlineLearner] Boost probabilité ML ({win_prob:.1%}) appliqué pour {symbol} -> Boost={conviction_boost:.2f}")

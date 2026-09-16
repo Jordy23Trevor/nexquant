@@ -171,7 +171,6 @@ ENABLE_LOSS_LIMIT = os.getenv("ENABLE_LOSS_LIMIT", "false").lower() == "true"  #
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))  # Max daily drawdown %
 MAX_DAILY_LOSS_AMOUNT = float(os.getenv("MAX_DAILY_LOSS_AMOUNT", "100.0"))  # Hard cap absolu 100€ max de perte jour
 MAX_MONTHLY_LOSS_PCT = float(os.getenv("MAX_MONTHLY_LOSS_PCT", "6.0"))  # Max monthly drawdown %
-MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "6"))  # Max concurrent positions across fleet
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "5"))  # Max concurrent positions across fleet
 SESSION_TARGET_EQUITY_MIN = float(os.getenv("SESSION_TARGET_EQUITY_MIN", "35.0"))  # Cible minimale de session (EUR)
 SESSION_TARGET_EQUITY_MAX = float(os.getenv("SESSION_TARGET_EQUITY_MAX", "40.0"))  # Cible maximale de session (EUR)
@@ -410,16 +409,12 @@ def validate_config():
     if not (0.1 <= RISK_PCT <= 10.0):  # V3: élargi à 10% max pour stratégies agressives
         errors.append(f"RISK_PCT ({RISK_PCT}%) est hors limites. Il doit être compris entre 0.1% et 10.0% par transaction.")
 
-    if not (0.5 <= MAX_DAILY_LOSS_PCT <= 15.0):  # V3: élargi à 15% pour stratégies x10
-        errors.append(f"MAX_DAILY_LOSS_PCT ({MAX_DAILY_LOSS_PCT}%) est hors limites. Il doit être compris entre 0.5% et 15.0% pour protéger le capital.")
     if ENABLE_LOSS_LIMIT:
         if not (0.5 <= MAX_DAILY_LOSS_PCT <= 15.0):  # V3: élargi à 15% pour stratégies x10
             errors.append(f"MAX_DAILY_LOSS_PCT ({MAX_DAILY_LOSS_PCT}%) est hors limites. Il doit être compris entre 0.5% et 15.0% pour protéger le capital.")
 
     if not (1.0 <= MAX_MONTHLY_LOSS_PCT <= 20.0):
         errors.append(f"MAX_MONTHLY_LOSS_PCT ({MAX_MONTHLY_LOSS_PCT}%) doit être compris entre 1.0% et 20.0%.")
-        if not (1.0 <= MAX_MONTHLY_LOSS_PCT <= 20.0):
-            errors.append(f"MAX_MONTHLY_LOSS_PCT ({MAX_MONTHLY_LOSS_PCT}%) doit être compris entre 1.0% et 20.0%.")
 
     if not (1 <= MAX_OPEN_POSITIONS <= 10):
         errors.append(f"MAX_OPEN_POSITIONS ({MAX_OPEN_POSITIONS}) doit être compris entre 1 et 10.")
@@ -483,7 +478,6 @@ __all__ = [
     "EMA_FAST_FOREX", "EMA_SLOW_FOREX", "ADX_TREND_FOREX", "SCORE_MIN_FOREX",
     "SL_ATR_MULT_FOREX", "TP_ATR_MULT_FOREX", "FOREX_NEWS_AVOID_MINUTES",
     # Risk Management
-    "RISK_PCT", "SL_ATR_MULT", "TP_ATR_MULT", "TRAIL_ATR_MULT", "TRAIL_ACTIVATE_ATR_MULT", "BE_ATR_MULT",
     "ENABLE_LOSS_LIMIT", "RISK_PCT", "SL_ATR_MULT", "TP_ATR_MULT", "TRAIL_ATR_MULT", "TRAIL_ACTIVATE_ATR_MULT", "BE_ATR_MULT",
     "SCORE_MIN", "SCORE_MODE", "MAX_DAILY_LOSS_PCT", "MAX_MONTHLY_LOSS_PCT", "MAX_OPEN_POSITIONS",
     "TSMOM_ENABLED", "TSMOM_LOOKBACK", "TSMOM_SKIP", "TSMOM_TARGET_VOL",
@@ -508,7 +502,6 @@ __all__ = [
     "CYCLE_TIME", "SYMBOL_TIMEOUT_SECONDS", "MAX_PARALLEL_SYMBOLS",
 
     # 🎯 V3 — Objectifs journaliers & sessions
-    "DAILY_TARGET_EUR", "SESSION_AWARE", "TRADING_MODE",
     "DAILY_TARGET_EUR", "SESSION_TARGET_EQUITY_MIN", "SESSION_TARGET_EQUITY_MAX", "SESSION_AWARE", "TRADING_MODE",
     "SIMULATED_SLIPPAGE_POINTS", "SIMULATED_COMMISSION_PCT",
 

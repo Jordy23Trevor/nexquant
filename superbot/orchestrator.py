@@ -1775,26 +1775,28 @@ class SuperBot:
 
     def _convert_pnl_to_account_currency(self, symbol: str, pnl: float, reference_price: float) -> float:
         """
-        Convertit un PnL brut dans la devise de cotation vers la devise du compte (USD).
+        Convertit un PnL brut dans la devise de cotation vers la devise du compte (EUR).
         """
         normalized = symbol.strip().upper().replace("/", "")
         
-        # Paires dont la quote currency est le JPY, CAD, CHF, AUD, NZD et la base est USD
-        # Le PnL brut calculé par le broker est dans la devise de cotation.
-        # En divisant par reference_price (taux USD/XXX), on revient en USD.
-        quote_currencies_to_divide = ["JPY", "CAD", "CHF", "AUD", "NZD"]
+        quote_ccy = normalized[-3:]  # Last 3 chars = quote currency
+        converted = pnl
         
-        if any(normalized.endswith(q) for q in quote_currencies_to_divide) and normalized.startswith("USD"):
+        if quote_ccy in ['JPY', 'CAD', 'CHF', 'AUD', 'NZD']:
             if reference_price > 0:
                 converted = pnl / reference_price
-                log.debug(f"Conversion PnL vers USD pour {symbol} : {pnl:.2f} / {reference_price:.3f} = {converted:.2f} USD")
-                return converted
+                log.debug(f"Conversion PnL vers base currency pour {symbol} : {pnl:.2f} / {reference_price:.3f} = {converted:.2f}")
             else:
-                log.warning(f"Prix de référence nul pour {symbol}, conversion vers USD impossible")
-                return pnl
+                log.warning(f"Prix de référence nul pour {symbol}, conversion impossible")
                 
-        # Pour toutes les autres paires (EURUSD, BTCUSDT, etc.), le PnL est déjà en USD
-        return pnl
+        base_ccy = normalized[:3]
+        current_currency = base_ccy if quote_ccy in ['JPY', 'CAD', 'CHF', 'AUD', 'NZD'] else quote_ccy
+        
+        if current_currency in ["USD", "SDT"]: # Handle USD and USDT
+            usd_to_eur_rate = 0.95
+            converted = converted * usd_to_eur_rate
+            
+        return converted
 
     def _update_position_tracking(self, symbol: str, side: str, size: float, entry_price: float,
                                    stop_loss: float = 0.0, take_profit: float = 0.0,

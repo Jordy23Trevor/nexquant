@@ -80,6 +80,43 @@ def calculate_sl_tp_levels(rm, entry_price: float, atr_value: float,
 
     sl_dist = sl_mult * atr_value
     tp_dist = tp_mult * atr_value
+    
+    # Minimum SL distances by asset class
+    MIN_SL_DISTANCES = {
+        'FOREX_MAJOR': 0.0012,    # 12 pips
+        'FOREX_JPY': 0.15,         # 15 pips for JPY pairs
+        'FOREX_CROSS': 0.0012,     # 12 pips
+        'GOLD': 8.0,               # $8 for XAUUSD
+        'SILVER': 0.30,            # $0.30 for XAGUSD
+        'OIL': 0.50,               # $0.50 for oil
+        'GAS': 0.020,              # for XNGUSD
+        'CRYPTO': None,            # handled separately (0.35% of price)
+    }
+
+    if symbol:
+        sym = symbol.strip().upper().replace("/", "")
+        asset_key = None
+        if effective_asset_type == "crypto":
+            asset_key = 'CRYPTO'
+        elif 'XAU' in sym or 'GOLD' in sym:
+            asset_key = 'GOLD'
+        elif 'XAG' in sym or 'SILVER' in sym:
+            asset_key = 'SILVER'
+        elif 'USO' in sym or 'WTI' in sym or 'OIL' in sym or 'BRENT' in sym:
+            asset_key = 'OIL'
+        elif 'XNG' in sym or 'GAS' in sym:
+            asset_key = 'GAS'
+        elif 'JPY' in sym:
+            asset_key = 'FOREX_JPY'
+        elif len(sym) >= 6:
+            asset_key = 'FOREX_MAJOR'
+            
+        if asset_key and asset_key in MIN_SL_DISTANCES and MIN_SL_DISTANCES[asset_key] is not None:
+            min_sl = MIN_SL_DISTANCES[asset_key]
+            if sl_dist < min_sl:
+                sl_dist = min_sl
+                tp_dist = max(tp_dist, sl_dist * 2.0)
+
     if effective_asset_type == "crypto" and entry_price > 0:
         min_crypto_sl = entry_price * 0.0035  # ~270$ sur BTC à 77000$ pour absorber le bruit
         if sl_dist < min_crypto_sl:

@@ -48,13 +48,6 @@ SESSION_DEFINITIONS = {
     },
     "PRE_LONDON": {
         "start_utc": 5, "end_utc": 7,
-        "description": "Pré-London (préparation, faible liquidité)",
-        "liquidity": "low",
-        "score_multiplier": 1.1,      # +10% score requis
-        "max_positions_ratio": 0.5,   # 50% des positions max
-        "risk_multiplier": 0.7,       # -30% de risque
-        "priority_assets": ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"],
-        "pnl_target_pct": 0.10,       # 10% de l'objectif journalier
         "description": "Pré-London (préparation, momentum pré-ouverture)",
         "liquidity": "medium",
         "score_multiplier": 1.05,     # Légère sélectivité
