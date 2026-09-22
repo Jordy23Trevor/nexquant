@@ -11,6 +11,7 @@ Orchestration dynamique des 6 stratégies adaptatives de haut niveau :
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 import pandas as pd
@@ -139,16 +140,15 @@ class StrategyEngine:
         active_sessions = active_sessions or ["LONDON"]
         regime_type = regime.regime
 
-        # Déterminer la liste ordonnée des stratégies candidates selon le régime
-        # 1. Protection Anti-Bruit : Choppy Noise
-        if regime_type == "choppy_noise":
-            log.info(f"🛡️ [Anti-Noise] {symbol} en régime 'choppy_noise' : marché sans tendance ni direction. Ordre évité.")
+        regime_normalized = str(regime_type).lower().strip()
+        if regime_normalized in ("choppy_noise", "high_volatility"):
+            log.info(f"🛡️ [Anti-Noise] {symbol} en régime '{regime_type}' : marché sans tendance ni direction. Ordre évité.")
             return SignalResult(
                 strategy_name="NONE",
                 market_regime=regime_type,
-                reason="Régime de marché chaotique (Choppy Noise)",
+                reason=f"Régime de marché non-tradable ({regime_type})",
                 decision_rationale=(
-                    f"Analyse approfondie {symbol} : Le marché est en phase de bruit chaotique (choppy_noise - "
+                    f"Analyse approfondie {symbol} : Le marché est en phase de bruit chaotique ({regime_type} - "
                     f"ADX faible, absence de structure directionnelle). Aucune stratégie engagée pour préserver le capital."
                 ),
                 should_long=False,
@@ -160,6 +160,19 @@ class StrategyEngine:
         candidates: List[str] = self._get_candidate_strategies(regime_type, active_sessions)
         if not candidates:
             candidates = ["MURPHY_TREND", "VOLMAN_PRICE_ACTION", "CHAN_MEAN_REVERSION"]
+            log.info(f"🛡️ [Régime] Aucune stratégie candidate pour {symbol} en régime '{regime_type}'. Pas de trade.")
+            return SignalResult(
+                strategy_name="NONE",
+                market_regime=regime_type,
+                reason=f"Aucune stratégie candidate pour le régime {regime_type}",
+                decision_rationale=(
+                    f"Analyse approfondie {symbol} : Régime {regime_type.upper()} sans stratégie adaptée. "
+                    f"Ordre différé pour préserver le capital."
+                ),
+                should_long=False,
+                should_short=False,
+                confidence=0.0
+            )
 
         best_signal: Optional[SignalResult] = None
         highest_score = -1.0
@@ -215,6 +228,15 @@ class StrategyEngine:
                 has_signal = sig.should_long or sig.should_short
 
                 if has_signal:
+                    # Règle "Score Minimum Global" : rejeter les signaux trop faibles
+                    effective_score_min = float(os.environ.get('SCORE_MIN', '8'))
+                    if sig.total_score < effective_score_min:
+                        tested_summaries.append(
+                            f"{strat_name} (signal rejeté: score {sig.total_score:.1f} < {effective_score_min})"
+                        )
+                        log.debug(f"[StrategyEngine] {symbol} - Signal {strat_name} rejeté car score ({sig.total_score:.1f}) < SCORE_MIN ({effective_score_min})")
+                        continue
+
                     # Règle "Trades Réfléchis & Conséquents" : R:R minimal de 1.8 (cible >= 2.0)
                     if sig.rr_ratio < 1.8 and sig.rr_ratio > 0:
                         tested_summaries.append(

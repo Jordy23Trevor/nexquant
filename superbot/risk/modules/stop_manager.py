@@ -152,6 +152,7 @@ def _check_trailing_stop(rm, symbol: str, position: Dict[str, Any], current_pric
 
         entry_price = position.get('entry_price', 0)
         activate_mult = getattr(rm, 'TRAIL_ACTIVATE_ATR_MULT', 2.0)
+        activate_mult = getattr(rm, 'TRAIL_ACTIVATE_ATR_MULT', 1.0)
 
         if position['side'] == 'LONG':
             # Distance d'activation : le trailing ne démarre qu'une fois le trade

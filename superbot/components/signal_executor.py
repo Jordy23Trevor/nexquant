@@ -63,10 +63,14 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
             bot._save_cooldowns()
             
     # Bloquer le pyramidage ou clôturer en cas de signal inverse confirmé
+    # Bloquer tout nouveau trade si une position est déjà ouverte sur ce symbole.
+    # Plus de "Reversal" automatique : les positions existantes sont gérées
+    # exclusivement par leurs SL/TP/trailing stops pour éviter les whipsaws destructeurs.
     existing_pos = bot.positions.get(normalized_symbol, {})
     existing_size = existing_pos.get('size', 0)
     if existing_size > 0:
         existing_side = existing_pos.get('side', '')  # 'LONG' ou 'SHORT'
+        existing_side = existing_pos.get('side', '')
         cand_side = "LONG" if signal_data.get('should_long') else ("SHORT" if signal_data.get('should_short') else "")
         if existing_side and cand_side and existing_side != cand_side:
             log.warning(
@@ -80,6 +84,12 @@ def execute_signal_trade(bot, symbol: str, signal_data: dict, df_with_indicators
             log.info(f"🚫 Trade {symbol} rejeté : Position déjà ouverte dans la même direction (pyramidage bloqué).")
             _reject_trade(bot, symbol, "Position déjà ouverte dans la même direction (pyramidage bloqué)")
             return
+        log.info(
+            f"🚫 Trade {symbol} rejeté : Position {existing_side} déjà ouverte "
+            f"(signal {cand_side} ignoré — pas de reversal automatique)."
+        )
+        _reject_trade(bot, symbol, f"Position {existing_side} déjà ouverte (signal {cand_side} ignoré)")
+        return
 
     # ── Audit post-freeze (fix 24/07/2026) ──────────────────────────────────
     # Après un freeze long du cycle (ex: 6h26 à cause d'une erreur DNS),

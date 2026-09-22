@@ -1359,6 +1359,15 @@ class SuperBot:
                         # séparément, sans écraser le hmm_label injecté par la stratégie.
                         signal_data['brain_regime'] = regime_result.regime
                         signal_data['market_regime'] = regime_result.regime
+                        # 🛡️ Si le régime réévalué est non-tradable, neutraliser le signal
+                        regime_lower = str(regime_result.regime).lower().strip()
+                        if regime_lower in ('choppy_noise', 'high_volatility'):
+                            log.info(
+                                f"🛡️ [Anti-Noise] Réévaluation de {symbol} en '{regime_result.regime}' : "
+                                f"annulation immédiate du signal."
+                            )
+                            signal_data['should_long'] = False
+                            signal_data['should_short'] = False
                         # hmm_label : ne mettre à jour que si non encore défini par la strategy
                         if 'hmm_label' not in signal_data or signal_data.get('hmm_label') in ('UNKNOWN', '', None):
                             signal_data['hmm_label'] = regime_result.regime

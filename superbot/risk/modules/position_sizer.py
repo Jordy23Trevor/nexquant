@@ -345,6 +345,19 @@ def calculate_position_size(rm, account_balance: float, entry_price: float,
             details['position_size'] = position_size
             details['capped_by_hard_limit'] = True
 
+        # Garde-fou : vérifier que le risque monétaire du lot minimum ne dépasse pas 1.5% du solde
+        # Cela empêche les trades sur XAGUSD (0.01 lot = 50 oz × $0.30 SL = $15 ≈ 13€) quand le compte est trop petit
+        min_lot_for_symbol = 0.01  # MT5 minimum standard
+        if position_size >= min_lot_for_symbol and price_risk > 0:
+            min_lot_risk_amount = min_lot_for_symbol * price_risk
+            max_acceptable_risk = balance * 0.015  # 1.5% du solde
+            if min_lot_risk_amount > max_acceptable_risk:
+                log.warning(
+                    f"🛡️ Trade {symbol} rejeté : le lot minimum ({min_lot_for_symbol}) "
+                    f"risque {min_lot_risk_amount:.2f}€ > 1.5% du solde ({max_acceptable_risk:.2f}€)"
+                )
+                return 0.0, {'error': f'Risque du lot minimum ({min_lot_risk_amount:.2f}€) trop élevé pour le solde ({balance:.0f}€)'}
+
         position_size = float(position_size)
         actual_risk_pct = float(actual_risk_pct)
         log.info(f"Taille de position calculée pour {symbol}: {position_size:.6f} | Risque: {actual_risk_pct:.2f}% du compte")
