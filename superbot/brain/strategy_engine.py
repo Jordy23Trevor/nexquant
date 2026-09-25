@@ -141,19 +141,14 @@ class StrategyEngine:
         regime_type = regime.regime
 
         # Déterminer la liste ordonnée des stratégies candidates selon le régime
-        # 1. Protection Anti-Bruit : Choppy Noise
-        if regime_type == "choppy_noise":
-            log.info(f"🛡️ [Anti-Noise] {symbol} en régime 'choppy_noise' : marché sans tendance ni direction. Ordre évité.")
         regime_normalized = str(regime_type).lower().strip()
         if regime_normalized in ("choppy_noise", "high_volatility"):
             log.info(f"🛡️ [Anti-Noise] {symbol} en régime '{regime_type}' : marché sans tendance ni direction. Ordre évité.")
             return SignalResult(
                 strategy_name="NONE",
                 market_regime=regime_type,
-                reason="Régime de marché chaotique (Choppy Noise)",
                 reason=f"Régime de marché non-tradable ({regime_type})",
                 decision_rationale=(
-                    f"Analyse approfondie {symbol} : Le marché est en phase de bruit chaotique (choppy_noise - "
                     f"Analyse approfondie {symbol} : Le marché est en phase de bruit chaotique ({regime_type} - "
                     f"ADX faible, absence de structure directionnelle). Aucune stratégie engagée pour préserver le capital."
                 ),
